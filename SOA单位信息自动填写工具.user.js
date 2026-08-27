@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SOA单位信息自动填写工具
 // @namespace    https://dime.health-100.cn/
-// @version      7.7.22
-// @description  基于 v7.7.6：首页待命逻辑不变，兼容级联候选勾选状态及搜索列表关闭后可编辑主输入框中的正式完整路径。
+// @version      7.7.23
+// @description  7.7.23更新测试
 // @author       wanxin
 // @match        https://dime.health-100.cn/*
 // @run-at       document-idle
