@@ -3,10 +3,11 @@
 // @namespace    https://tampermonkey.net/
 // @version      4.5
 // @description  4-8列左对齐固定宽度网格 + 可调模块宽度/列间距 + 淡蓝悬浮高亮 + 网格槽位锁定拖拽 + 本地自动保存
-// @author       wanxin
+
 // @match        *://*home.health-100.cn/*
 // @grant        none
 
+// @author       WanXin
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.3%E9%A6%96%E9%A1%B5%E6%8E%92%E5%BA%8F%E6%A8%A1%E5%9D%97.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.3%E9%A6%96%E9%A1%B5%E6%8E%92%E5%BA%8F%E6%A8%A1%E5%9D%97.user.js
 // ==/UserScript==

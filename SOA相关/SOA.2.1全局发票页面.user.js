@@ -3,10 +3,11 @@
 // @namespace    https://tampermonkey.net/
 // @version      6.13
 // @description  6.13更新测试的
-// @author       wanxin
+
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
 
+// @author       WanXin
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.1%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8%E9%A1%B5%E9%9D%A2.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.1%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8%E9%A1%B5%E9%9D%A2.user.js
 // ==/UserScript==

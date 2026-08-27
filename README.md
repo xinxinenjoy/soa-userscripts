@@ -159,3 +159,33 @@ Push 到 GitHub 后，正常情况下无需再手工维护 GitCode。
 **wanxin**
 
 自用脚本持续维护中。
+
+---
+
+<!-- AUTO-USERSCRIPTS:START -->
+
+## 📦 脚本清单
+
+> 本区域由 GitHub Actions 自动维护，请勿手工修改其中的脚本信息。
+
+### SOA相关
+
+| 脚本 | 版本 | 作者 | 说明 | 安装 |
+|---|---:|---|---|---|
+| **SOA.1.1蝶美-单位信息填充** | 7.7.23 | WanXin | 7.7.23更新测试2026年8月27日16:48:06 | [安装脚本](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.1.1%E8%9D%B6%E7%BE%8E-%E5%8D%95%E4%BD%8D%E4%BF%A1%E6%81%AF%E5%A1%AB%E5%85%85.user.js) |
+| **SOA.1.2蝶美-套餐危害核对** | 4.2.12 | WanXin | 统一列表核对与编辑弹窗的在岗状态识别，兼容状态后带性别、婚姻等说明。 | [安装脚本](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.1.2%E8%9D%B6%E7%BE%8E-%E5%A5%97%E9%A4%90%E5%8D%B1%E5%AE%B3%E6%A0%B8%E5%AF%B9.user.js) |
+| **SOA.2.1全局发票页面** | 6.13 | WanXin | 6.13更新测试的 | [安装脚本](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.1%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8%E9%A1%B5%E9%9D%A2.user.js) |
+| **SOA.2.2订单发票页面** | 1.5 | WanXin | 仅用于 #/order/invoice 查看页：独立发票列表优化，不影响原合并开票脚本 | [安装脚本](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.2%E8%AE%A2%E5%8D%95%E5%8F%91%E7%A5%A8%E9%A1%B5%E9%9D%A2.user.js) |
+| **SOA.2.3首页排序模块** | 4.5 | WanXin | 4-8列左对齐固定宽度网格 + 可调模块宽度/列间距 + 淡蓝悬浮高亮 + 网格槽位锁定拖拽 + 本地自动保存 | [安装脚本](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.3%E9%A6%96%E9%A1%B5%E6%8E%92%E5%BA%8F%E6%A8%A1%E5%9D%97.user.js) |
+| **SOA.2.4前台批量模块** | 1.2 | WanXin | 批量输入预约单号并回车，实时监听Ant Design提示；异常自动记录并跳过，完成后统一汇总 | [安装脚本](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.4%E5%89%8D%E5%8F%B0%E6%89%B9%E9%87%8F%E6%A8%A1%E5%9D%97.user.js) |
+
+### 红领巾的游戏脚本
+
+| 脚本 | 版本 | 作者 | 说明 | 安装 |
+|---|---:|---|---|---|
+| **CurseForge增强** | 4.1 | WanXin | 测试一下内容看看会不会生效 | [安装脚本](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/%E7%BA%A2%E9%A2%86%E5%B7%BE%E7%9A%84%E6%B8%B8%E6%88%8F%E8%84%9A%E6%9C%AC/CurseForge%E5%A2%9E%E5%BC%BA.user.js) |
+| **GOW底下尖塔** | 4.2.24 | WanXin | 自动校准与购买建议；重点房间按数字顺序优先导航、F最后；主线与每个目标独立计算总火把；新增地图指引开关，关闭后恢复网页原始地图视觉并保留缩放与位移；主线路完成后显示全部未处理守卫 | [安装脚本](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/%E7%BA%A2%E9%A2%86%E5%B7%BE%E7%9A%84%E6%B8%B8%E6%88%8F%E8%84%9A%E6%9C%AC/GOW%E5%BA%95%E4%B8%8B%E5%B0%96%E5%A1%94.user.js) |
+
+共收录 **8** 个 Userscript。
+
+<!-- AUTO-USERSCRIPTS:END -->

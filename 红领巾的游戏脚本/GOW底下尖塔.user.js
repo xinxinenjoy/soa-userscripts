@@ -3,10 +3,11 @@
 // @namespace    http://tampermonkey.net/
 // @version      4.2.24
 // @description  自动校准与购买建议；重点房间按数字顺序优先导航、F最后；主线与每个目标独立计算总火把；新增地图指引开关，关闭后恢复网页原始地图视觉并保留缩放与位移；主线路完成后显示全部未处理守卫
-// @author       WanXin
+
 // @match        https://solofandy.github.io/*
 // @grant        none
 
+// @author       WanXin
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/%E7%BA%A2%E9%A2%86%E5%B7%BE%E7%9A%84%E6%B8%B8%E6%88%8F%E8%84%9A%E6%9C%AC/GOW%E5%BA%95%E4%B8%8B%E5%B0%96%E5%A1%94.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/%E7%BA%A2%E9%A2%86%E5%B7%BE%E7%9A%84%E6%B8%B8%E6%88%8F%E8%84%9A%E6%9C%AC/GOW%E5%BA%95%E4%B8%8B%E5%B0%96%E5%A1%94.user.js
 // ==/UserScript==

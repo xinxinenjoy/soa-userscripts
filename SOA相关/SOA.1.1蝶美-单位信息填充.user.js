@@ -3,12 +3,13 @@
 // @namespace    https://dime.health-100.cn/
 // @version      7.7.23
 // @description  7.7.23更新测试2026年8月27日16:48:06
-// @author       wanxin
+
 // @match        https://dime.health-100.cn/*
 // @run-at       document-idle
 // @grant        none
 // @noframes
 
+// @author       WanXin
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.1.1%E8%9D%B6%E7%BE%8E-%E5%8D%95%E4%BD%8D%E4%BF%A1%E6%81%AF%E5%A1%AB%E5%85%85.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.1.1%E8%9D%B6%E7%BE%8E-%E5%8D%95%E4%BD%8D%E4%BF%A1%E6%81%AF%E5%A1%AB%E5%85%85.user.js
 // ==/UserScript==

@@ -3,10 +3,11 @@
 // @namespace    https://tampermonkey.net/soa-order-invoice/
 // @version      1.5
 // @description  仅用于 #/order/invoice 查看页：独立发票列表优化，不影响原合并开票脚本
-// @author       wanxin
+
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
 
+// @author       WanXin
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.2%E8%AE%A2%E5%8D%95%E5%8F%91%E7%A5%A8%E9%A1%B5%E9%9D%A2.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.2%E8%AE%A2%E5%8D%95%E5%8F%91%E7%A5%A8%E9%A1%B5%E9%9D%A2.user.js
 // ==/UserScript==

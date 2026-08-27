@@ -3,12 +3,13 @@
 // @namespace    https://dime.health-100.cn/
 // @version      4.2.12
 // @description  统一列表核对与编辑弹窗的在岗状态识别，兼容状态后带性别、婚姻等说明。
-// @author       wanxin
+
 // @match        https://dime.health-100.cn/*
 // @run-at       document-idle
 // @grant        none
 // @noframes
 
+// @author       WanXin
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.1.2%E8%9D%B6%E7%BE%8E-%E5%A5%97%E9%A4%90%E5%8D%B1%E5%AE%B3%E6%A0%B8%E5%AF%B9.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.1.2%E8%9D%B6%E7%BE%8E-%E5%A5%97%E9%A4%90%E5%8D%B1%E5%AE%B3%E6%A0%B8%E5%AF%B9.user.js
 // ==/UserScript==
