@@ -5,8 +5,8 @@
 // @description  4-8列左对齐固定宽度网格 + 可调模块宽度/列间距 + 淡蓝悬浮高亮 + 网格槽位锁定拖拽 + 本地自动保存
 // @match        *://*home.health-100.cn/*
 // @grant        none
-// @updateURL    https://gitcode.com/gcw_7DpHPfUr/soa-userscript/blob/main/SOA%E6%A8%A1%E5%9D%97%E6%8E%92%E5%BA%8F.user.js
-// @downloadURL  https://gitcode.com/gcw_7DpHPfUr/soa-userscript/blob/main/SOA%E6%A8%A1%E5%9D%97%E6%8E%92%E5%BA%8F.user.js
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/soa-userscript/main/SOA%E6%A8%A1%E5%9D%97%E6%8E%92%E5%BA%8F.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/soa-userscript/main/SOA%E6%A8%A1%E5%9D%97%E6%8E%92%E5%BA%8F.user.js
 // ==/UserScript==
 
 (function () {
