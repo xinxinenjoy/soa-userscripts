@@ -7,6 +7,9 @@ on:
 
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -16,6 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          path: source
 
       - name: Check GitCode Token
         env:
@@ -39,16 +43,128 @@ jobs:
 
           chmod 600 ~/.netrc
 
-      - name: Test GitCode Authentication
+      - name: Clone GitCode Publish Repository
         run: |
-          git ls-remote https://gitcode.com/gcw_7DpHPfUr/soa-userscript.git
+          git clone \
+            https://gitcode.com/gcw_7DpHPfUr/soa-userscript.git \
+            publish
 
-      - name: Push to GitCode
+      - name: Sync GitHub Content to Publish Repository
         run: |
-          git remote remove gitcode 2>/dev/null || true
+          rsync -a --delete \
+            --exclude=".git/" \
+            source/ publish/
 
-          git remote add gitcode \
-            https://gitcode.com/gcw_7DpHPfUr/soa-userscript.git
+      - name: Rewrite Userscript Update URLs
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          from urllib.parse import quote
+          import re
 
-          git push gitcode HEAD:main
-          git push gitcode --tags
+          root = Path("publish")
+
+          BASE_URL = (
+              "https://raw.gitcode.com/"
+              "gcw_7DpHPfUr/"
+              "soa-userscript/"
+              "raw/main/"
+          )
+
+          scripts = sorted(root.rglob("*.user.js"))
+
+          if not scripts:
+              print("未发现 .user.js 文件，无需修改更新地址。")
+              raise SystemExit(0)
+
+          for path in scripts:
+              relative = path.relative_to(root)
+
+              encoded_path = "/".join(
+                  quote(part, safe="._-")
+                  for part in relative.parts
+              )
+
+              raw_url = BASE_URL + encoded_path
+
+              text = path.read_text(encoding="utf-8-sig")
+
+              update_line = f"// @updateURL    {raw_url}"
+              download_line = f"// @downloadURL  {raw_url}"
+
+              update_pattern = re.compile(
+                  r"(?m)^//\s*@updateURL\s+.*$"
+              )
+              download_pattern = re.compile(
+                  r"(?m)^//\s*@downloadURL\s+.*$"
+              )
+
+              has_update = bool(update_pattern.search(text))
+              has_download = bool(download_pattern.search(text))
+
+              if has_update:
+                  text = update_pattern.sub(
+                      update_line,
+                      text,
+                      count=1
+                  )
+
+              if has_download:
+                  text = download_pattern.sub(
+                      download_line,
+                      text,
+                      count=1
+                  )
+
+              missing_lines = []
+
+              if not has_update:
+                  missing_lines.append(update_line)
+
+              if not has_download:
+                  missing_lines.append(download_line)
+
+              if missing_lines:
+                  marker = "// ==/UserScript=="
+
+                  if marker not in text:
+                      print(
+                          f"警告：{relative} 未找到 Userscript 元数据结束标记，"
+                          "无法自动插入更新地址。"
+                      )
+                  else:
+                      block = "\n".join(missing_lines) + "\n"
+                      text = text.replace(
+                          marker,
+                          block + marker,
+                          1
+                      )
+
+              path.write_text(
+                  text,
+                  encoding="utf-8",
+                  newline="\n"
+              )
+
+              print(f"已处理：{relative}")
+              print(f"  -> {raw_url}")
+
+          print(f"共处理 {len(scripts)} 个 .user.js 文件。")
+          PY
+
+      - name: Commit and Push to GitCode
+        run: |
+          cd publish
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "GitCode 发布内容无变化，无需提交。"
+            exit 0
+          fi
+
+          git commit -m "Sync from GitHub ${GITHUB_SHA::7}"
+          git push origin main
