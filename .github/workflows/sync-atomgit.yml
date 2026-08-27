@@ -1,0 +1,26 @@
+name: Sync to AtomGit
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GitHub repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to AtomGit
+        env:
+          ATOMGIT_TOKEN: ${{ secrets.ATOMGIT_TOKEN }}
+        run: |
+          git remote add atomgit "https://gitcode.com/gcw_7DpHPfUr/soa-userscripts.git"
+          git push atomgit HEAD:main
+          git push atomgit --tags
