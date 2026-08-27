@@ -5,8 +5,8 @@
 // @description  6.13更新测试的内容
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/xinxinenjoy/soa-userscripts/raw/refs/heads/main/SOA%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8.user.js
-// @downloadURL    https://raw.githubusercontent.com/xinxinenjoy/soa-userscripts/raw/refs/heads/main/SOA%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8.user.js
+// @updateURL    https://gitcode.com/gcw_7DpHPfUr/soa-userscript/blob/main/SOA%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8.user.js
+// @downloadURL    https://gitcode.com/gcw_7DpHPfUr/soa-userscript/blob/main/SOA%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8.user.js
 // ==/UserScript==
 
 (function () {
