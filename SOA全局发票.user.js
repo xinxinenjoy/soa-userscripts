@@ -5,6 +5,8 @@
 // @description  仅在 #/merge-order-invoice 启用：动态列重排/宽度/对齐 + 文案替换 + 状态高亮 + 金额去千分位 + 创建人补“手工开票” + 客户列临时加宽 + 按可视顺序复制；减少 React 节点冲突与重复监听
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
+// @updateURL    https://raw.githubusercontent.com/xinxinenjoy/soa-userscripts/raw/refs/heads/main/SOA%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8.user.js
+// @downloadURL    https://raw.githubusercontent.com/xinxinenjoy/soa-userscripts/raw/refs/heads/main/SOA%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8.user.js
 // ==/UserScript==
 
 (function () {
