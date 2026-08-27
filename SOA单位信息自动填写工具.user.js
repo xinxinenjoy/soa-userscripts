@@ -8,8 +8,8 @@
 // @run-at       document-idle
 // @grant        none
 // @noframes
-// @updateURL    https://gitcode.com/gcw_7DpHPfUr/soa-userscript/blob/main/SOA%E5%8D%95%E4%BD%8D%E4%BF%A1%E6%81%AF%E8%87%AA%E5%8A%A8%E5%A1%AB%E5%86%99%E5%B7%A5%E5%85%B7.user.js
-// @downloadURL    https://gitcode.com/gcw_7DpHPfUr/soa-userscript/blob/main/SOA%E5%8D%95%E4%BD%8D%E4%BF%A1%E6%81%AF%E8%87%AA%E5%8A%A8%E5%A1%AB%E5%86%99%E5%B7%A5%E5%85%B7.user.js
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/soa-userscript/blob/main/SOA%E5%8D%95%E4%BD%8D%E4%BF%A1%E6%81%AF%E8%87%AA%E5%8A%A8%E5%A1%AB%E5%86%99%E5%B7%A5%E5%85%B7.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/soa-userscript/blob/main/SOA%E5%8D%95%E4%BD%8D%E4%BF%A1%E6%81%AF%E8%87%AA%E5%8A%A8%E5%A1%AB%E5%86%99%E5%B7%A5%E5%85%B7.user.js
 // ==/UserScript==
 
 (async function () {
