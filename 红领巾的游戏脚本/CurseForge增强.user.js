@@ -2,7 +2,7 @@
 // @name         CurseForge增强
 // @namespace    http://tampermonkey.net/
 // @version      4.1
-// @description  翻译关键词 + 数量标签 + 相对时间 + 月份直译（不计算日期）
+// @description  测试一下内容看看会不会生效
 // @author       wanxin
 // @match        https://www.curseforge.com/*
 // @run-at       document-end
