@@ -49,6 +49,7 @@ jobs:
       - name: Clone GitCode Publish Repository
         run: |
           git clone \
+            --branch main \
             https://gitcode.com/gcw_7DpHPfUr/soa-userscript.git \
             publish
 
@@ -58,14 +59,15 @@ jobs:
             --exclude=".git/" \
             source/ publish/
 
-      - name: Rewrite Userscript Update URLs
+      - name: Verify and Rewrite Userscript Update URLs
         run: |
           python3 <<'PY'
           from pathlib import Path
           from urllib.parse import quote
           import re
+          import sys
 
-          root = Path("publish")
+          ROOT = Path("publish")
 
           BASE_URL = (
               "https://raw.gitcode.com/"
@@ -74,85 +76,157 @@ jobs:
               "raw/main/"
           )
 
-          scripts = sorted(root.rglob("*.user.js"))
+          START_RE = re.compile(
+              r"(?m)^[ \t]*//[ \t]*==UserScript==[ \t]*$"
+          )
+          END_RE = re.compile(
+              r"(?m)^[ \t]*//[ \t]*==/UserScript==[ \t]*$"
+          )
+
+          TAG_PATTERNS = {
+              "updateURL": re.compile(
+                  r"(?m)^[ \t]*//[ \t]*@updateURL(?:[ \t]+([^\r\n]*))?[ \t]*$"
+              ),
+              "downloadURL": re.compile(
+                  r"(?m)^[ \t]*//[ \t]*@downloadURL(?:[ \t]+([^\r\n]*))?[ \t]*$"
+              ),
+          }
+
+          scripts = sorted(ROOT.rglob("*.user.js"))
 
           if not scripts:
-              print("未发现 .user.js 文件，无需修改更新地址。")
+              print("未发现 .user.js 文件，无需处理。")
               raise SystemExit(0)
 
-          for path in scripts:
-              relative = path.relative_to(root)
+          errors = []
+
+          def build_expected_url(path: Path) -> str:
+              """
+              直接根据文件在 GitCode 发布仓库中的实际相对路径生成 Raw URL。
+              不依赖脚本中原有 URL 的格式或内容。
+              """
+              relative = path.relative_to(ROOT)
 
               encoded_path = "/".join(
                   quote(part, safe="._-")
                   for part in relative.parts
               )
 
-              raw_url = BASE_URL + encoded_path
+              return BASE_URL + encoded_path
 
-              text = path.read_text(encoding="utf-8-sig")
+          def get_tag_urls(metadata: str, tag: str):
+              values = []
+              for match in TAG_PATTERNS[tag].finditer(metadata):
+                  value = (match.group(1) or "").strip()
+                  values.append(value)
+              return values
 
-              update_line = f"// @updateURL    {raw_url}"
-              download_line = f"// @downloadURL  {raw_url}"
+          def remove_tag_lines(metadata: str, tag: str) -> str:
+              return TAG_PATTERNS[tag].sub("", metadata)
 
-              update_pattern = re.compile(
-                  r"(?m)^//\s*@updateURL\s+.*$"
-              )
-              download_pattern = re.compile(
-                  r"(?m)^//\s*@downloadURL\s+.*$"
-              )
+          for path in scripts:
+              relative = path.relative_to(ROOT)
+              expected_url = build_expected_url(path)
 
-              has_update = bool(update_pattern.search(text))
-              has_download = bool(download_pattern.search(text))
+              try:
+                  text = path.read_text(encoding="utf-8-sig")
+              except Exception as exc:
+                  errors.append(f"{relative}: 无法读取文件：{exc}")
+                  continue
 
-              if has_update:
-                  text = update_pattern.sub(
-                      update_line,
-                      text,
-                      count=1
+              start_match = START_RE.search(text)
+              end_match = END_RE.search(text)
+
+              if not start_match or not end_match or end_match.start() <= start_match.end():
+                  errors.append(
+                      f"{relative}: 未找到完整的 ==UserScript== 元数据区，已跳过。"
                   )
+                  continue
 
-              if has_download:
-                  text = download_pattern.sub(
-                      download_line,
-                      text,
-                      count=1
-                  )
+              metadata_start = start_match.start()
+              metadata_end = end_match.end()
+              metadata = text[metadata_start:metadata_end]
 
-              missing_lines = []
+              print("")
+              print(f"处理：{relative}")
+              print(f"目标：{expected_url}")
 
-              if not has_update:
-                  missing_lines.append(update_line)
+              statuses = {}
 
-              if not has_download:
-                  missing_lines.append(download_line)
+              for tag in ("updateURL", "downloadURL"):
+                  values = get_tag_urls(metadata, tag)
 
-              if missing_lines:
-                  marker = "// ==/UserScript=="
-
-                  if marker not in text:
-                      print(
-                          f"警告：{relative} 未找到 Userscript 元数据结束标记，"
-                          "无法自动插入更新地址。"
+                  if len(values) == 0:
+                      statuses[tag] = "缺失，自动添加"
+                  elif len(values) == 1 and values[0] == expected_url:
+                      statuses[tag] = "已正确，无需修正"
+                  elif len(values) == 1:
+                      statuses[tag] = (
+                          f"地址不一致，自动修正\n"
+                          f"    原值：{values[0] or '(空)'}"
                       )
                   else:
-                      block = "\n".join(missing_lines) + "\n"
-                      text = text.replace(
-                          marker,
-                          block + marker,
-                          1
+                      statuses[tag] = (
+                          f"发现 {len(values)} 个重复标签，"
+                          "自动清理并保留唯一正确地址"
                       )
 
+              # 删除 metadata 中所有旧的 updateURL / downloadURL。
+              cleaned = metadata
+              cleaned = remove_tag_lines(cleaned, "updateURL")
+              cleaned = remove_tag_lines(cleaned, "downloadURL")
+
+              # 清理删除标签后产生的连续空行。
+              cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
+              end_marker = END_RE.search(cleaned)
+              if not end_marker:
+                  errors.append(
+                      f"{relative}: 清理后元数据结束标记异常，已跳过写入。"
+                  )
+                  continue
+
+              canonical_block = (
+                  f"// @updateURL    {expected_url}\n"
+                  f"// @downloadURL  {expected_url}\n"
+              )
+
+              # 将两条标准更新地址统一插入到元数据结束标记之前。
+              cleaned = (
+                  cleaned[:end_marker.start()]
+                  + canonical_block
+                  + cleaned[end_marker.start():]
+              )
+
+              new_text = (
+                  text[:metadata_start]
+                  + cleaned
+                  + text[metadata_end:]
+              )
+
               path.write_text(
-                  text,
+                  new_text,
                   encoding="utf-8",
                   newline="\n"
               )
 
-              print(f"已处理：{relative}")
-              print(f"  -> {raw_url}")
+              print(f"  @updateURL   ：{statuses['updateURL']}")
+              print(f"  @downloadURL ：{statuses['downloadURL']}")
 
-          print(f"共处理 {len(scripts)} 个 .user.js 文件。")
+          print("")
+          print(f"共检测 {len(scripts)} 个 .user.js 文件。")
+
+          if errors:
+              print("")
+              print("以下脚本处理失败：")
+              for item in errors:
+                  print(f"  - {item}")
+
+              # 有脚本元数据异常时直接让 Workflow 失败，
+              # 防止错误版本继续发布到 GitCode。
+              sys.exit(1)
+
+          print("所有脚本更新地址均已核对并标准化。")
           PY
 
       - name: Commit and Push to GitCode
