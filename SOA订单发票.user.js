@@ -5,8 +5,8 @@
 // @description  仅用于 #/order/invoice 查看页：独立发票列表优化，不影响原合并开票脚本
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
-// @updateURL    https://gitcode.com/gcw_7DpHPfUr/soa-userscript/blob/main/SOA%E8%AE%A2%E5%8D%95%E5%8F%91%E7%A5%A8.user.js
-// @downloadURL  https://gitcode.com/gcw_7DpHPfUr/soa-userscript/blob/main/SOA%E8%AE%A2%E5%8D%95%E5%8F%91%E7%A5%A8.user.js
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/soa-userscript/main/SOA%E8%AE%A2%E5%8D%95%E5%8F%91%E7%A5%A8.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/soa-userscript/main/SOA%E8%AE%A2%E5%8D%95%E5%8F%91%E7%A5%A8.user.js
 // ==/UserScript==
 
 (function () {
