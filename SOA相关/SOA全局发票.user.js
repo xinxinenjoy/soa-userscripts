@@ -5,8 +5,9 @@
 // @description  6.13更新测试的
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8.user.js
+
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8.user.js
 // ==/UserScript==
 
 (function () {

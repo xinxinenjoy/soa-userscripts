@@ -8,8 +8,9 @@
 // @run-at       document-idle
 // @grant        none
 // @noframes
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E5%A5%97%E9%A4%90%E5%8D%B1%E5%AE%B3%E5%9B%A0%E7%B4%A0%E6%A0%B8%E5%AF%B9%E5%B7%A5%E5%85%B7.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E5%A5%97%E9%A4%90%E5%8D%B1%E5%AE%B3%E5%9B%A0%E7%B4%A0%E6%A0%B8%E5%AF%B9%E5%B7%A5%E5%85%B7.user.js
+
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA%E5%A5%97%E9%A4%90%E5%8D%B1%E5%AE%B3%E5%9B%A0%E7%B4%A0%E6%A0%B8%E5%AF%B9%E5%B7%A5%E5%85%B7.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA%E5%A5%97%E9%A4%90%E5%8D%B1%E5%AE%B3%E5%9B%A0%E7%B4%A0%E6%A0%B8%E5%AF%B9%E5%B7%A5%E5%85%B7.user.js
 // ==/UserScript==
 
 (function () {
