@@ -6,8 +6,9 @@
 // @author       wanxin
 // @match        *://*home.health-100.cn/*
 // @grant        none
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E6%A8%A1%E5%9D%97%E6%8E%92%E5%BA%8F.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E6%A8%A1%E5%9D%97%E6%8E%92%E5%BA%8F.user.js
+
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.3%E9%A6%96%E9%A1%B5%E6%8E%92%E5%BA%8F%E6%A8%A1%E5%9D%97.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.3%E9%A6%96%E9%A1%B5%E6%8E%92%E5%BA%8F%E6%A8%A1%E5%9D%97.user.js
 // ==/UserScript==
 
 (function () {

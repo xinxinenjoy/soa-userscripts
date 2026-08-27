@@ -7,8 +7,9 @@
 // @match        *://checkup-register.health-100.cn/group/register*
 // @grant        none
 // @run-at       document-idle
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E5%89%8D%E5%8F%B0%E6%89%B9%E9%87%8F%E7%99%BB%E8%AE%B0%E5%B7%A5%E5%85%B7.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E5%89%8D%E5%8F%B0%E6%89%B9%E9%87%8F%E7%99%BB%E8%AE%B0%E5%B7%A5%E5%85%B7.user.js
+
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.4%E5%89%8D%E5%8F%B0%E6%89%B9%E9%87%8F%E6%A8%A1%E5%9D%97.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.4%E5%89%8D%E5%8F%B0%E6%89%B9%E9%87%8F%E6%A8%A1%E5%9D%97.user.js
 // ==/UserScript==
 
 (function () {
