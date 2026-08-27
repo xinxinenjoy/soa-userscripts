@@ -41,14 +41,14 @@ jobs:
 
       - name: Test GitCode Authentication
         run: |
-          git ls-remote https://gitcode.com/gcw_7DpHPfUr/soa-userscripts.git
+          git ls-remote https://gitcode.com/gcw_7DpHPfUr/soa-userscript.git
 
       - name: Push to GitCode
         run: |
           git remote remove gitcode 2>/dev/null || true
 
           git remote add gitcode \
-            https://gitcode.com/gcw_7DpHPfUr/soa-userscripts.git
+            https://gitcode.com/gcw_7DpHPfUr/soa-userscript.git
 
           git push gitcode HEAD:main
           git push gitcode --tags
