@@ -15,6 +15,12 @@ env:
   # 这里填写 Secret 的“名称”，不是 Token 内容
   GITCODE_SECRET_NAME: GITCODE_TOKEN
 
+  # Userscript 统一作者
+  USERSCRIPT_AUTHOR: WanXin
+
+  # 自动维护的说明文档
+  README_FILE: README.md
+
 on:
   push:
     branches:
@@ -25,18 +31,22 @@ on:
 
   workflow_dispatch:
 
-# 需要回写 GitHub 原始文件，因此必须允许 contents: write
+# 需要自动修改并提交 GitHub 原始文件
 permissions:
   contents: write
 
 jobs:
   sync:
-    # Workflow 自动回写 GitHub 后会产生一个新 push。
-    # 带有 [auto-gitcode-url] 的自动提交直接跳过，避免无限循环。
+    # 自动维护 Commit 会再次触发 push。
+    # 带有 [auto-userscript-maintenance] 的提交直接跳过，
+    # 避免无限循环。
     if: >-
-      ${{
+      ${{ 
         github.event_name != 'push' ||
-        !contains(github.event.head_commit.message, '[auto-gitcode-url]')
+        !contains(
+          github.event.head_commit.message,
+          '[auto-userscript-maintenance]'
+        )
       }}
 
     runs-on: ubuntu-latest
@@ -50,9 +60,9 @@ jobs:
           path: source
 
       # --------------------------------------------------------
-      # 1. 先修改 GitHub 原始 .user.js
+      # 1. 自动维护 Userscript 元数据 + README
       # --------------------------------------------------------
-      - name: Verify and Rewrite GitHub Userscript URLs
+      - name: Maintain Userscripts and README
         run: |
           python3 <<'PY'
           from pathlib import Path
@@ -62,10 +72,12 @@ jobs:
           import sys
 
           ROOT = Path("source")
+          README_PATH = ROOT / os.environ.get("README_FILE", "README.md")
 
           GITCODE_OWNER = os.environ["GITCODE_OWNER"]
           GITCODE_REPO = os.environ["GITCODE_REPO"]
           GITCODE_BRANCH = os.environ["GITCODE_BRANCH"]
+          USERSCRIPT_AUTHOR = os.environ.get("USERSCRIPT_AUTHOR", "WanXin")
 
           BASE_URL = (
               f"https://raw.gitcode.com/"
@@ -82,6 +94,9 @@ jobs:
           )
 
           TAG_PATTERNS = {
+              "author": re.compile(
+                  r"(?m)^[ \t]*//[ \t]*@author(?:[ \t]+([^\r\n]*))?[ \t]*$"
+              ),
               "updateURL": re.compile(
                   r"(?m)^[ \t]*//[ \t]*@updateURL(?:[ \t]+([^\r\n]*))?[ \t]*$"
               ),
@@ -90,6 +105,13 @@ jobs:
               ),
           }
 
+          META_LINE_RE = re.compile(
+              r"^[ \t]*//[ \t]*@([A-Za-z0-9:_-]+)(?:[ \t]+(.*?))?[ \t]*$"
+          )
+
+          AUTO_START = "<!-- AUTO-USERSCRIPTS:START -->"
+          AUTO_END = "<!-- AUTO-USERSCRIPTS:END -->"
+
           scripts = sorted(ROOT.rglob("*.user.js"))
 
           if not scripts:
@@ -97,31 +119,54 @@ jobs:
               raise SystemExit(0)
 
           errors = []
+          script_infos = []
+
 
           def build_expected_url(path: Path) -> str:
-              """
-              GitCode 当前采用与 GitHub 相同的目录结构，
-              因此直接根据 GitHub 中脚本的实际相对路径生成 Raw URL。
-              """
               relative = path.relative_to(ROOT)
-
               encoded_path = "/".join(
                   quote(part, safe="._-")
                   for part in relative.parts
               )
-
               return BASE_URL + encoded_path
 
-          def get_values(metadata: str, tag: str):
-              values = []
 
-              for match in TAG_PATTERNS[tag].finditer(metadata):
-                  values.append((match.group(1) or "").strip())
-
-              return values
-
-          def remove_tag(metadata: str, tag: str) -> str:
+          def clean_tag(metadata: str, tag: str) -> str:
               return TAG_PATTERNS[tag].sub("", metadata)
+
+
+          def parse_metadata(metadata: str):
+              result = {}
+
+              for line in metadata.splitlines():
+                  match = META_LINE_RE.match(line)
+
+                  if not match:
+                      continue
+
+                  key = match.group(1)
+                  value = (match.group(2) or "").strip()
+
+                  result.setdefault(key, []).append(value)
+
+              return result
+
+
+          def first(meta, key, default=""):
+              values = meta.get(key) or []
+              return values[0] if values else default
+
+
+          def md_escape(value: str) -> str:
+              return (
+                  str(value)
+                  .replace("\\", "\\\\")
+                  .replace("|", "\\|")
+                  .replace("\r", " ")
+                  .replace("\n", " ")
+                  .strip()
+              )
+
 
           for path in scripts:
               relative = path.relative_to(ROOT)
@@ -152,30 +197,46 @@ jobs:
               metadata_end = end_match.end()
               metadata = text[metadata_start:metadata_end]
 
+              original_meta = parse_metadata(metadata)
+
               print("")
               print(f"检查：{relative}")
-              print(f"正确地址：{expected_url}")
+              print(f"作者：{USERSCRIPT_AUTHOR}")
+              print(f"更新地址：{expected_url}")
 
-              for tag in ("updateURL", "downloadURL"):
-                  values = get_values(metadata, tag)
+              for tag, expected in (
+                  ("author", USERSCRIPT_AUTHOR),
+                  ("updateURL", expected_url),
+                  ("downloadURL", expected_url),
+              ):
+                  values = original_meta.get(tag) or []
 
                   if not values:
                       print(f"  @{tag}: 缺失，自动添加")
+
                   elif len(values) > 1:
                       print(
                           f"  @{tag}: 发现 {len(values)} 个重复标签，"
                           "自动清理"
                       )
-                  elif values[0] != expected_url:
-                      print(f"  @{tag}: 地址不一致，自动修正")
-                      print(f"    原值：{values[0] or '(空)'}")
+
+                  elif values[0] != expected:
+                      print(
+                          f"  @{tag}: 内容不一致，自动修正"
+                      )
+                      print(
+                          f"    原值：{values[0] or '(空)'}"
+                      )
+
                   else:
                       print(f"  @{tag}: 正确")
 
-              # 无论原来是什么格式，都统一删除旧标签并写入唯一标准值
+              # 删除旧 author / updateURL / downloadURL，
+              # 然后统一写入唯一标准值。
               cleaned = metadata
-              cleaned = remove_tag(cleaned, "updateURL")
-              cleaned = remove_tag(cleaned, "downloadURL")
+              cleaned = clean_tag(cleaned, "author")
+              cleaned = clean_tag(cleaned, "updateURL")
+              cleaned = clean_tag(cleaned, "downloadURL")
 
               cleaned = re.sub(
                   r"\n{3,}",
@@ -192,6 +253,7 @@ jobs:
                   continue
 
               canonical = (
+                  f"// @author       {USERSCRIPT_AUTHOR}\n"
                   f"// @updateURL    {expected_url}\n"
                   f"// @downloadURL  {expected_url}\n"
               )
@@ -214,6 +276,39 @@ jobs:
                   newline="\n"
               )
 
+              new_meta = parse_metadata(cleaned)
+
+              script_infos.append({
+                  "path": relative.as_posix(),
+                  "group": (
+                      relative.parts[0]
+                      if len(relative.parts) > 1
+                      else "根目录"
+                  ),
+                  "name": first(
+                      new_meta,
+                      "name",
+                      path.stem
+                  ),
+                  "version": first(
+                      new_meta,
+                      "version",
+                      "-"
+                  ),
+                  "author": first(
+                      new_meta,
+                      "author",
+                      USERSCRIPT_AUTHOR
+                  ),
+                  "description": first(
+                      new_meta,
+                      "description",
+                      ""
+                  ),
+                  "url": expected_url,
+              })
+
+
           if errors:
               print("")
               print("以下脚本存在问题，已停止发布：")
@@ -223,36 +318,142 @@ jobs:
 
               sys.exit(1)
 
+
+          # ============================================================
+          # 自动维护 README 脚本清单区块
+          # ============================================================
+          groups = {}
+
+          for info in script_infos:
+              groups.setdefault(
+                  info["group"],
+                  []
+              ).append(info)
+
+          lines = [
+              AUTO_START,
+              "",
+              "## 📦 脚本清单",
+              "",
+              "> 本区域由 GitHub Actions 自动维护，请勿手工修改其中的脚本信息。",
+              "",
+          ]
+
+          for group in sorted(groups):
+              lines.extend([
+                  f"### {md_escape(group)}",
+                  "",
+                  "| 脚本 | 版本 | 作者 | 说明 | 安装 |",
+                  "|---|---:|---|---|---|",
+              ])
+
+              for info in sorted(
+                  groups[group],
+                  key=lambda item: item["path"].lower()
+              ):
+                  lines.append(
+                      "| "
+                      + f"**{md_escape(info['name'])}** | "
+                      + f"{md_escape(info['version'])} | "
+                      + f"{md_escape(info['author'])} | "
+                      + f"{md_escape(info['description']) or '-'} | "
+                      + f"[安装脚本]({info['url']}) |"
+                  )
+
+              lines.append("")
+
+          lines.extend([
+              f"共收录 **{len(script_infos)}** 个 Userscript。",
+              "",
+              AUTO_END,
+          ])
+
+          auto_block = "\n".join(lines)
+
+          if README_PATH.exists():
+              readme = README_PATH.read_text(
+                  encoding="utf-8-sig"
+              )
+          else:
+              readme = (
+                  "# WanXin Userscripts\n\n"
+                  "Tampermonkey / Userscript 脚本仓库。\n"
+              )
+
+          if (
+              AUTO_START in readme
+              and AUTO_END in readme
+          ):
+              start = readme.index(AUTO_START)
+              end = (
+                  readme.index(AUTO_END)
+                  + len(AUTO_END)
+              )
+
+              readme = (
+                  readme[:start].rstrip()
+                  + "\n\n"
+                  + auto_block
+                  + "\n\n"
+                  + readme[end:].lstrip()
+              )
+
+          else:
+              readme = (
+                  readme.rstrip()
+                  + "\n\n---\n\n"
+                  + auto_block
+                  + "\n"
+              )
+
+          README_PATH.write_text(
+              readme,
+              encoding="utf-8",
+              newline="\n"
+          )
+
           print("")
-          print(f"共检查 {len(scripts)} 个 .user.js 文件。")
-          print("GitHub 原始脚本更新地址已全部标准化。")
+          print(
+              f"共检查 {len(scripts)} 个 .user.js 文件。"
+          )
+          print(
+              f"所有脚本已统一设置作者："
+              f"{USERSCRIPT_AUTHOR}"
+          )
+          print(
+              "GitCode 更新地址已全部标准化。"
+          )
+          print(
+              f"README 已更新：{README_PATH}"
+          )
           PY
 
       # --------------------------------------------------------
-      # 2. 如果 GitHub 原始文件发生变化，就自动提交回 GitHub
+      # 2. 将自动修正结果提交回 GitHub
       # --------------------------------------------------------
-      - name: Commit URL Changes Back to GitHub
+      - name: Commit Maintenance Changes Back to GitHub
         run: |
           cd source
 
           git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add -A
 
           if git diff --cached --quiet; then
-            echo "GitHub 原始文件中的更新地址均已正确，无需回写。"
+            echo "GitHub 原始文件和 README 均无需更新。"
             exit 0
           fi
 
           git commit \
-            -m "[auto-gitcode-url] 自动更新 Userscript GitCode 地址"
+            -m "[auto-userscript-maintenance] 自动维护脚本元数据和 README"
 
           git push \
             origin \
             "HEAD:${GITHUB_BRANCH}"
 
-          echo "GitHub 原始文件已自动更新。"
+          echo "GitHub 自动维护内容已提交。"
 
       # --------------------------------------------------------
       # 3. 检查 GitCode Token
@@ -296,7 +497,7 @@ jobs:
             publish
 
       # --------------------------------------------------------
-      # 5. 将已经修正过 URL 的 GitHub 内容同步到 GitCode
+      # 5. 将已经维护好的 GitHub 内容完整同步到 GitCode
       # --------------------------------------------------------
       - name: Sync GitHub Content to GitCode
         run: |
@@ -312,7 +513,8 @@ jobs:
           cd publish
 
           git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add -A
 
