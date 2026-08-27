@@ -21,6 +21,6 @@ jobs:
         env:
           ATOMGIT_TOKEN: ${{ secrets.ATOMGIT_TOKEN }}
         run: |
-          git remote add atomgit "https://gcw_7DpHPfUr:${ATOMGIT_TOKEN}@atomgit.com/soa-userscripts/soa-userscripts.git"
+          git remote add atomgit "https://gcw_7DpHPfUr:${ATOMGIT_TOKEN}@atomgit.com/gcw_7DpHPfUr/soa-userscripts.git"
           git push atomgit HEAD:main
           git push atomgit --tags
