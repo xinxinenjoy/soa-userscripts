@@ -7,6 +7,7 @@
 // @match        https://www.curseforge.com/*
 // @run-at       document-end
 // @grant        none
+
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/%E7%BA%A2%E9%A2%86%E5%B7%BE%E7%9A%84%E6%B8%B8%E6%88%8F%E8%84%9A%E6%9C%AC/CurseForge%E5%A2%9E%E5%BC%BA.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/%E7%BA%A2%E9%A2%86%E5%B7%BE%E7%9A%84%E6%B8%B8%E6%88%8F%E8%84%9A%E6%9C%AC/CurseForge%E5%A2%9E%E5%BC%BA.user.js
 // ==/UserScript==

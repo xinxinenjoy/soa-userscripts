@@ -6,6 +6,7 @@
 // @author       WanXin
 // @match        https://solofandy.github.io/*
 // @grant        none
+
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/%E7%BA%A2%E9%A2%86%E5%B7%BE%E7%9A%84%E6%B8%B8%E6%88%8F%E8%84%9A%E6%9C%AC/GOW%E5%BA%95%E4%B8%8B%E5%B0%96%E5%A1%94.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/%E7%BA%A2%E9%A2%86%E5%B7%BE%E7%9A%84%E6%B8%B8%E6%88%8F%E8%84%9A%E6%9C%AC/GOW%E5%BA%95%E4%B8%8B%E5%B0%96%E5%A1%94.user.js
 // ==/UserScript==
