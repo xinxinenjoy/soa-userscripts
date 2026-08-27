@@ -22,28 +22,10 @@ jobs:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
         run: |
           if [ -z "${GITCODE_TOKEN}" ]; then
-            echo "错误：GitHub Secret GITCODE_TOKEN 为空"
+            echo "错误：GITCODE_TOKEN 为空"
             exit 1
           fi
           echo "GITCODE_TOKEN 已读取"
-
-      - name: Get GitCode Login
-        env:
-          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-        run: |
-          RESPONSE=$(curl -fsSL \
-            -H "Authorization: Bearer ${GITCODE_TOKEN}" \
-            "https://api.gitcode.com/api/v5/user")
-
-          GITCODE_LOGIN=$(echo "$RESPONSE" | jq -r '.login')
-
-          if [ -z "$GITCODE_LOGIN" ] || [ "$GITCODE_LOGIN" = "null" ]; then
-            echo "错误：无法取得 GitCode 登录用户名"
-            exit 1
-          fi
-
-          echo "GitCode 登录账号：${GITCODE_LOGIN}"
-          echo "GITCODE_LOGIN=${GITCODE_LOGIN}" >> "$GITHUB_ENV"
 
       - name: Configure GitCode Authentication
         env:
@@ -51,18 +33,22 @@ jobs:
         run: |
           cat > ~/.netrc <<EOF
           machine gitcode.com
-          login ${GITCODE_LOGIN}
+          login gcw_7DpHPfUr
           password ${GITCODE_TOKEN}
           EOF
 
           chmod 600 ~/.netrc
+
+      - name: Test GitCode Authentication
+        run: |
+          git ls-remote https://gitcode.com/gcw_7DpHPfUr/soa-userscripts.git
 
       - name: Push to GitCode
         run: |
           git remote remove gitcode 2>/dev/null || true
 
           git remote add gitcode \
-            "https://gitcode.com/gcw_7DpHPfUr/soa-userscripts.git"
+            https://gitcode.com/gcw_7DpHPfUr/soa-userscripts.git
 
           git push gitcode HEAD:main
           git push gitcode --tags
