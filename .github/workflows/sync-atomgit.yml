@@ -1,4 +1,4 @@
-name: Sync to AtomGit
+name: Sync to GitCode
 
 on:
   push:
@@ -12,15 +12,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout GitHub repository
+      - name: Checkout GitHub
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Push to AtomGit
+      - name: Push to GitCode
         env:
-          ATOMGIT_TOKEN: ${{ secrets.ATOMGIT_TOKEN }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
         run: |
-          git remote add atomgit "https://gcw_7DpHPfUr:${ATOMGIT_TOKEN}@atomgit.com/gcw_7DpHPfUr/soa-userscripts.git"
-          git push atomgit HEAD:main
-          git push atomgit --tags
+          git remote add gitcode "https://gcw_7DpHPfUr:${GITCODE_TOKEN}@gitcode.com/gcw_7DpHPfUr/soa-userscripts.git"
+          git push gitcode HEAD:main
+          git push gitcode --tags
