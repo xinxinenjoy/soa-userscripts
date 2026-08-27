@@ -2,12 +2,17 @@ name: Sync to GitCode
 
 # ============================================================
 # 可复用配置区
-# 换到其他项目时，通常只需要修改这里
+# 换项目时通常只需要修改这里
 # ============================================================
 env:
+  GITHUB_BRANCH: main
+
   GITCODE_OWNER: gcw_7DpHPfUr
   GITCODE_REPO: wanxin-userscripts
   GITCODE_BRANCH: main
+
+  # GitHub Actions -> Settings -> Secrets and variables -> Actions
+  # 这里填写 Secret 的“名称”，不是 Token 内容
   GITCODE_SECRET_NAME: GITCODE_TOKEN
 
 on:
@@ -20,63 +25,34 @@ on:
 
   workflow_dispatch:
 
+# 需要回写 GitHub 原始文件，因此必须允许 contents: write
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   sync:
+    # Workflow 自动回写 GitHub 后会产生一个新 push。
+    # 带有 [auto-gitcode-url] 的自动提交直接跳过，避免无限循环。
+    if: >-
+      ${{
+        github.event_name != 'push' ||
+        !contains(github.event.head_commit.message, '[auto-gitcode-url]')
+      }}
+
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout GitHub
         uses: actions/checkout@v4
         with:
+          ref: ${{ env.GITHUB_BRANCH }}
           fetch-depth: 0
           path: source
 
-      - name: Load and Check GitCode Secret
-        env:
-          GITCODE_TOKEN: ${{ secrets[env.GITCODE_SECRET_NAME] }}
-        run: |
-          if [ -z "${GITCODE_TOKEN}" ]; then
-            echo "错误：未读取到 GitCode Token"
-            echo "当前配置的 Secret 名称：${GITCODE_SECRET_NAME}"
-            echo "请确认 GitHub 仓库 Settings -> Secrets and variables -> Actions 中存在该 Secret"
-            exit 1
-          fi
-
-          echo "GitCode Token 已读取"
-          echo "Secret 名称：${GITCODE_SECRET_NAME}"
-
-      - name: Configure GitCode Authentication
-        env:
-          GITCODE_TOKEN: ${{ secrets[env.GITCODE_SECRET_NAME] }}
-        run: |
-          cat > ~/.netrc <<EOF
-          machine gitcode.com
-          login ${GITCODE_OWNER}
-          password ${GITCODE_TOKEN}
-          EOF
-
-          chmod 600 ~/.netrc
-
-      - name: Clone GitCode Publish Repository
-        run: |
-          echo "目标 GitCode 仓库：${GITCODE_OWNER}/${GITCODE_REPO}"
-          echo "目标分支：${GITCODE_BRANCH}"
-
-          git clone \
-            --branch "${GITCODE_BRANCH}" \
-            "https://gitcode.com/${GITCODE_OWNER}/${GITCODE_REPO}.git" \
-            publish
-
-      - name: Sync GitHub Content to Publish Repository
-        run: |
-          rsync -a --delete \
-            --exclude=".git/" \
-            source/ publish/
-
-      - name: Verify and Rewrite Userscript Update URLs
+      # --------------------------------------------------------
+      # 1. 先修改 GitHub 原始 .user.js
+      # --------------------------------------------------------
+      - name: Verify and Rewrite GitHub Userscript URLs
         run: |
           python3 <<'PY'
           from pathlib import Path
@@ -85,7 +61,7 @@ jobs:
           import re
           import sys
 
-          ROOT = Path("publish")
+          ROOT = Path("source")
 
           GITCODE_OWNER = os.environ["GITCODE_OWNER"]
           GITCODE_REPO = os.environ["GITCODE_REPO"]
@@ -124,8 +100,8 @@ jobs:
 
           def build_expected_url(path: Path) -> str:
               """
-              根据脚本在 GitCode 发布仓库中的实际相对路径
-              自动生成唯一正确的 Raw URL。
+              GitCode 当前采用与 GitHub 相同的目录结构，
+              因此直接根据 GitHub 中脚本的实际相对路径生成 Raw URL。
               """
               relative = path.relative_to(ROOT)
 
@@ -136,16 +112,15 @@ jobs:
 
               return BASE_URL + encoded_path
 
-          def get_tag_urls(metadata: str, tag: str):
+          def get_values(metadata: str, tag: str):
               values = []
 
               for match in TAG_PATTERNS[tag].finditer(metadata):
-                  value = (match.group(1) or "").strip()
-                  values.append(value)
+                  values.append((match.group(1) or "").strip())
 
               return values
 
-          def remove_tag_lines(metadata: str, tag: str) -> str:
+          def remove_tag(metadata: str, tag: str) -> str:
               return TAG_PATTERNS[tag].sub("", metadata)
 
           for path in scripts:
@@ -169,7 +144,7 @@ jobs:
                   or end_match.start() <= start_match.end()
               ):
                   errors.append(
-                      f"{relative}: 未找到完整的 ==UserScript== 元数据区，已跳过。"
+                      f"{relative}: 未找到完整的 ==UserScript== 元数据区。"
                   )
                   continue
 
@@ -178,44 +153,30 @@ jobs:
               metadata = text[metadata_start:metadata_end]
 
               print("")
-              print(f"处理：{relative}")
-              print(f"目标：{expected_url}")
-
-              statuses = {}
+              print(f"检查：{relative}")
+              print(f"正确地址：{expected_url}")
 
               for tag in ("updateURL", "downloadURL"):
-                  values = get_tag_urls(metadata, tag)
+                  values = get_values(metadata, tag)
 
-                  if len(values) == 0:
-                      statuses[tag] = "缺失，自动添加"
-
-                  elif len(values) == 1 and values[0] == expected_url:
-                      statuses[tag] = "已正确，无需修正"
-
-                  elif len(values) == 1:
-                      statuses[tag] = (
-                          f"地址不一致，自动修正\n"
-                          f"    原值：{values[0] or '(空)'}"
+                  if not values:
+                      print(f"  @{tag}: 缺失，自动添加")
+                  elif len(values) > 1:
+                      print(
+                          f"  @{tag}: 发现 {len(values)} 个重复标签，"
+                          "自动清理"
                       )
-
+                  elif values[0] != expected_url:
+                      print(f"  @{tag}: 地址不一致，自动修正")
+                      print(f"    原值：{values[0] or '(空)'}")
                   else:
-                      statuses[tag] = (
-                          f"发现 {len(values)} 个重复标签，"
-                          "自动清理并保留唯一正确地址"
-                      )
+                      print(f"  @{tag}: 正确")
 
-              # 删除所有旧的 updateURL / downloadURL
+              # 无论原来是什么格式，都统一删除旧标签并写入唯一标准值
               cleaned = metadata
-              cleaned = remove_tag_lines(
-                  cleaned,
-                  "updateURL"
-              )
-              cleaned = remove_tag_lines(
-                  cleaned,
-                  "downloadURL"
-              )
+              cleaned = remove_tag(cleaned, "updateURL")
+              cleaned = remove_tag(cleaned, "downloadURL")
 
-              # 清理删除标签后可能产生的连续空行
               cleaned = re.sub(
                   r"\n{3,}",
                   "\n\n",
@@ -226,19 +187,18 @@ jobs:
 
               if not end_marker:
                   errors.append(
-                      f"{relative}: 清理后元数据结束标记异常，已跳过写入。"
+                      f"{relative}: 元数据结束标记异常。"
                   )
                   continue
 
-              canonical_block = (
+              canonical = (
                   f"// @updateURL    {expected_url}\n"
                   f"// @downloadURL  {expected_url}\n"
               )
 
-              # 在元数据结束标记前统一写入正确地址
               cleaned = (
                   cleaned[:end_marker.start()]
-                  + canonical_block
+                  + canonical
                   + cleaned[end_marker.start():]
               )
 
@@ -254,38 +214,99 @@ jobs:
                   newline="\n"
               )
 
-              print(
-                  f"  @updateURL   ："
-                  f"{statuses['updateURL']}"
-              )
-              print(
-                  f"  @downloadURL ："
-                  f"{statuses['downloadURL']}"
-              )
-
-          print("")
-          print(
-              f"共检测 {len(scripts)} 个 .user.js 文件。"
-          )
-
           if errors:
               print("")
-              print("以下脚本处理失败：")
+              print("以下脚本存在问题，已停止发布：")
 
               for item in errors:
                   print(f"  - {item}")
 
-              # 防止有问题的脚本继续发布
               sys.exit(1)
 
-          print(
-              "所有脚本更新地址均已核对并标准化。"
-          )
-          print(
-              f"当前 Raw 基础地址：{BASE_URL}"
-          )
+          print("")
+          print(f"共检查 {len(scripts)} 个 .user.js 文件。")
+          print("GitHub 原始脚本更新地址已全部标准化。")
           PY
 
+      # --------------------------------------------------------
+      # 2. 如果 GitHub 原始文件发生变化，就自动提交回 GitHub
+      # --------------------------------------------------------
+      - name: Commit URL Changes Back to GitHub
+        run: |
+          cd source
+
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "GitHub 原始文件中的更新地址均已正确，无需回写。"
+            exit 0
+          fi
+
+          git commit \
+            -m "[auto-gitcode-url] 自动更新 Userscript GitCode 地址"
+
+          git push \
+            origin \
+            "HEAD:${GITHUB_BRANCH}"
+
+          echo "GitHub 原始文件已自动更新。"
+
+      # --------------------------------------------------------
+      # 3. 检查 GitCode Token
+      # --------------------------------------------------------
+      - name: Load and Check GitCode Secret
+        env:
+          GITCODE_TOKEN: ${{ secrets[env.GITCODE_SECRET_NAME] }}
+        run: |
+          if [ -z "${GITCODE_TOKEN}" ]; then
+            echo "错误：未读取到 GitCode Token"
+            echo "当前 Secret 名称：${GITCODE_SECRET_NAME}"
+            exit 1
+          fi
+
+          echo "GitCode Token 已读取"
+          echo "Secret 名称：${GITCODE_SECRET_NAME}"
+
+      - name: Configure GitCode Authentication
+        env:
+          GITCODE_TOKEN: ${{ secrets[env.GITCODE_SECRET_NAME] }}
+        run: |
+          cat > ~/.netrc <<EOF
+          machine gitcode.com
+          login ${GITCODE_OWNER}
+          password ${GITCODE_TOKEN}
+          EOF
+
+          chmod 600 ~/.netrc
+
+      # --------------------------------------------------------
+      # 4. 克隆 GitCode 发布仓库
+      # --------------------------------------------------------
+      - name: Clone GitCode Publish Repository
+        run: |
+          echo "目标 GitCode 仓库：${GITCODE_OWNER}/${GITCODE_REPO}"
+          echo "目标分支：${GITCODE_BRANCH}"
+
+          git clone \
+            --branch "${GITCODE_BRANCH}" \
+            "https://gitcode.com/${GITCODE_OWNER}/${GITCODE_REPO}.git" \
+            publish
+
+      # --------------------------------------------------------
+      # 5. 将已经修正过 URL 的 GitHub 内容同步到 GitCode
+      # --------------------------------------------------------
+      - name: Sync GitHub Content to GitCode
+        run: |
+          rsync -a --delete \
+            --exclude=".git/" \
+            source/ publish/
+
+      # --------------------------------------------------------
+      # 6. 提交并推送 GitCode
+      # --------------------------------------------------------
       - name: Commit and Push to GitCode
         run: |
           cd publish
@@ -296,7 +317,7 @@ jobs:
           git add -A
 
           if git diff --cached --quiet; then
-            echo "GitCode 发布内容无变化，无需提交。"
+            echo "GitCode 内容无变化，无需提交。"
             exit 0
           fi
 
@@ -306,3 +327,5 @@ jobs:
           git push \
             origin \
             "${GITCODE_BRANCH}"
+
+          echo "GitCode 同步完成。"
