@@ -9,9 +9,8 @@ env:
   GITCODE_REPO: wanxin-userscripts
   GITCODE_BRANCH: main
 
-# README 更新不与脚本发布同时运行。
-# 脚本发布成功后，再根据最新 publish/ 内容生成 README。
 on:
+  # 脚本发布成功后再更新 README，避免与发布 Flow 同时修改仓库。
   workflow_run:
     workflows:
       - "Publish Userscripts to GitCode"
@@ -96,7 +95,24 @@ jobs:
           )
 
 
-          def parse_metadata(metadata: str):
+          def parse_metadata(text: str, label: str):
+              start_match = START_RE.search(text)
+              end_match = END_RE.search(text)
+
+              if (
+                  not start_match
+                  or not end_match
+                  or end_match.start() <= start_match.end()
+              ):
+                  raise ValueError(
+                      f"{label}: 缺少完整 UserScript 元数据区"
+                  )
+
+              metadata = text[
+                  start_match.start():
+                  end_match.end()
+              ]
+
               result = {}
 
               for line in metadata.splitlines():
@@ -139,6 +155,21 @@ jobs:
               )
 
 
+          def is_source_userscript(path: Path) -> bool:
+              if not path.name.endswith(".user.js"):
+                  return False
+
+              relative = path.relative_to(ROOT)
+
+              if (
+                  relative.parts
+                  and relative.parts[0] == PUBLISH_DIR
+              ):
+                  return False
+
+              return True
+
+
           if not README_PATH.exists():
               print(
                   f"错误：找不到 {README_PATH}，"
@@ -147,10 +178,89 @@ jobs:
               sys.exit(1)
 
 
-          scripts = []
+          # ====================================================
+          # 1. 扫描源脚本
+          #
+          # 用 @publishID 建立：
+          # publishID -> 原始一级目录名称
+          #
+          # README 展示使用这个目录名称，而不是 publishGroup。
+          # ====================================================
+          source_by_id = {}
+          source_errors = []
+
+          source_scripts = sorted(
+              path
+              for path in ROOT.rglob("*.user.js")
+              if is_source_userscript(path)
+          )
+
+          for path in source_scripts:
+              relative = path.relative_to(ROOT)
+
+              try:
+                  text = path.read_text(
+                      encoding="utf-8-sig"
+                  )
+
+                  meta = parse_metadata(
+                      text,
+                      str(relative)
+                  )
+
+              except Exception as exc:
+                  source_errors.append(
+                      str(exc)
+                  )
+                  continue
+
+              publish_id = first(
+                  meta,
+                  "publishID"
+              )
+
+              # 未正式进入发布体系的脚本暂不参与 README 映射。
+              if not publish_id:
+                  continue
+
+              original_group = (
+                  relative.parts[0]
+                  if len(relative.parts) > 1
+                  else "根目录"
+              )
+
+              key = publish_id.lower()
+
+              if key in source_by_id:
+                  source_errors.append(
+                      f"源脚本 @publishID 重复：{publish_id}\n"
+                      f"  - {source_by_id[key]['relative']}\n"
+                      f"  - {relative}"
+                  )
+                  continue
+
+              source_by_id[key] = {
+                  "relative": relative,
+                  "original_group": original_group,
+              }
+
+
+          if source_errors:
+              print("读取源脚本时发现问题：")
+
+              for error in source_errors:
+                  print(f"  - {error}")
+
+              sys.exit(1)
+
+
+          # ====================================================
+          # 2. 扫描 publish/ 正式发布脚本
+          # ====================================================
+          publish_scripts = []
 
           if PUBLISH_ROOT.exists():
-              scripts = sorted(
+              publish_scripts = sorted(
                   PUBLISH_ROOT.rglob("*.user.js")
               )
 
@@ -159,39 +269,24 @@ jobs:
           errors = []
 
 
-          for path in scripts:
+          for path in publish_scripts:
               relative = path.relative_to(ROOT)
 
               try:
                   text = path.read_text(
                       encoding="utf-8-sig"
                   )
+
+                  meta = parse_metadata(
+                      text,
+                      str(relative)
+                  )
+
               except Exception as exc:
                   errors.append(
-                      f"{relative}: 无法读取：{exc}"
+                      str(exc)
                   )
                   continue
-
-              start_match = START_RE.search(text)
-              end_match = END_RE.search(text)
-
-              if (
-                  not start_match
-                  or not end_match
-                  or end_match.start() <= start_match.end()
-              ):
-                  errors.append(
-                      f"{relative}: "
-                      "缺少完整 UserScript 元数据区。"
-                  )
-                  continue
-
-              metadata = text[
-                  start_match.start():
-                  end_match.end()
-              ]
-
-              meta = parse_metadata(metadata)
 
               name = first(
                   meta,
@@ -214,11 +309,7 @@ jobs:
               publish_group = first(
                   meta,
                   "publishGroup",
-                  (
-                      relative.parts[-2]
-                      if len(relative.parts) >= 3
-                      else "root"
-                  )
+                  "root"
               )
 
               publish_id = first(
@@ -229,7 +320,30 @@ jobs:
                   else path.stem
               )
 
-              encoded = encode_relative(relative)
+              source_info = source_by_id.get(
+                  publish_id.lower()
+              )
+
+              if source_info:
+                  display_group = source_info[
+                      "original_group"
+                  ]
+              else:
+                  # 正常情况下不应发生。
+                  # 为保证 README 仍能生成，先回退到 publishGroup，
+                  # 同时在 Actions 中发出 warning。
+                  display_group = publish_group
+
+                  print(
+                      "::warning::"
+                      f"发布脚本 {publish_id} "
+                      "未找到对应源脚本，"
+                      f"README 分类暂回退为 {publish_group}"
+                  )
+
+              encoded = encode_relative(
+                  relative
+              )
 
               gitcode_url = (
                   f"https://raw.gitcode.com/"
@@ -250,7 +364,8 @@ jobs:
                   "name": name,
                   "version": version,
                   "description": description,
-                  "group": publish_group,
+                  "display_group": display_group,
+                  "publish_group": publish_group,
                   "publish_id": publish_id,
                   "gitcode_url": gitcode_url,
                   "github_url": github_url,
@@ -266,11 +381,14 @@ jobs:
               sys.exit(1)
 
 
+          # ====================================================
+          # 3. 按“源文件原始一级目录名称”分组
+          # ====================================================
           groups = {}
 
           for item in items:
               groups.setdefault(
-                  item["group"],
+                  item["display_group"],
                   []
               ).append(item)
 
@@ -325,7 +443,9 @@ jobs:
 
           lines.append(AUTO_END)
 
-          auto_block = "\n".join(lines)
+          auto_block = "\n".join(
+              lines
+          )
 
           readme = README_PATH.read_text(
               encoding="utf-8-sig"
@@ -342,7 +462,9 @@ jobs:
               print(AUTO_END)
               sys.exit(1)
 
-          start = readme.index(AUTO_START)
+          start = readme.index(
+              AUTO_START
+          )
 
           end = (
               readme.index(AUTO_END)
@@ -366,6 +488,10 @@ jobs:
           print(
               f"README 已根据 publish/ 中的 "
               f"{len(items)} 个脚本更新。"
+          )
+
+          print(
+              "README 分类显示使用源脚本原始一级目录名称。"
           )
           PY
 
