@@ -10,9 +10,10 @@
 // @noframes
 
 // @author       WanXin
+// @publishGroup soaxg
 // @publishID    soa-weihaihedui
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soa-1-2-93825be4.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soa-1-2-93825be4.user.js
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-weihaihedui.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-weihaihedui.user.js
 // ==/UserScript==
 
 (function () {

@@ -9,9 +9,10 @@
 // @grant        none
 
 // @author       WanXin
-// @publishID    curseforge-46f20416
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/curseforge-46f20416.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/curseforge-46f20416.user.js
+// @publishGroup hljdyxjb
+// @publishID    game-curseforge
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-curseforge.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-curseforge.user.js
 // ==/UserScript==
 
 (function () {

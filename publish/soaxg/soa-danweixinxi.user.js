@@ -10,9 +10,10 @@
 // @noframes
 
 // @author       WanXin
-// @publishID    soa-1-1-b2a1bba0
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soa-1-1-b2a1bba0.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soa-1-1-b2a1bba0.user.js
+// @publishGroup soaxg
+// @publishID    soa-danweixinxi
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-danweixinxi.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-danweixinxi.user.js
 // ==/UserScript==
 
 (async function () {

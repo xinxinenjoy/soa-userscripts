@@ -8,9 +8,10 @@
 // @grant        none
 
 // @author       WanXin
-// @publishID    soa-2-3-8ed4fb4b
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soa-2-3-8ed4fb4b.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soa-2-3-8ed4fb4b.user.js
+// @publishGroup soaxg
+// @publishID    soa-shouyepaixu
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-shouyepaixu.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-shouyepaixu.user.js
 // ==/UserScript==
 
 (function () {

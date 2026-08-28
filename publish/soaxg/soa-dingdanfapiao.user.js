@@ -1,43 +1,45 @@
 // ==UserScript==
-// @name         SOA.2.1全局发票页面
-// @namespace    https://tampermonkey.net/
-// @version      6.13
-// @description  6.13更新测试的
+// @name         SOA.2.2订单发票页面
+// @namespace    https://tampermonkey.net/soa-order-invoice/
+// @version      1.5
+// @description  仅用于 #/order/invoice 查看页：独立发票列表优化，不影响原合并开票脚本
 
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
 
 // @author       WanXin
-// @publishID    soa-2-1-ca533192
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soa-2-1-ca533192.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soa-2-1-ca533192.user.js
+// @publishGroup soaxg
+// @publishID    soa-dingdanfapiao
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-dingdanfapiao.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-dingdanfapiao.user.js
 // ==/UserScript==
 
 (function () {
   "use strict";
 
   /******************** 0) 路由范围 ********************/
-  const TARGET_HASH_PREFIX = "#/merge-order-invoice";
-  const isTargetRoute = () => location.hash.startsWith(TARGET_HASH_PREFIX);
+  const TARGET_HASH_PREFIX = "#/order/invoice";
+  const isTargetRoute = () =>
+    location.hash.startsWith(TARGET_HASH_PREFIX);
 
   /******************** 1) 配置 ********************/
   /*需要隐藏的表头填在这个位置，换行用逗号隔开*/
   const HIDDEN_COLUMNS = [
-    "需要隐藏的表头填这里"
+    "卡类开票",
+    "预开票",
+    "发票类型",
   ];
 
 const COLUMN_LAYOUT = [
     { header: "销方公司", width: 100, align: "right"  },
-    { header: "开票客户", width: 470, adjustable: true },
+    { header: "开票客户", width: 530, adjustable: true },
     { header: "发票金额", width: 80, align: "right" },
     { header: "当前状态", width: 110 },
-    { header: "创建人", width: 280 },
-    { header: "来源", width: 80 },
+    { header: "创建人", width: 150 },
     { header: "操作", width: 260 },
-    { header: "申请单号", width: 230 },
-    { header: "卡类开票", width: 70 },
-    { header: "预开票", width: 70 },
-    { header: "发票类型", width: 100 },
+    { header: "申请单", width: 230 },
+    { header: "申请开票单位代码", width: 150 },
+    { header: "来源", width: 80 },
   ];
 
   const TEXT_REPLACE = {
@@ -117,7 +119,7 @@ const COLUMN_LAYOUT = [
 
   function findInvoiceTableRoot() {
     const candidates = [
-      ...document.querySelectorAll(".mergeinvoice_container .ant-table"),
+      ...document.querySelectorAll(".invoice_list .ant-table"),
     ];
 
     return candidates.find(
@@ -234,14 +236,43 @@ const COLUMN_LAYOUT = [
 
   /******************** 5) 单元格处理：保留原节点结构 ********************/
   function getCellFullText(td) {
-    const titled = td.querySelector("[title]");
-    if (titled && titled.getAttribute("title")) {
-      const text = titled.getAttribute("title").trim();
-      if (text) return text;
-    }
 
-    const ownTitle = (td.getAttribute("title") || "").trim();
-    if (ownTitle) return ownTitle;
+    // 兼容 Ant Design ellipsis：
+    // 例如：
+    // <span>
+    //   新乡美年大健康管理有限公
+    //   <span title="司门诊部">...</span>
+    // </span>
+    // 需要拼接成完整名称。
+
+    const ellipsisNodes = td.querySelectorAll(
+      ".ant-typography-ellipsis span"
+    );
+
+    if (ellipsisNodes.length) {
+      let result = "";
+
+      ellipsisNodes.forEach(node => {
+        node.childNodes.forEach(child => {
+
+          if (child.nodeType === Node.TEXT_NODE) {
+            result += child.nodeValue || "";
+          }
+
+          if (
+            child.nodeType === Node.ELEMENT_NODE &&
+            child.getAttribute("title")
+          ) {
+            result += child.getAttribute("title");
+          }
+
+        });
+      });
+
+      result = normText(result);
+
+      if (result) return result;
+    }
 
     return normText(td.innerText);
   }
@@ -260,18 +291,16 @@ const COLUMN_LAYOUT = [
 
   // 只改已有文本节点的 nodeValue，不使用 innerHTML/textContent 删除 React 管理的子节点。
   function setCellTextKeepStructure(td, newText) {
+
     const textNodes = getMeaningfulTextNodes(td);
+
     if (!textNodes.length) return false;
 
+    // 只修改已有文本节点，避免破坏 React 管理的 DOM
     textNodes[0].nodeValue = newText;
-    for (let index = 1; index < textNodes.length; index += 1) {
-      textNodes[index].nodeValue = "";
-    }
 
-    if (td.hasAttribute("title")) td.setAttribute("title", newText);
-    const titled = td.querySelector("[title]");
-    if (titled && titled.getAttribute("title")) {
-      titled.setAttribute("title", newText);
+    for (let i = 1; i < textNodes.length; i++) {
+      textNodes[i].nodeValue = "";
     }
 
     return true;
@@ -330,13 +359,15 @@ const COLUMN_LAYOUT = [
         border: 0 !important;
       }
 
-      ${scope} .ant-table-body { overflow-x: auto !important; }
-      ${scope} .ant-table-body::-webkit-scrollbar { height: 0 !important; }
-      ${scope} .ant-table-body::-webkit-scrollbar-thumb { background: transparent !important; }
-      ${scope} .ant-table-body::-webkit-scrollbar-track { background: transparent !important; }
       ${scope} .ant-table-body {
+        overflow-x: hidden !important;
         scrollbar-width: none !important;
         -ms-overflow-style: none !important;
+      }
+
+      ${scope} .ant-table-header,
+      ${scope} .ant-table-body {
+        width: 100% !important;
       }
 
       ${scope} .ant-table-header tr {
@@ -481,7 +512,7 @@ const COLUMN_LAYOUT = [
 
     if (!styleEl) {
       styleEl = document.createElement("style");
-      styleEl.id = "tm-antd-style";
+      styleEl.id = "tm-order-invoice-style";
       document.head.appendChild(styleEl);
     }
 
@@ -491,7 +522,7 @@ const COLUMN_LAYOUT = [
   }
 
   function removeStyle() {
-    const node = document.getElementById("tm-antd-style");
+    const node = document.getElementById("tm-order-invoice-style");
     if (node) node.remove();
     styleEl = null;
     lastHeaderSignature = "";
@@ -525,13 +556,6 @@ const COLUMN_LAYOUT = [
       prepareCustomerCell(cells[customerIdx]);
     }
 
-    if (
-      creatorIdx !== undefined &&
-      cells[creatorIdx] &&
-      !cells[creatorIdx].querySelector("a,button")
-    ) {
-      prepareCreatorCell(cells[creatorIdx]);
-    }
 
     // 跳过操作链接和按钮，避免破坏操作列。
     for (const cell of cells) {
@@ -584,7 +608,7 @@ const COLUMN_LAYOUT = [
     if (uiBtn && document.body.contains(uiBtn)) return;
 
     uiBtn = document.createElement("button");
-    uiBtn.id = "tm-btn-widen-customer";
+    uiBtn.id = "tm-order-btn-widen-customer";
     uiBtn.type = "button";
     uiBtn.title = "左键加宽，右键缩窄；快捷键 Alt+= / Alt+-";
 
@@ -616,7 +640,7 @@ const COLUMN_LAYOUT = [
   }
 
   function removeUiButton() {
-    const node = document.getElementById("tm-btn-widen-customer");
+    const node = document.getElementById("tm-order-btn-widen-customer");
     if (node) node.remove();
     uiBtn = null;
   }
