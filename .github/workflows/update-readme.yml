@@ -1,0 +1,397 @@
+name: Update Userscripts README
+
+env:
+  GITHUB_BRANCH: main
+  README_FILE: README.md
+  PUBLISH_DIR: publish
+
+  GITCODE_OWNER: gcw_7DpHPfUr
+  GITCODE_REPO: wanxin-userscripts
+  GITCODE_BRANCH: main
+
+# README 更新不与脚本发布同时运行。
+# 脚本发布成功后，再根据最新 publish/ 内容生成 README。
+on:
+  workflow_run:
+    workflows:
+      - "Publish Userscripts to GitCode"
+    types:
+      - completed
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-userscripts-readme
+  cancel-in-progress: true
+
+jobs:
+  update-readme:
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        github.event.workflow_run.conclusion == 'success'
+      }}
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Latest Main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.GITHUB_BRANCH }}
+          fetch-depth: 0
+
+      - name: Generate README Script List
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          from urllib.parse import quote
+          import os
+          import re
+          import sys
+
+          ROOT = Path(".")
+          README_PATH = ROOT / os.environ.get(
+              "README_FILE",
+              "README.md"
+          )
+
+          PUBLISH_DIR = os.environ.get(
+              "PUBLISH_DIR",
+              "publish"
+          )
+
+          PUBLISH_ROOT = ROOT / PUBLISH_DIR
+
+          GITCODE_OWNER = os.environ["GITCODE_OWNER"]
+          GITCODE_REPO = os.environ["GITCODE_REPO"]
+          GITCODE_BRANCH = os.environ["GITCODE_BRANCH"]
+
+          GITHUB_REPOSITORY = os.environ["GITHUB_REPOSITORY"]
+          GITHUB_BRANCH = os.environ.get(
+              "GITHUB_BRANCH",
+              "main"
+          )
+
+          AUTO_START = "<!-- AUTO-USERSCRIPTS:START -->"
+          AUTO_END = "<!-- AUTO-USERSCRIPTS:END -->"
+
+          START_RE = re.compile(
+              r"(?m)^[ \t]*//[ \t]*==UserScript==[ \t]*$"
+          )
+
+          END_RE = re.compile(
+              r"(?m)^[ \t]*//[ \t]*==/UserScript==[ \t]*$"
+          )
+
+          META_LINE_RE = re.compile(
+              r"^[ \t]*//[ \t]*@"
+              r"([A-Za-z0-9:_-]+)"
+              r"(?:[ \t]+(.*?))?"
+              r"[ \t]*$"
+          )
+
+
+          def parse_metadata(metadata: str):
+              result = {}
+
+              for line in metadata.splitlines():
+                  match = META_LINE_RE.match(line)
+
+                  if not match:
+                      continue
+
+                  key = match.group(1)
+                  value = (match.group(2) or "").strip()
+
+                  result.setdefault(
+                      key,
+                      []
+                  ).append(value)
+
+              return result
+
+
+          def first(meta, key, default=""):
+              values = meta.get(key) or []
+              return values[0] if values else default
+
+
+          def md_escape(value: str) -> str:
+              return (
+                  str(value)
+                  .replace("\\", "\\\\")
+                  .replace("|", "\\|")
+                  .replace("\r", " ")
+                  .replace("\n", " ")
+                  .strip()
+              )
+
+
+          def encode_relative(relative: Path) -> str:
+              return "/".join(
+                  quote(part, safe="._-")
+                  for part in relative.parts
+              )
+
+
+          if not README_PATH.exists():
+              print(
+                  f"错误：找不到 {README_PATH}，"
+                  "请先提交基础 README.md。"
+              )
+              sys.exit(1)
+
+
+          scripts = []
+
+          if PUBLISH_ROOT.exists():
+              scripts = sorted(
+                  PUBLISH_ROOT.rglob("*.user.js")
+              )
+
+
+          items = []
+          errors = []
+
+
+          for path in scripts:
+              relative = path.relative_to(ROOT)
+
+              try:
+                  text = path.read_text(
+                      encoding="utf-8-sig"
+                  )
+              except Exception as exc:
+                  errors.append(
+                      f"{relative}: 无法读取：{exc}"
+                  )
+                  continue
+
+              start_match = START_RE.search(text)
+              end_match = END_RE.search(text)
+
+              if (
+                  not start_match
+                  or not end_match
+                  or end_match.start() <= start_match.end()
+              ):
+                  errors.append(
+                      f"{relative}: "
+                      "缺少完整 UserScript 元数据区。"
+                  )
+                  continue
+
+              metadata = text[
+                  start_match.start():
+                  end_match.end()
+              ]
+
+              meta = parse_metadata(metadata)
+
+              name = first(
+                  meta,
+                  "name",
+                  path.stem
+              )
+
+              version = first(
+                  meta,
+                  "version",
+                  "-"
+              )
+
+              description = first(
+                  meta,
+                  "description",
+                  ""
+              )
+
+              publish_group = first(
+                  meta,
+                  "publishGroup",
+                  (
+                      relative.parts[-2]
+                      if len(relative.parts) >= 3
+                      else "root"
+                  )
+              )
+
+              publish_id = first(
+                  meta,
+                  "publishID",
+                  path.name[:-8]
+                  if path.name.endswith(".user.js")
+                  else path.stem
+              )
+
+              encoded = encode_relative(relative)
+
+              gitcode_url = (
+                  f"https://raw.gitcode.com/"
+                  f"{GITCODE_OWNER}/"
+                  f"{GITCODE_REPO}/"
+                  f"raw/{GITCODE_BRANCH}/"
+                  f"{encoded}"
+              )
+
+              github_url = (
+                  f"https://raw.githubusercontent.com/"
+                  f"{GITHUB_REPOSITORY}/"
+                  f"{GITHUB_BRANCH}/"
+                  f"{encoded}"
+              )
+
+              items.append({
+                  "name": name,
+                  "version": version,
+                  "description": description,
+                  "group": publish_group,
+                  "publish_id": publish_id,
+                  "gitcode_url": gitcode_url,
+                  "github_url": github_url,
+              })
+
+
+          if errors:
+              print("生成 README 前发现以下问题：")
+
+              for error in errors:
+                  print(f"  - {error}")
+
+              sys.exit(1)
+
+
+          groups = {}
+
+          for item in items:
+              groups.setdefault(
+                  item["group"],
+                  []
+              ).append(item)
+
+
+          lines = [
+              AUTO_START,
+              "",
+          ]
+
+
+          if not items:
+              lines.extend([
+                  "> 暂无正式发布脚本。",
+                  "",
+              ])
+
+          else:
+              for group in sorted(
+                  groups,
+                  key=str.lower
+              ):
+                  lines.extend([
+                      f"### {md_escape(group)}",
+                      "",
+                      "| 脚本 | 版本 | 说明 | GitCode 安装 | GitHub 备用 |",
+                      "|---|---:|---|---|---|",
+                  ])
+
+                  for item in sorted(
+                      groups[group],
+                      key=lambda x: (
+                          x["name"].lower(),
+                          x["publish_id"].lower()
+                      )
+                  ):
+                      lines.append(
+                          "| "
+                          + f"**{md_escape(item['name'])}** | "
+                          + f"{md_escape(item['version'])} | "
+                          + f"{md_escape(item['description']) or '-'} | "
+                          + f"[安装]({item['gitcode_url']}) | "
+                          + f"[备用]({item['github_url']}) |"
+                      )
+
+                  lines.append("")
+
+              lines.extend([
+                  f"共收录 **{len(items)}** 个脚本。",
+                  "",
+              ])
+
+
+          lines.append(AUTO_END)
+
+          auto_block = "\n".join(lines)
+
+          readme = README_PATH.read_text(
+              encoding="utf-8-sig"
+          )
+
+          if (
+              AUTO_START not in readme
+              or AUTO_END not in readme
+          ):
+              print(
+                  "错误：README 缺少自动维护标记："
+              )
+              print(AUTO_START)
+              print(AUTO_END)
+              sys.exit(1)
+
+          start = readme.index(AUTO_START)
+
+          end = (
+              readme.index(AUTO_END)
+              + len(AUTO_END)
+          )
+
+          updated = (
+              readme[:start].rstrip()
+              + "\n\n"
+              + auto_block
+              + "\n\n"
+              + readme[end:].lstrip()
+          )
+
+          README_PATH.write_text(
+              updated,
+              encoding="utf-8",
+              newline="\n"
+          )
+
+          print(
+              f"README 已根据 publish/ 中的 "
+              f"{len(items)} 个脚本更新。"
+          )
+          PY
+
+      - name: Commit README Changes
+        shell: bash
+        run: |
+          git config \
+            user.name \
+            "GitHub Actions"
+
+          git config \
+            user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add "${README_FILE}"
+
+          if git diff --cached --quiet; then
+            echo "README 无变化，无需提交。"
+            exit 0
+          fi
+
+          git commit \
+            -m "[auto-readme] 自动更新 Userscript 脚本清单"
+
+          git push \
+            origin \
+            "HEAD:${GITHUB_BRANCH}"
+
+          echo "README 自动更新完成。"

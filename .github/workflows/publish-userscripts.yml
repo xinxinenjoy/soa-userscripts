@@ -12,8 +12,7 @@ name: Publish Userscripts to GitCode
 # 6. 最终稳定地址统一为：
 #      publish/<publishGroup>/<publishID>.user.js
 # 7. @updateURL / @downloadURL 永远指向稳定 publish 地址
-# 8. README 自动维护
-# 9. GitHub 完整镜像到 GitCode
+# 8. GitHub 完整镜像到 GitCode
 # ============================================================
 
 env:
@@ -29,7 +28,6 @@ env:
 
   USERSCRIPT_AUTHOR: WanXin
 
-  README_FILE: README.md
 
   # Workflow 自动生成目录，请勿手工维护
   PUBLISH_DIR: publish
@@ -83,7 +81,7 @@ jobs:
           python3 -m pip install --disable-pip-version-check --quiet pypinyin
 
       # ========================================================
-      # 2. 维护源脚本 + 生成固定 publish 目录 + README
+      # 2. 维护源脚本 + 生成固定 publish 目录
       # ========================================================
       - name: Maintain and Build Userscripts
         shell: bash
@@ -192,10 +190,6 @@ jobs:
               r"^[A-Za-z0-9]"
               r"[A-Za-z0-9._-]{0,39}$"
           )
-
-          AUTO_START = "<!-- AUTO-USERSCRIPTS:START -->"
-          AUTO_END = "<!-- AUTO-USERSCRIPTS:END -->"
-
 
           def is_source_userscript(path: Path) -> bool:
               if not path.name.endswith(".user.js"):
@@ -775,111 +769,6 @@ jobs:
               )
 
 
-          # ====================================================
-          # README 自动脚本清单
-          # ====================================================
-          groups = {}
-
-          for info in prepared:
-              groups.setdefault(
-                  info["group"],
-                  []
-              ).append(info)
-
-          lines = [
-              AUTO_START,
-              "",
-              "## 📦 脚本清单",
-              "",
-              "> 本区域由 GitHub Actions 自动维护。"
-              "安装地址固定指向 `publish/`，"
-              "源文件改名或移动不会影响已安装脚本的更新。",
-              "",
-          ]
-
-          for group in sorted(groups):
-              lines.extend([
-                  f"### {md_escape(group)}",
-                  "",
-                  "| 脚本 | 版本 | 说明 | GitCode 安装 | GitHub 备用 |",
-                  "|---|---:|---|---|---|",
-              ])
-
-              for info in sorted(
-                  groups[group],
-                  key=lambda item: (
-                      item["name"].lower(),
-                      item["relative"].as_posix().lower()
-                  )
-              ):
-                  lines.append(
-                      "| "
-                      + f"**{md_escape(info['name'])}** | "
-                      + f"{md_escape(info['version'])} | "
-                      + f"{md_escape(info['description']) or '-'} | "
-                      + f"[安装]({info['gitcode_url']}) | "
-                      + f"[备用]({info['github_url']}) |"
-                  )
-
-              lines.append("")
-
-          lines.extend([
-              f"共收录 **{len(prepared)}** 个 Userscript。",
-              "",
-              AUTO_END,
-          ])
-
-          auto_block = "\n".join(
-              lines
-          )
-
-          if README_PATH.exists():
-              readme = README_PATH.read_text(
-                  encoding="utf-8-sig"
-              )
-          else:
-              readme = (
-                  "# WanXin Userscripts\n\n"
-                  "Tampermonkey / Userscript 脚本仓库。\n"
-              )
-
-          if (
-              AUTO_START in readme
-              and AUTO_END in readme
-          ):
-              start = readme.index(
-                  AUTO_START
-              )
-
-              end = (
-                  readme.index(
-                      AUTO_END
-                  )
-                  + len(AUTO_END)
-              )
-
-              readme = (
-                  readme[:start].rstrip()
-                  + "\n\n"
-                  + auto_block
-                  + "\n\n"
-                  + readme[end:].lstrip()
-              )
-
-          else:
-              readme = (
-                  readme.rstrip()
-                  + "\n\n---\n\n"
-                  + auto_block
-                  + "\n"
-              )
-
-          README_PATH.write_text(
-              readme,
-              encoding="utf-8",
-              newline="\n"
-          )
-
           print("")
           print(
               f"源脚本数量：{len(prepared)}"
@@ -920,7 +809,7 @@ jobs:
           fi
 
           git commit \
-            -m "[auto-userscript-maintenance] 固定分组发布地址并维护 README"
+            -m "[auto-userscript-maintenance] 固定分组发布地址"
 
           git push \
             origin \
