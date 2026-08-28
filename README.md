@@ -25,7 +25,25 @@
 
 <!-- AUTO-USERSCRIPTS:START -->
 
-> 暂无自动生成的脚本清单。运行发布 Workflow 后会自动更新。
+### hljdyxjb
+
+| 脚本 | 版本 | 说明 | GitCode 安装 | GitHub 备用 |
+|---|---:|---|---|---|
+| **CurseForge增强** | 4.1 | 测试一下内容看看会不会生效 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-curseforge.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/hljdyxjb/game-curseforge.user.js) |
+| **GOW底下尖塔** | 4.2.24 | 自动校准与购买建议；重点房间按数字顺序优先导航、F最后；主线与每个目标独立计算总火把；新增地图指引开关，关闭后恢复网页原始地图视觉并保留缩放与位移；主线路完成后显示全部未处理守卫 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-gowdxjt.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/hljdyxjb/game-gowdxjt.user.js) |
+
+### soaxg
+
+| 脚本 | 版本 | 说明 | GitCode 安装 | GitHub 备用 |
+|---|---:|---|---|---|
+| **SOA.1.1蝶美-单位信息填充** | 7.7.23 | 7.7.23更新测试2026年8月27日16:48:06 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-danweixinxi.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-danweixinxi.user.js) |
+| **SOA.1.2蝶美-套餐危害核对** | 4.2.12 | 统一列表核对与编辑弹窗的在岗状态识别，兼容状态后带性别、婚姻等说明。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-weihaihedui.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-weihaihedui.user.js) |
+| **SOA.2.1全局发票页面** | 6.13 | 6.13更新测试的 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-quanjufapiao.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-quanjufapiao.user.js) |
+| **SOA.2.2订单发票页面** | 1.5 | 仅用于 #/order/invoice 查看页：独立发票列表优化，不影响原合并开票脚本 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-dingdanfapiao.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-dingdanfapiao.user.js) |
+| **SOA.2.3首页排序模块** | 4.5 | 4-8列左对齐固定宽度网格 + 可调模块宽度/列间距 + 淡蓝悬浮高亮 + 网格槽位锁定拖拽 + 本地自动保存 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-shouyepaixu.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-shouyepaixu.user.js) |
+| **SOA.2.4前台批量模块** | 1.2 | 批量输入预约单号并回车，实时监听Ant Design提示；异常自动记录并跳过，完成后统一汇总 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-qiantaipiliang.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-qiantaipiliang.user.js) |
+
+共收录 **8** 个脚本。
 
 <!-- AUTO-USERSCRIPTS:END -->
 
