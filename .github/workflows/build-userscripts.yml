@@ -1,7 +1,7 @@
-name: Publish Userscripts to GitCode
+name: Build Userscripts
 
 # ============================================================
-# WanXin Userscripts 自动发布
+# WanXin Userscripts 自动构建
 #
 # 核心规则：
 # 1. GitHub main 是唯一开发源
@@ -12,7 +12,7 @@ name: Publish Userscripts to GitCode
 # 6. 最终稳定地址统一为：
 #      publish/<publishGroup>/<publishID>.user.js
 # 7. @updateURL / @downloadURL 永远指向稳定 publish 地址
-# 8. GitHub 完整镜像到 GitCode
+# 8. GitCode 同步由独立 Workflow 在 README 完成后执行
 # ============================================================
 
 env:
@@ -22,9 +22,6 @@ env:
   GITCODE_REPO: wanxin-userscripts
   GITCODE_BRANCH: main
 
-  # GitHub:
-  # Settings -> Secrets and variables -> Actions
-  GITCODE_SECRET_NAME: GITCODE_TOKEN
 
   USERSCRIPT_AUTHOR: WanXin
 
@@ -46,7 +43,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-userscripts-gitcode
+  group: build-userscripts
   cancel-in-progress: false
 
 jobs:
@@ -816,94 +813,3 @@ jobs:
             "HEAD:${GITHUB_BRANCH}"
 
           echo "GitHub 自动维护内容已提交。"
-
-      # ========================================================
-      # 3. 检查 GitCode Token
-      # ========================================================
-      - name: Check GitCode Secret
-        env:
-          GITCODE_TOKEN: ${{ secrets[env.GITCODE_SECRET_NAME] }}
-        shell: bash
-        run: |
-          if [ -z "${GITCODE_TOKEN}" ]; then
-            echo "错误：未读取到 GitCode Token"
-            echo "Secret 名称：${GITCODE_SECRET_NAME}"
-            exit 1
-          fi
-
-          echo "GitCode Token 已读取。"
-
-      - name: Configure GitCode Authentication
-        env:
-          GITCODE_TOKEN: ${{ secrets[env.GITCODE_SECRET_NAME] }}
-        shell: bash
-        run: |
-          cat > ~/.netrc <<EOF
-          machine gitcode.com
-          login ${GITCODE_OWNER}
-          password ${GITCODE_TOKEN}
-          EOF
-
-          chmod 600 ~/.netrc
-
-      # ========================================================
-      # 4. 克隆 GitCode
-      # ========================================================
-      - name: Clone GitCode
-        shell: bash
-        run: |
-          echo \
-            "GitCode：${GITCODE_OWNER}/${GITCODE_REPO}"
-
-          git clone \
-            --branch "${GITCODE_BRANCH}" \
-            "https://gitcode.com/${GITCODE_OWNER}/${GITCODE_REPO}.git" \
-            gitcode
-
-      # ========================================================
-      # 5. GitHub 完整镜像到 GitCode
-      # ========================================================
-      - name: Sync GitHub to GitCode
-        shell: bash
-        run: |
-          rsync -a --delete \
-            --exclude=".git/" \
-            source/ gitcode/
-
-      # ========================================================
-      # 6. 提交 GitCode
-      # ========================================================
-      - name: Commit and Push GitCode
-        shell: bash
-        run: |
-          cd gitcode
-
-          git config \
-            user.name \
-            "GitHub Actions"
-
-          git config \
-            user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add -A
-
-          if git diff --cached --quiet; then
-            echo "GitCode 内容无变化。"
-            exit 0
-          fi
-
-          SOURCE_SHA="$(
-            git -C ../source \
-            rev-parse \
-            --short HEAD
-          )"
-
-          git commit \
-            -m "Sync from GitHub ${SOURCE_SHA}"
-
-          git push \
-            origin \
-            "${GITCODE_BRANCH}"
-
-          echo "GitCode 同步完成。"

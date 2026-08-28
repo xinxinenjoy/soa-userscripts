@@ -1,0 +1,157 @@
+name: Sync Latest Repository to GitCode
+
+env:
+  GITHUB_BRANCH: main
+
+  GITCODE_OWNER: gcw_7DpHPfUr
+  GITCODE_REPO: wanxin-userscripts
+  GITCODE_BRANCH: main
+
+  GITCODE_SECRET_NAME: GITCODE_TOKEN
+
+on:
+  # README 完成以后才同步 GitCode。
+  # 这样 GitCode 收到的一定是已经生成完整脚本清单的最终仓库状态。
+  workflow_run:
+    workflows:
+      - "Update Userscripts README"
+    types:
+      - completed
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-latest-repository-gitcode
+  cancel-in-progress: true
+
+jobs:
+  sync-gitcode:
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        github.event.workflow_run.conclusion == 'success'
+      }}
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Latest Main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.GITHUB_BRANCH }}
+          fetch-depth: 0
+          path: source
+
+      - name: Show GitHub Source Commit
+        shell: bash
+        run: |
+          echo "即将同步到 GitCode 的 GitHub 最新提交："
+          git -C source log -1 --oneline
+
+          echo ""
+          echo "README 自动区块状态："
+
+          if grep -q '<!-- AUTO-USERSCRIPTS:START -->' source/README.md \
+            && grep -q '<!-- AUTO-USERSCRIPTS:END -->' source/README.md; then
+            echo "README 自动区块存在。"
+          else
+            echo "::error::README 缺少自动脚本清单标记。"
+            exit 1
+          fi
+
+          if grep -q '暂无自动生成的脚本清单' source/README.md; then
+            echo "::warning::README 仍包含初始占位文字，请检查 README Workflow。"
+          fi
+
+      - name: Check GitCode Secret
+        env:
+          GITCODE_TOKEN: ${{ secrets[env.GITCODE_SECRET_NAME] }}
+        shell: bash
+        run: |
+          if [ -z "${GITCODE_TOKEN}" ]; then
+            echo "::error::未读取到 GitCode Token：${GITCODE_SECRET_NAME}"
+            exit 1
+          fi
+
+          echo "GitCode Token 已读取。"
+
+      - name: Configure GitCode Authentication
+        env:
+          GITCODE_TOKEN: ${{ secrets[env.GITCODE_SECRET_NAME] }}
+        shell: bash
+        run: |
+          cat > ~/.netrc <<EOF
+          machine gitcode.com
+          login ${GITCODE_OWNER}
+          password ${GITCODE_TOKEN}
+          EOF
+
+          chmod 600 ~/.netrc
+
+      - name: Clone GitCode
+        shell: bash
+        run: |
+          git clone \
+            --branch "${GITCODE_BRANCH}" \
+            "https://gitcode.com/${GITCODE_OWNER}/${GITCODE_REPO}.git" \
+            gitcode
+
+      - name: Mirror Latest GitHub to GitCode
+        shell: bash
+        run: |
+          rsync -a --delete \
+            --exclude=".git/" \
+            source/ gitcode/
+
+      - name: Commit and Push GitCode
+        shell: bash
+        run: |
+          cd gitcode
+
+          git config \
+            user.name \
+            "GitHub Actions"
+
+          git config \
+            user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "GitCode 已经是最新状态，无需提交。"
+            exit 0
+          fi
+
+          SOURCE_SHA="$(
+            git -C ../source \
+            rev-parse \
+            --short HEAD
+          )"
+
+          git commit \
+            -m "Sync final GitHub state ${SOURCE_SHA}"
+
+          git push \
+            origin \
+            "${GITCODE_BRANCH}"
+
+          echo "GitCode 已同步 GitHub 最终状态。"
+
+      - name: Sync Summary
+        shell: bash
+        run: |
+          {
+            echo "## GitCode 最终同步"
+            echo
+            echo "✅ Userscript 构建完成"
+            echo
+            echo "✅ README 自动脚本清单完成"
+            echo
+            echo "✅ 最新 GitHub main 已同步至 GitCode"
+            echo
+            echo "GitHub 提交：\`$(git -C source rev-parse --short HEAD)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
