@@ -8,7 +8,7 @@
 // @grant        none
 
 // @author       WanXin
-// @publishID    gow-903764c1
+// @publishID    game-gowdxjt
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/gow-903764c1.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/gow-903764c1.user.js
 // ==/UserScript==

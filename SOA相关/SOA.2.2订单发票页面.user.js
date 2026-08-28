@@ -8,7 +8,7 @@
 // @grant        none
 
 // @author       WanXin
-// @publishID    soa-2-2-86186873
+// @publishID    soa-dingdanfapiao
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soa-2-2-86186873.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soa-2-2-86186873.user.js
 // ==/UserScript==

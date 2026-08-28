@@ -9,7 +9,7 @@
 // @run-at       document-idle
 
 // @author       WanXin
-// @publishID    soa-2-4-3c5f5ba7
+// @publishID    soa-qiantaipiliang
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soa-2-4-3c5f5ba7.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soa-2-4-3c5f5ba7.user.js
 // ==/UserScript==

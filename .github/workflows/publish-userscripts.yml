@@ -6,13 +6,14 @@ name: Publish Userscripts to GitCode
 # 核心规则：
 # 1. GitHub main 是唯一开发源
 # 2. 源脚本可以放在任意目录、任意改名
-# 3. 每个脚本通过 @publishID 获得永久发布地址
-# 4. 没有 @publishID 时，首次运行自动生成并写回源脚本
-# 5. 最终稳定地址统一为：
-#      publish/<publishID>.user.js
-# 6. @updateURL / @downloadURL 永远指向稳定 publish 地址
-# 7. README 自动维护
-# 8. GitHub 完整镜像到 GitCode
+# 3. 每个脚本通过 @publishGroup + @publishID 获得永久发布地址
+# 4. 没有 @publishGroup 时，根据源一级目录自动生成拼音简称并写回
+# 5. 没有 @publishID 时，首次运行自动生成并写回源脚本
+# 6. 最终稳定地址统一为：
+#      publish/<publishGroup>/<publishID>.user.js
+# 7. @updateURL / @downloadURL 永远指向稳定 publish 地址
+# 8. README 自动维护
+# 9. GitHub 完整镜像到 GitCode
 # ============================================================
 
 env:
@@ -74,7 +75,15 @@ jobs:
           path: source
 
       # ========================================================
-      # 1. 维护源脚本 + 生成固定 publish 目录 + README
+      # 1. 准备中文目录转拼音简称所需依赖
+      # ========================================================
+      - name: Install Pinyin Dependency
+        shell: bash
+        run: |
+          python3 -m pip install --disable-pip-version-check --quiet pypinyin
+
+      # ========================================================
+      # 2. 维护源脚本 + 生成固定 publish 目录 + README
       # ========================================================
       - name: Maintain and Build Userscripts
         shell: bash
@@ -88,6 +97,8 @@ jobs:
           import shutil
           import sys
           import unicodedata
+
+          from pypinyin import Style, lazy_pinyin
 
           ROOT = Path("source")
           README_PATH = ROOT / os.environ.get(
@@ -158,6 +169,10 @@ jobs:
                   r"(?m)^[ \t]*//[ \t]*@publishID"
                   r"(?:[ \t]+([^\r\n]*))?[ \t]*$"
               ),
+              "publishGroup": re.compile(
+                  r"(?m)^[ \t]*//[ \t]*@publishGroup"
+                  r"(?:[ \t]+([^\r\n]*))?[ \t]*$"
+              ),
               "updateURL": re.compile(
                   r"(?m)^[ \t]*//[ \t]*@updateURL"
                   r"(?:[ \t]+([^\r\n]*))?[ \t]*$"
@@ -171,6 +186,11 @@ jobs:
           PUBLISH_ID_RE = re.compile(
               r"^[A-Za-z0-9]"
               r"[A-Za-z0-9._-]{0,79}$"
+          )
+
+          PUBLISH_GROUP_RE = re.compile(
+              r"^[A-Za-z0-9]"
+              r"[A-Za-z0-9._-]{0,39}$"
           )
 
           AUTO_START = "<!-- AUTO-USERSCRIPTS:START -->"
@@ -306,34 +326,106 @@ jobs:
               return f"{slug}-{digest}"
 
 
+          def make_auto_publish_group(relative: Path) -> str:
+              """
+              根据源文件一级目录生成稳定发布分类。
+
+              规则：
+              - 根目录脚本 -> root
+              - 纯英文/数字目录 -> 转小写短横线
+              - 含中文 -> 中文使用拼音首字母，英文数字原样保留
+
+              示例：
+                SOA相关        -> soaxg
+                青龙脚本       -> qljb
+                游戏相关       -> yxxg
+                tools         -> tools
+
+              生成后会写回 @publishGroup，
+              后续即使源文件移动目录也不会变化。
+              """
+              if len(relative.parts) <= 1:
+                  return "root"
+
+              raw = relative.parts[0].strip()
+
+              pieces = []
+
+              for char in raw:
+                  if char.isascii() and char.isalnum():
+                      pieces.append(char.lower())
+                      continue
+
+                  if char in "._-":
+                      pieces.append("-")
+                      continue
+
+                  if "\u4e00" <= char <= "\u9fff":
+                      initials = lazy_pinyin(
+                          char,
+                          style=Style.FIRST_LETTER,
+                          strict=False
+                      )
+
+                      if initials and initials[0]:
+                          pieces.append(
+                              initials[0][0].lower()
+                          )
+
+              group = "".join(pieces)
+
+              group = re.sub(
+                  r"[^a-z0-9._-]+",
+                  "-",
+                  group
+              )
+
+              group = re.sub(
+                  r"-+",
+                  "-",
+                  group
+              ).strip("-._")
+
+              if not group:
+                  group = "group"
+
+              return group[:40].rstrip("-._") or "group"
+
+
           def encoded_publish_path(
+              publish_group: str,
               publish_id: str
           ) -> str:
               filename = f"{publish_id}.user.js"
 
               return (
                   f"{quote(PUBLISH_DIR, safe='._-')}/"
+                  f"{quote(publish_group, safe='._-')}/"
                   f"{quote(filename, safe='._-')}"
               )
 
 
           def build_gitcode_url(
+              publish_group: str,
               publish_id: str
           ) -> str:
               return (
                   GITCODE_RAW_BASE
                   + encoded_publish_path(
+                      publish_group,
                       publish_id
                   )
               )
 
 
           def build_github_url(
+              publish_group: str,
               publish_id: str
           ) -> str:
               return (
                   GITHUB_RAW_BASE
                   + encoded_publish_path(
+                      publish_group,
                       publish_id
                   )
               )
@@ -342,6 +434,7 @@ jobs:
           prepared = []
           errors = []
           used_ids = {}
+          used_publish_paths = {}
 
 
           for path in scripts:
@@ -411,6 +504,45 @@ jobs:
                   )
                   auto_created = True
 
+              group_values = (
+                  original_meta.get(
+                      "publishGroup"
+                  )
+                  or []
+              )
+
+              if len(group_values) > 1:
+                  errors.append(
+                      f"{relative}: "
+                      "发现多个 @publishGroup，请只保留一个。"
+                  )
+                  continue
+
+              publish_group = (
+                  group_values[0].strip()
+                  if group_values
+                  else ""
+              )
+
+              group_auto_created = False
+
+              if not publish_group:
+                  publish_group = make_auto_publish_group(
+                      relative
+                  )
+                  group_auto_created = True
+
+              if not PUBLISH_GROUP_RE.fullmatch(
+                  publish_group
+              ):
+                  errors.append(
+                      f"{relative}: "
+                      f"@publishGroup '{publish_group}' 不合法。"
+                      "只允许英文字母、数字、点、横线、下划线，"
+                      "长度 1-40。"
+                  )
+                  continue
+
               if not PUBLISH_ID_RE.fullmatch(
                   publish_id
               ):
@@ -434,17 +566,53 @@ jobs:
 
               used_ids[key] = relative
 
+              publish_relative = (
+                  Path(PUBLISH_DIR)
+                  / publish_group
+                  / f"{publish_id}.user.js"
+              )
+
+              publish_path_key = (
+                  publish_relative
+                  .as_posix()
+                  .lower()
+              )
+
+              if publish_path_key in used_publish_paths:
+                  errors.append(
+                      "最终发布路径重复："
+                      f"'{publish_relative.as_posix()}'\n"
+                      f"  - {used_publish_paths[publish_path_key]}\n"
+                      f"  - {relative}"
+                  )
+                  continue
+
+              used_publish_paths[publish_path_key] = relative
+
               expected_url = build_gitcode_url(
+                  publish_group,
                   publish_id
               )
 
               github_backup_url = build_github_url(
+                  publish_group,
                   publish_id
               )
 
               print("")
               print(f"检查：{relative}")
+              print(f"publishGroup：{publish_group}")
               print(f"publishID：{publish_id}")
+
+              if group_auto_created:
+                  print(
+                      "  @publishGroup: 缺失，"
+                      "已根据一级目录生成拼音简称并永久写入"
+                  )
+              else:
+                  print(
+                      "  @publishGroup: 已存在，保持不变"
+                  )
 
               if auto_created:
                   print(
@@ -464,6 +632,7 @@ jobs:
 
               for tag in (
                   "author",
+                  "publishGroup",
                   "publishID",
                   "updateURL",
                   "downloadURL",
@@ -493,6 +662,8 @@ jobs:
               canonical = (
                   f"// @author       "
                   f"{USERSCRIPT_AUTHOR}\n"
+                  f"// @publishGroup "
+                  f"{publish_group}\n"
                   f"// @publishID    "
                   f"{publish_id}\n"
                   f"// @updateURL    "
@@ -521,9 +692,11 @@ jobs:
                   "source_path": path,
                   "relative": relative,
                   "text": new_text,
+                  "publish_group": publish_group,
                   "publish_id": publish_id,
                   "publish_path": (
                       PUBLISH_ROOT
+                      / publish_group
                       / f"{publish_id}.user.js"
                   ),
                   "name": first(
@@ -548,11 +721,7 @@ jobs:
                   ),
                   "gitcode_url": expected_url,
                   "github_url": github_backup_url,
-                  "group": (
-                      relative.parts[0]
-                      if len(relative.parts) > 1
-                      else "根目录"
-                  ),
+                  "group": publish_group,
               })
 
 
@@ -594,6 +763,11 @@ jobs:
           )
 
           for info in prepared:
+              info["publish_path"].parent.mkdir(
+                  parents=True,
+                  exist_ok=True
+              )
+
               info["publish_path"].write_text(
                   info["text"],
                   encoding="utf-8",
@@ -746,7 +920,7 @@ jobs:
           fi
 
           git commit \
-            -m "[auto-userscript-maintenance] 固定发布地址并维护 README"
+            -m "[auto-userscript-maintenance] 固定分组发布地址并维护 README"
 
           git push \
             origin \
