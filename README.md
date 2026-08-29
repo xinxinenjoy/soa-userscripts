@@ -29,19 +29,19 @@
 
 | 脚本 | 版本 | 说明 | GitCode 安装 | GitHub 备用 |
 |---|---:|---|---|---|
-| **SOA.1.1蝶美-单位信息填充** | 7.7.23 | 自动填充单位信息，支持地区、行业、经济类型、单位类型、社会信用代码、企业规模、职工人数、接害人数等字段。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-danweixinxi.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-danweixinxi.user.js) |
-| **SOA.1.2蝶美-套餐危害核对** | 4.2.12 | 增强“套餐危害核对”功能，提供自动化核对、批量处理、用户自定义别名和忽略列表等功能。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-weihaihedui.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-weihaihedui.user.js) |
-| **SOA.2.1全局发票页面** | 6.13 | 优化SOA发票页面的表格布局、文案显示和复制功能，支持动态加载内容的处理。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-quanjufapiao.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-quanjufapiao.user.js) |
-| **SOA.2.2订单发票页面** | 1.5 | SOA订单发票列表页面增强：列重排、宽度调整、文案替换、复制优化。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-dingdanfapiao.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-dingdanfapiao.user.js) |
-| **SOA.2.3首页排序模块** | 4.5 | SOA首页模块排序，支持拖拽排序、保存顺序、恢复默认顺序、设置每行显示列数、设置模块宽度、设置列间距。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-shouyepaixu.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-shouyepaixu.user.js) |
-| **SOA.2.4前台批量模块** | 1.2 | 批量预约单号，自动提交并等待结果，支持异常记录和跳过。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-qiantaipiliang.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-qiantaipiliang.user.js) |
+| **SOA.1.1蝶美-单位信息填充** | 7.7.24 | 自动填充单位信息，支持地区、行业、经济类型、单位类型、社会信用代码、企业规模、职工人数、接害人数等字段。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-danweixinxi.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-danweixinxi.user.js) |
+| **SOA.1.2蝶美-套餐危害核对** | 4.2.13 | 增强“套餐危害核对”功能，提供自动化核对、批量处理、用户自定义别名和忽略列表等功能。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-weihaihedui.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-weihaihedui.user.js) |
+| **SOA.2.1全局发票页面** | 6.14 | 优化SOA发票页面的表格布局、文案显示和复制功能，支持动态加载内容的处理。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-quanjufapiao.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-quanjufapiao.user.js) |
+| **SOA.2.2订单发票页面** | 1.6 | SOA订单发票列表页面增强：列重排、宽度调整、文案替换、复制优化。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-dingdanfapiao.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-dingdanfapiao.user.js) |
+| **SOA.2.3首页排序模块** | 4.6 | SOA首页模块排序，支持拖拽排序、保存顺序、恢复默认顺序、设置每行显示列数、设置模块宽度、设置列间距。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-shouyepaixu.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-shouyepaixu.user.js) |
+| **SOA.2.4前台批量模块** | 1.3 | 批量预约单号，自动提交并等待结果，支持异常记录和跳过。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-qiantaipiliang.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-qiantaipiliang.user.js) |
 
 ### 红领巾的游戏脚本
 
 | 脚本 | 版本 | 说明 | GitCode 安装 | GitHub 备用 |
 |---|---:|---|---|---|
-| **CurseForge增强** | 4.1 | 增强CurseForge网站的中文显示，翻译部分英文为中文，支持动态加载内容的翻译。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-curseforge.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/hljdyxjb/game-curseforge.user.js) |
-| **GOW底下尖塔** | 4.2.24 | GOW底下尖塔火把管理与节点同步工具 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-gowdxjt.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/hljdyxjb/game-gowdxjt.user.js) |
+| **CurseForge增强** | 4.2 | 增强CurseForge网站的中文显示，翻译部分英文为中文，支持动态加载内容的翻译。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-curseforge.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/hljdyxjb/game-curseforge.user.js) |
+| **GOW底下尖塔** | 4.2.25 | GOW底下尖塔火把管理与节点同步工具 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-gowdxjt.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/hljdyxjb/game-gowdxjt.user.js) |
 
 共收录 **8** 个脚本。
 
