@@ -2,7 +2,7 @@
 // @name         SOA.2.1全局发票页面
 // @namespace    https://tampermonkey.net/
 // @version      6.13
-// @description  6.13更新测试的
+// @description  优化SOA发票页面的表格布局、文案显示和复制功能，支持动态加载内容的处理。
 
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
@@ -13,6 +13,14 @@
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-quanjufapiao.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-quanjufapiao.user.js
 // ==/UserScript==
+
+/*
+ * 更新记录
+ *
+ * v6.13  -  2026-8-29
+ * - 更新：测试版本
+ *
+ */
 
 (function () {
   "use strict";

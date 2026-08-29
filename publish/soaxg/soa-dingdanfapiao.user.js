@@ -2,7 +2,7 @@
 // @name         SOA.2.2订单发票页面
 // @namespace    https://tampermonkey.net/soa-order-invoice/
 // @version      1.5
-// @description  仅用于 #/order/invoice 查看页：独立发票列表优化，不影响原合并开票脚本
+// @description  SOA订单发票列表页面增强：列重排、宽度调整、文案替换、复制优化。
 
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
@@ -13,6 +13,14 @@
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-dingdanfapiao.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-dingdanfapiao.user.js
 // ==/UserScript==
+
+/*
+ * 更新记录
+ *
+ * v1.5  -  2026-8-29
+ * - 更新：测试版本
+ *
+ */
 
 (function () {
   "use strict";

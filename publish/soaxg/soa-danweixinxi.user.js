@@ -2,12 +2,13 @@
 // @name         SOA.1.1蝶美-单位信息填充
 // @namespace    https://dime.health-100.cn/
 // @version      7.7.23
-// @description  7.7.23更新测试2026年8月27日16:48:06
-
+// @description  自动填充单位信息，支持地区、行业、经济类型、单位类型、社会信用代码、企业规模、职工人数、接害人数等字段。
+//
 // @match        https://dime.health-100.cn/*
 // @run-at       document-idle
 // @grant        none
 // @noframes
+//
 
 // @author       WanXin
 // @publishGroup soaxg
@@ -15,6 +16,14 @@
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-danweixinxi.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-danweixinxi.user.js
 // ==/UserScript==
+
+/*
+ * 更新记录
+ *
+ * v7.7.23  -  2026-8-29
+ * - 更新：测试版本
+ *
+ */
 
 (async function () {
   const TOOL_ID = "dime-company-auto-fill-tool-v7-7";
