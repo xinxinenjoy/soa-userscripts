@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOA.1.2蝶美-套餐危害核对
 // @namespace    https://dime.health-100.cn/
-// @version      4.2.13
+// @version      4.2.15
 // @description  增强“套餐危害核对”功能，提供自动化核对、批量处理、用户自定义别名和忽略列表等功能。
 
 // @match        https://dime.health-100.cn/*
@@ -19,16 +19,24 @@
 /*
  * 更新记录
  *
- * v4.2.12  -  2026-8-29
- * - 更新了
+ * v4.2.15  -  2026-8-29
+ * - 优化：所有危害自动补齐在真正写入搜索框前，统一先解析映射关系；存在映射时始终使用映射后的标准危害名称进行搜索和选择。
+ * - 优化：该规则同时适用于内置别名和用户自行保存的匹配规则，不再需要针对名称顺序、简称等差异逐个修改补齐逻辑。
+ *
+ * v4.2.14  -  2026-8-29
+ * - 修复：“酸酐或酸雾”与系统实际危害名称“酸雾或酸酐”顺序不一致时，映射规则无法生效、自动补齐仍按旧名称搜索的问题。
+ * - 优化：将系统真实危害名称“酸雾或酸酐”纳入标准危害库；套餐中的“酸酐或酸雾”通过既有别名规则统一映射后参与核对和补齐。
  *
  */
 
 (function () {
   "use strict";
 
-  const GLOBAL_KEY = "__DIME_HAZARD_PACKAGE_CHECKER_V4212__";
+  const GLOBAL_KEY = "__DIME_HAZARD_PACKAGE_CHECKER_V4215__";
   [
+    "__DIME_HAZARD_PACKAGE_CHECKER_V4215__",
+    "__DIME_HAZARD_PACKAGE_CHECKER_V4214__",
+    "__DIME_HAZARD_PACKAGE_CHECKER_V4213__",
     "__DIME_HAZARD_PACKAGE_CHECKER_V4212__",
     "__DIME_HAZARD_PACKAGE_CHECKER_V4211__",
     "__DIME_HAZARD_PACKAGE_CHECKER_V4210__",
@@ -668,7 +676,7 @@
   "四溴化碳",
   "四乙基铅（按 Pb 计）",
   "松节油",
-  "酸酐或酸雾",
+  "酸雾或酸酐",
   "铊及其可溶性化合物（按 Tl 计）",
   "钽及其化合物",
   "钽及其氧化物（按 Ta 计）",
@@ -909,7 +917,9 @@
       "氯气": "氯，氯气",
       "六氯环己烷": "六六六（六氯环已烷）",
       "钼及其化合物": "钼及其化合物（按 Mo 计）",
-      "大理石粉尘": "大理石粉尘 （碳酸钙）"
+      "大理石粉尘": "大理石粉尘 （碳酸钙）",
+      "锰及其无机化合物": "锰及其无机化合物（按 MnO2 计）",
+      "乙酐": "乙酐（乙酸酐）",
     },
 
     // 默认排除项：仍会在“无关内容”模块中保留记录，便于复核。
@@ -1150,6 +1160,19 @@
     }
 
     return null;
+  }
+
+  function getAutofillHazardName(value) {
+    const raw = cleanText(value);
+    if (!raw) return "";
+
+    const resolved =
+      resolveCanonical(raw);
+
+    return cleanText(
+      resolved?.canonical ||
+      raw
+    );
   }
 
   function matchHazards(left, right) {
@@ -3135,7 +3158,7 @@
   tool.id = TOOL_ID;
   tool.innerHTML = `
     <div class="tool-header">
-      <strong>套餐危害因素核对工具 v4.2.12</strong>
+      <strong>套餐危害因素核对工具 v4.2.15</strong>
       <div class="tool-header-actions">
         <button class="tool-header-button tool-collapse" type="button" title="折叠工具">−</button>
         <button class="tool-header-button tool-close" type="button" title="收起到快捷按钮">×</button>
@@ -5997,13 +6020,57 @@
 
 
   async function selectOneHazard(dialog, name, updateStep) {
-    if (isHazardAlreadySelected(dialog, name)) return { status: "skipped", name };
+    const originalName =
+      cleanText(name);
 
-    const context = getHazardSelectContext(dialog);
+    const searchName =
+      getAutofillHazardName(
+        originalName
+      );
 
-    updateStep?.(`步骤 1/3：输入危害并触发搜索\n${name}`);
+    if (!searchName) {
+      throw new Error(
+        "危害名称为空，无法执行自动补齐"
+      );
+    }
+
+    if (
+      isHazardAlreadySelected(
+        dialog,
+        searchName
+      )
+    ) {
+      return {
+        status: "skipped",
+        name: searchName
+      };
+    }
+
+    const context =
+      getHazardSelectContext(dialog);
+
+    updateStep?.(
+      originalName &&
+      strictKey(originalName) !==
+        strictKey(searchName)
+        ? (
+            "步骤 1/3：按映射后的标准名称搜索\n" +
+            `${originalName} → ${searchName}`
+          )
+        : (
+            "步骤 1/3：输入危害并触发搜索\n" +
+            searchName
+          )
+    );
+
     await activateHazardSearch(context);
-    await insertSearchText(context, name, dialog);
+
+    // 所有实际输入统一使用映射后的标准危害名称。
+    await insertSearchText(
+      context,
+      searchName,
+      dialog
+    );
 
     let selected = false;
 
@@ -6014,54 +6081,54 @@
       selected = await selectTreeselectByOwnEnterHandler(
         dialog,
         context,
-        name,
+        searchName,
         updateStep
       );
     } else {
-      const dropdown = await openDropdownAfterTyping(context, name);
+      const dropdown = await openDropdownAfterTyping(context, searchName);
       await waitUntil(
         () => getSelectableOptions(dropdown).length,
         4500,
         60,
-        `“${name}”搜索结果出现`
+        `“${searchName}”搜索结果出现`
       );
 
       const matchedOption = getSelectableOptions(dropdown).find(option =>
-        matchHazards(name, getOptionText(option)).matched
+        matchHazards(searchName, getOptionText(option)).matched
       );
 
       if (!matchedOption) {
         setNativeInputValue(context.input, "", "deleteContentBackward");
-        throw new Error(`搜索结果中没有找到“${name}”`);
+        throw new Error(`搜索结果中没有找到“${searchName}”`);
       }
 
-      updateStep?.(`正在点击搜索结果\n${name}`);
+      updateStep?.(`正在点击搜索结果\n${searchName}`);
       clickHazardOption(matchedOption);
       selected = await waitForHazardSelected(
         dialog,
-        name,
+        searchName,
         AUTOFILL_TIMING.selectionTimeout
       );
     }
 
     if (!selected) {
       throw new Error(
-        `已执行精确候选定位并按 Enter，但未确认“${name}”被选中`
+        `已执行精确候选定位并按 Enter，但未确认“${searchName}”被选中`
       );
     }
 
     // 标签生成和搜索框清空后，再确认该标签持续稳定存在，
     // 避免界面已显示但 Vue 表单模型尚未完成同步。
-    await waitForNextHazardReady(dialog, name);
+    await waitForNextHazardReady(dialog, searchName);
     await waitForDialogRequirementsStable(
       dialog,
-      [name],
+      [searchName],
       "",
       BATCH_RELIABILITY.selectionStableMs,
       6500
     );
 
-    return { status: "selected", name };
+    return { status: "selected", name: searchName };
   }
 
   function getDialogStageSelectContext(dialog) {
@@ -8498,5 +8565,5 @@
     hideToolPanel();
     enhanceVisibleEditDialogs();
   });
-  console.log("套餐危害因素核对工具 v4.2.12 在岗识别统一版 已加载。");
+  console.log("套餐危害因素核对工具 v4.2.15 已加载。");
 })();
