@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOA.2.3首页排序模块
 // @namespace    https://tampermonkey.net/
-// @version      4.5
+// @version      4.6
 // @description  SOA首页模块排序，支持拖拽排序、保存顺序、恢复默认顺序、设置每行显示列数、设置模块宽度、设置列间距。
 
 // @match        *://*home.health-100.cn/*

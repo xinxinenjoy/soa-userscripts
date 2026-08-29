@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOA.1.2蝶美-套餐危害核对
 // @namespace    https://dime.health-100.cn/
-// @version      4.2.12
+// @version      4.2.13
 // @description  增强“套餐危害核对”功能，提供自动化核对、批量处理、用户自定义别名和忽略列表等功能。
 
 // @match        https://dime.health-100.cn/*

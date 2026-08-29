@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOA.2.4前台批量模块
 // @namespace    https://tampermonkey.net/
-// @version      1.2
+// @version      1.3
 // @description  批量预约单号，自动提交并等待结果，支持异常记录和跳过。
 
 // @match        *://checkup-register.health-100.cn/group/register*

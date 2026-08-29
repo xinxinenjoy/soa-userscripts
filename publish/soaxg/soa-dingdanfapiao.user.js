@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOA.2.2订单发票页面
 // @namespace    https://tampermonkey.net/soa-order-invoice/
-// @version      1.5
+// @version      1.6
 // @description  SOA订单发票列表页面增强：列重排、宽度调整、文案替换、复制优化。
 
 // @match        https://checkup-soa3.health-100.cn/*
