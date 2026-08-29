@@ -9,7 +9,7 @@
 
 // @author       WanXin
 // @publishGroup soaxg
-// @publishID    soa-2-5-dd044a15
+// @publishID    soa-dingdanauto
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-2-5-dd044a15.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-2-5-dd044a15.user.js
 // ==/UserScript==
