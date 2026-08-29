@@ -35,6 +35,7 @@
 | **SOA.2.2订单发票页面** | 1.6 | SOA订单发票列表页面增强：列重排、宽度调整、文案替换、复制优化。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-dingdanfapiao.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-dingdanfapiao.user.js) |
 | **SOA.2.3首页排序模块** | 4.6 | SOA首页模块排序，支持拖拽排序、保存顺序、恢复默认顺序、设置每行显示列数、设置模块宽度、设置列间距。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-shouyepaixu.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-shouyepaixu.user.js) |
 | **SOA.2.4前台批量模块** | 1.15 | 批量预约单号；支持SPA常驻、14位预约单号智能提取、可调宽度窗口及“已到检”首次查询自动仅当日。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-qiantaipiliang.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-qiantaipiliang.user.js) |
+| **SOA.2.5订单流程自动化** | 1.5 | SOA订单流程自动化：内勤复核、合同补充、发起落单、落单审核、落单完成及数据提取；支持文件绑定、异常等待和流程状态判定。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-2-5-dd044a15.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-2-5-dd044a15.user.js) |
 
 ### 红领巾的游戏脚本
 
@@ -43,7 +44,7 @@
 | **CurseForge增强** | 4.2 | 增强CurseForge网站的中文显示，翻译部分英文为中文，支持动态加载内容的翻译。 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-curseforge.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/hljdyxjb/game-curseforge.user.js) |
 | **GOW底下尖塔** | 4.2.25 | GOW底下尖塔火把管理与节点同步工具 | [安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-gowdxjt.user.js) | [备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/hljdyxjb/game-gowdxjt.user.js) |
 
-共收录 **8** 个脚本。
+共收录 **9** 个脚本。
 
 <!-- AUTO-USERSCRIPTS:END -->
 
