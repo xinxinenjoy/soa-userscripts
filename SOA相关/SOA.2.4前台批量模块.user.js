@@ -1,14 +1,12 @@
 // ==UserScript==
 // @name         SOA.2.4前台批量模块
 // @namespace    https://tampermonkey.net/
-// @version      1.4
-// @description  批量预约单号，自动提交并等待结果，支持异常记录和跳过；兼容SPA页面切换并将工具按钮固定在预约单号输入框右侧。
+// @version      1.12
+// @description  批量预约单号；支持SPA常驻、14位预约单号智能提取、可调宽度窗口及自动避让定位。
 
-// @match        *://checkup-register.health-100.cn/register_list*
-// @match        *://checkup-register.health-100.cn/group/register*
-// @match        *://checkup-register.health-100.cn/group/submit*
+// @match        *://checkup-register.health-100.cn/*
 // @grant        none
-// @run-at       document-idle
+// @run-at       document-start
 
 // @author       WanXin
 // @publishGroup soaxg
@@ -20,19 +18,30 @@
 /*
  * 更新记录
  *
- * v1.4  -  2026-8-29
- * - 优化：增加 /register_list 初始页匹配，脚本可在单页应用首次打开时提前加载。
- * - 优化：自动识别 /group/register 与 /group/submit 页面，SPA 内部切换后无需 F5 刷新即可显示工具。
- * - 优化：批量预约按钮取消自由悬浮拖动，固定显示在预约单号输入框 #vid 的右侧并自动跟随页面布局。
- * - 优化：离开可用页面时自动隐藏工具；进入可用页面后自动恢复，不影响原批量预约处理逻辑。
+ * v1.12  -  2026-8-29
+ * - 优化：工具按钮改为以预约单号输入框 #vid 右侧为起点自动寻找空位，避免覆盖页面已有按钮、菜单和表单元素。
+ * - 优化：如果当前位置发生遮挡，工具会按固定步长继续向右偏移，优先选择第一个安全位置。
+ * - 保留：14位预约单号智能提取、窗口宽度拖动记忆、SPA常驻、批量预约及异常处理等功能不变。
  *
- * v1.2  -  2026-8-29
- * - 更新：测试版本
+ * v1.11  -  2026-8-29
+ * - 优化：重写工具窗口使用说明，突出“粘贴 → 自动提取 → 开始运行 → 查看结果”的操作流程。
  *
+ * v1.10  -  2026-8-29
+ * - 修复：从每行内容中提取独立的连续14位预约单号，自动忽略前后文字、空格和符号。
+ * - 修复：不会从15位及以上连续数字中误截取14位。
  */
 
 (function () {
   "use strict";
+
+  const INSTANCE_KEY =
+    "__SOA_BATCH_BOOKING_V18__";
+
+  if (window[INSTANCE_KEY]) {
+    return;
+  }
+
+  window[INSTANCE_KEY] = true;
 
   /* =========================================================
    * 1. 配置
@@ -41,16 +50,24 @@
   const CONFIG = {
     INPUT_SELECTOR: "#vid",
     LIST_SELECTOR: ".appointment-card .ant-table-tbody",
+
+    // 工具按钮定位：从 #vid 右侧开始自动向右寻找不遮挡页面元素的位置
+    BUTTON_START_GAP: 12,
+    BUTTON_SEARCH_STEP: 36,
+    BUTTON_MAX_SHIFT: 900,
+    BUTTON_SAFE_GAP: 8,
+
     BUTTON_POS_KEY: "__soa_batch_booking_button_pos_v11",
 
-    // SPA 页面：脚本会在初始列表页提前加载，
-    // 仅在以下两个业务页面显示工具。
-    ACTIVE_PATHS: [
-      "/group/register",
-      "/group/submit"
-    ],
+    // 批量窗口宽度与记忆
+    PANEL_WIDTH_KEY: "__soa_batch_booking_panel_width_v19",
+    PANEL_DEFAULT_WIDTH: 640,
+    PANEL_MIN_WIDTH: 480,
+    PANEL_MAX_WIDTH: 920,
 
-    // 按钮与预约单号输入框右侧的间距。
+    // 工具是否显示只判断预约单号输入框 #vid。
+    // SPA 页面切换后无需依赖 URL，也无需刷新页面。
+    // 输入框出现且可见 -> 显示；输入框不存在 -> 隐藏。
     BUTTON_GAP: 10,
 
     // 单次提交后等待预约号出现在“预约列表”的最长时间
@@ -75,6 +92,7 @@
     panel: "__soa_batch_fill_panel",
     textarea: "__soa_batch_fill_textarea",
     count: "__soa_batch_fill_count",
+    parseDetail: "__soa_batch_fill_parse_detail",
     progress: "__soa_batch_fill_progress",
     status: "__soa_batch_fill_status",
     log: "__soa_batch_fill_log",
@@ -85,6 +103,7 @@
     stop: "__soa_batch_fill_stop",
     skip: "__soa_batch_fill_skip",
     close: "__soa_batch_fill_close",
+    resizeHandle: "__soa_batch_fill_resize_handle",
     style: "__soa_batch_fill_style"
   };
 
@@ -161,6 +180,80 @@
       !input.disabled &&
       !input.readOnly &&
       isVisible(input)
+    );
+  }
+
+  function rectsOverlap(a, b, gap = 0) {
+    return !(
+      a.right + gap <= b.left ||
+      a.left >= b.right + gap ||
+      a.bottom + gap <= b.top ||
+      a.top >= b.bottom + gap
+    );
+  }
+
+  function getBlockingElements(button) {
+    const selectors = [
+      "button",
+      "input",
+      "select",
+      "textarea",
+      ".ant-btn",
+      ".ant-select",
+      ".ant-dropdown",
+      ".ant-dropdown-menu",
+      ".ant-popover",
+      ".ant-tooltip",
+      ".ant-modal",
+      ".ant-picker",
+      ".ant-cascader-picker"
+    ];
+
+    return Array.from(
+      document.querySelectorAll(
+        selectors.join(",")
+      )
+    ).filter(el => {
+      if (
+        !el ||
+        el === button ||
+        el.closest?.(`#${IDS.panel}`) ||
+        el.id === IDS.button ||
+        !isVisible(el)
+      ) {
+        return false;
+      }
+
+      const rect =
+        el.getBoundingClientRect();
+
+      return (
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    });
+  }
+
+  function positionIsSafe(
+    left,
+    top,
+    width,
+    height,
+    blockers
+  ) {
+    const candidate = {
+      left,
+      top,
+      right: left + width,
+      bottom: top + height
+    };
+
+    return !blockers.some(el =>
+      rectsOverlap(
+        candidate,
+        el.getBoundingClientRect(),
+        CONFIG.BUTTON_SAFE_GAP
+      )
     );
   }
 
@@ -895,27 +988,93 @@
    * 9. 输入解析
    * ========================================================= */
 
-  function parseCodes(text) {
-    const raw =
+  function extractBookingCode(line) {
+    const text =
+      String(line || "");
+
+    /*
+     * 提取“独立的连续14位数字”：
+     * - 前后可以是文字、空格、标点或其他非数字字符；
+     * - 如果14位数字前后紧邻数字，则说明它属于更长数字串，不提取。
+     *
+     * 不使用 lookbehind，兼容性更稳。
+     */
+    const match =
+      text.match(
+        /(?:^|\D)(\d{14})(?!\d)/
+      );
+
+    return match
+      ? match[1]
+      : "";
+  }
+
+  function analyzeCodes(text) {
+    const lines =
       String(text || "")
-        .split(/\r?\n/)
-        .map(v => v.trim())
-        .filter(Boolean);
+        .split(/\r?\n/);
 
-    // 保持原顺序去重
     const seen = new Set();
-    const result = [];
 
-    for (const code of raw) {
-      if (seen.has(code)) {
-        continue;
+    const valid = [];
+    const unrecognized = [];
+    const duplicated = [];
+    const cleaned = [];
+
+    lines.forEach(
+      (rawLine, index) => {
+        const line =
+          String(rawLine || "")
+            .trim();
+
+        // 空行忽略，不计入未识别。
+        if (!line) {
+          return;
+        }
+
+        const code =
+          extractBookingCode(line);
+
+        if (!code) {
+          unrecognized.push({
+            lineNumber: index + 1,
+            text: line
+          });
+          return;
+        }
+
+        // 原始整行不等于提取出的14位号码，说明清理掉了其他内容。
+        if (line !== code) {
+          cleaned.push({
+            lineNumber: index + 1,
+            original: line,
+            code
+          });
+        }
+
+        if (seen.has(code)) {
+          duplicated.push({
+            lineNumber: index + 1,
+            code
+          });
+          return;
+        }
+
+        seen.add(code);
+        valid.push(code);
       }
+    );
 
-      seen.add(code);
-      result.push(code);
-    }
+    return {
+      valid,
+      cleaned,
+      unrecognized,
+      duplicated
+    };
+  }
 
-    return result;
+  function parseCodes(text) {
+    return analyzeCodes(text).valid;
   }
 
   function renderAnomalySummary() {
@@ -1019,17 +1178,53 @@
         IDS.count
       );
 
+    const detail =
+      document.getElementById(
+        IDS.parseDetail
+      );
+
     if (!textarea || !count) {
       return;
     }
 
-    const codes =
-      parseCodes(
+    const analysis =
+      analyzeCodes(
         textarea.value
       );
 
     count.textContent =
-      `识别 ${codes.length} 个预约单号`;
+      `有效 ${analysis.valid.length} 个`;
+
+    if (detail) {
+      detail.innerHTML = `
+        <span class="__soa_parse_ok">有效 ${analysis.valid.length}</span>
+        <span class="__soa_parse_clean">已清理 ${analysis.cleaned.length}</span>
+        <span class="__soa_parse_dup">重复 ${analysis.duplicated.length}</span>
+        <span class="__soa_parse_bad">未识别 ${analysis.unrecognized.length}</span>
+      `;
+
+      const preview =
+        analysis.unrecognized
+          .slice(0, 5)
+          .map(
+            item =>
+              `第${item.lineNumber}行：${item.text}`
+          )
+          .join("\n");
+
+      detail.title =
+        preview
+          ? (
+              "以下内容未找到独立的连续14位预约号：\n" +
+              preview +
+              (
+                analysis.unrecognized.length > 5
+                  ? `\n……另有 ${analysis.unrecognized.length - 5} 行`
+                  : ""
+              )
+            )
+          : "可从每行文字、空格或符号中自动提取独立的连续14位预约号";
+    }
   }
 
   function updateUI() {
@@ -1159,20 +1354,36 @@
         IDS.textarea
       );
 
-    const codes =
-      parseCodes(
+    const analysis =
+      analyzeCodes(
         textarea?.value || ""
       );
 
+    const codes =
+      analysis.valid;
+
     if (!codes.length) {
       setStatus(
-        "请先填写预约单号，每行一个",
+        analysis.unrecognized.length
+          ? "没有识别到可处理的14位预约单号"
+          : "请先填写预约单号，每行一个",
         "warn"
       );
 
       textarea?.focus();
 
       return;
+    }
+
+    if (
+      analysis.cleaned.length ||
+      analysis.unrecognized.length ||
+      analysis.duplicated.length
+    ) {
+      appendLog(
+        "warn",
+        `运行前智能整理：已清理 ${analysis.cleaned.length} 行，重复 ${analysis.duplicated.length} 行，未识别 ${analysis.unrecognized.length} 行`
+      );
     }
 
     state.running = true;
@@ -1267,7 +1478,7 @@
         position: fixed;
         left: 0;
         top: 0;
-        z-index: 100000;
+        z-index: 10;
         display: none;
         min-width: 112px;
         height: 32px;
@@ -1292,7 +1503,7 @@
       #${IDS.mask} {
         position: fixed;
         inset: 0;
-        z-index: 100001;
+        z-index: 1200;
         display: none;
         align-items: center;
         justify-content: center;
@@ -1300,7 +1511,8 @@
       }
 
       #${IDS.panel} {
-        width: 560px;
+        position: relative;
+        width: ${CONFIG.PANEL_DEFAULT_WIDTH}px;
         max-width: calc(100vw - 40px);
         max-height: calc(100vh - 60px);
         overflow: hidden;
@@ -1357,7 +1569,7 @@
       #${IDS.textarea} {
         display: block;
         width: 100%;
-        height: 160px;
+        height: 170px;
         resize: vertical;
         box-sizing: border-box;
         padding: 9px 10px;
@@ -1386,9 +1598,33 @@
         justify-content: space-between;
         align-items: center;
         gap: 10px;
-        margin-top: 7px;
+        margin-top: 8px;
         color: #777;
         font-size: 12px;
+      }
+
+      #${IDS.parseDetail} {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        cursor: help;
+      }
+
+      #${IDS.parseDetail} .__soa_parse_ok {
+        color: #389e0d;
+      }
+
+      #${IDS.parseDetail} .__soa_parse_clean {
+        color: #1677ff;
+      }
+
+      #${IDS.parseDetail} .__soa_parse_dup {
+        color: #8c8c8c;
+      }
+
+      #${IDS.parseDetail} .__soa_parse_bad {
+        color: #cf1322;
       }
 
       #${IDS.status}[data-type="running"] {
@@ -1432,7 +1668,7 @@
       }
 
       #${IDS.log} {
-        height: 145px;
+        height: 160px;
         margin-top: 10px;
         overflow-y: auto;
         box-sizing: border-box;
@@ -1502,6 +1738,35 @@
 
       .__soa_log_info {
         color: #555;
+      }
+
+      #${IDS.resizeHandle} {
+        position: absolute;
+        top: 48px;
+        right: 0;
+        bottom: 0;
+        width: 8px;
+        z-index: 4;
+        cursor: ew-resize;
+        background: transparent;
+      }
+
+      #${IDS.resizeHandle}::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        right: 2px;
+        width: 3px;
+        height: 52px;
+        transform: translateY(-50%);
+        border-radius: 2px;
+        background: rgba(0,0,0,.12);
+        transition: background .15s;
+      }
+
+      #${IDS.resizeHandle}:hover::after,
+      #${IDS.resizeHandle}.__soa_resizing::after {
+        background: rgba(24,144,255,.55);
       }
 
       #${IDS.panel} .__soa_footer {
@@ -1762,6 +2027,152 @@
    * 13. 创建 UI
    * ========================================================= */
 
+  function getSavedPanelWidth() {
+    try {
+      const raw =
+        Number(
+          localStorage.getItem(
+            CONFIG.PANEL_WIDTH_KEY
+          )
+        );
+
+      if (
+        Number.isFinite(raw) &&
+        raw >= CONFIG.PANEL_MIN_WIDTH &&
+        raw <= CONFIG.PANEL_MAX_WIDTH
+      ) {
+        return raw;
+      }
+    } catch {
+      // 忽略
+    }
+
+    return CONFIG.PANEL_DEFAULT_WIDTH;
+  }
+
+  function savePanelWidth(width) {
+    try {
+      localStorage.setItem(
+        CONFIG.PANEL_WIDTH_KEY,
+        String(
+          Math.round(width)
+        )
+      );
+    } catch {
+      // 忽略
+    }
+  }
+
+  function initPanelResize() {
+    const panel =
+      document.getElementById(
+        IDS.panel
+      );
+
+    const handle =
+      document.getElementById(
+        IDS.resizeHandle
+      );
+
+    if (!panel || !handle) {
+      return;
+    }
+
+    panel.style.width =
+      `${getSavedPanelWidth()}px`;
+
+    let dragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    const onMove = event => {
+      if (!dragging) {
+        return;
+      }
+
+      const maxWidth =
+        Math.max(
+          CONFIG.PANEL_MIN_WIDTH,
+          Math.min(
+            CONFIG.PANEL_MAX_WIDTH,
+            window.innerWidth - 40
+          )
+        );
+
+      const next =
+        Math.min(
+          maxWidth,
+          Math.max(
+            CONFIG.PANEL_MIN_WIDTH,
+            startWidth +
+            event.clientX -
+            startX
+          )
+        );
+
+      panel.style.width =
+        `${Math.round(next)}px`;
+    };
+
+    const onUp = () => {
+      if (!dragging) {
+        return;
+      }
+
+      dragging = false;
+
+      handle.classList.remove(
+        "__soa_resizing"
+      );
+
+      savePanelWidth(
+        panel.getBoundingClientRect()
+          .width
+      );
+
+      window.removeEventListener(
+        "pointermove",
+        onMove
+      );
+
+      window.removeEventListener(
+        "pointerup",
+        onUp
+      );
+    };
+
+    handle.addEventListener(
+      "pointerdown",
+      event => {
+        if (event.button !== 0) {
+          return;
+        }
+
+        dragging = true;
+        startX = event.clientX;
+        startWidth =
+          panel.getBoundingClientRect()
+            .width;
+
+        handle.classList.add(
+          "__soa_resizing"
+        );
+
+        window.addEventListener(
+          "pointermove",
+          onMove
+        );
+
+        window.addEventListener(
+          "pointerup",
+          onUp
+        );
+
+        event.preventDefault();
+      }
+    );
+  }
+
   function createUI() {
     if (
       document.getElementById(
@@ -1801,25 +2212,33 @@
           >×</button>
         </div>
 
+        <div
+          id="${IDS.resizeHandle}"
+          title="左右拖动调整窗口宽度"
+        ></div>
+
         <div class="__soa_body">
           <div class="__soa_hint">
-            每行填写一个预约单号。脚本会逐条写入页面输入框并模拟回车，
-            只有在左侧预约列表中确认到该号码后，才继续处理下一条。
-            页面顶部的 Ant Design 提示会被实时监听并记录。等待约 4 秒仍未确认时自动重试一次；
-            最终失败则按“预约单号 + 页面提示”记录异常并继续下一条。
+            <b>使用方法：</b>直接粘贴原始预约信息，每行一条。工具会自动提取其中独立的 <b>14 位预约单号</b>，
+            姓名、说明文字、空格和符号会自动忽略；重复号码自动去重，无法识别的内容不会提交。
+            确认下方“有效”数量后点击“开始运行”，工具会逐条加入预约列表，并在日志中记录成功、跳过和异常结果。
           </div>
 
           <textarea
             id="${IDS.textarea}"
-            placeholder="例如：
-123456789
-123456790
-123456791"
+            placeholder="可直接粘贴原始内容，例如：
+预约号：12345678901234
+12345678901235 张三
+订单 12345678901236 已确认"
           ></textarea>
 
           <div class="__soa_meta">
-            <span id="${IDS.count}">
-              识别 0 个预约单号
+            <span id="${IDS.count}" style="display:none;">有效 0 个</span>
+            <span id="${IDS.parseDetail}">
+              <span class="__soa_parse_ok">有效 0</span>
+              <span class="__soa_parse_clean">已清理 0</span>
+              <span class="__soa_parse_dup">重复 0</span>
+              <span class="__soa_parse_bad">未识别 0</span>
             </span>
             <span
               id="${IDS.status}"
@@ -1895,6 +2314,8 @@
     document.body.appendChild(
       mask
     );
+
+    initPanelResize();
 
     const textarea =
       document.getElementById(
@@ -1997,31 +2418,25 @@
   }
 
   /* =========================================================
-   * 14. SPA 页面识别 / 按钮定位 / 初始化
+   * 14. 初始页常驻 / #vid 检测 / 初始化
    * ========================================================= */
 
-  let lastActiveRoute = false;
+  let hadUsableInput = false;
   let launcherSyncTimer = null;
+  let antObserverStarted = false;
 
-  function normalizePathname(pathname) {
-    const value =
-      String(pathname || "/")
-        .replace(/\/+$/g, "");
+  function removeToolDom() {
+    document
+      .getElementById(
+        IDS.button
+      )
+      ?.remove();
 
-    return value || "/";
-  }
-
-  function isActiveRoute() {
-    const current =
-      normalizePathname(
-        location.pathname
-      );
-
-    return CONFIG.ACTIVE_PATHS.some(
-      path =>
-        normalizePathname(path) ===
-        current
-    );
+    document
+      .getElementById(
+        IDS.mask
+      )
+      ?.remove();
   }
 
   function hideLauncher() {
@@ -2046,7 +2461,7 @@
     }
   }
 
-  function stopTaskWhenLeavingPage() {
+  function stopTaskWhenInputLeaves() {
     if (!state.running) {
       return;
     }
@@ -2058,7 +2473,7 @@
 
     appendLog(
       "warn",
-      "已离开批量预约页面，当前任务已安全停止"
+      "预约单号输入框已离开页面，当前任务已安全停止"
     );
 
     setStatus(
@@ -2069,39 +2484,75 @@
     updateUI();
   }
 
-  function positionLauncher() {
-    const active =
-      isActiveRoute();
+  function ensureToolCreated() {
+    const input = getInput();
 
     if (
-      lastActiveRoute &&
-      !active
+      !input ||
+      !isVisible(input)
     ) {
-      stopTaskWhenLeavingPage();
+      return false;
     }
 
-    lastActiveRoute = active;
-
-    if (!active) {
-      hideLauncher();
-      return;
-    }
-
-    const input = getInput();
     const button =
       document.getElementById(
         IDS.button
       );
 
+    const mask =
+      document.getElementById(
+        IDS.mask
+      );
+
     if (
-      !input ||
       !button ||
-      !isVisible(input)
+      !mask
     ) {
-      if (button) {
-        button.style.display =
-          "none";
-      }
+      removeToolDom();
+      createUI();
+
+      console.log(
+        "[SOA批量预约] 检测到 #vid，已创建工具"
+      );
+    }
+
+    return true;
+  }
+
+  function positionLauncher() {
+    const input = getInput();
+
+    const usable =
+      Boolean(
+        input &&
+        isVisible(input)
+      );
+
+    if (
+      hadUsableInput &&
+      !usable
+    ) {
+      stopTaskWhenInputLeaves();
+    }
+
+    hadUsableInput =
+      usable;
+
+    if (!usable) {
+      hideLauncher();
+      return;
+    }
+
+    if (!ensureToolCreated()) {
+      return;
+    }
+
+    const button =
+      document.getElementById(
+        IDS.button
+      );
+
+    if (!button) {
       return;
     }
 
@@ -2114,124 +2565,181 @@
     const buttonRect =
       button.getBoundingClientRect();
 
-    const gap =
-      CONFIG.BUTTON_GAP;
-
-    let left =
-      inputRect.right + gap;
+    const blockers =
+      getBlockingElements(
+        button
+      );
 
     let top =
       inputRect.top +
-      (inputRect.height -
-        buttonRect.height) / 2;
-
-    // 极窄窗口下如果右侧放不下，退到输入框左侧，
-    // 正常页面仍固定显示在输入框右边。
-    if (
-      left + buttonRect.width >
-      window.innerWidth - 8
-    ) {
-      left =
-        inputRect.left -
-        buttonRect.width -
-        gap;
-    }
-
-    left = Math.max(
-      8,
-      Math.min(
-        left,
-        window.innerWidth -
-        buttonRect.width - 8
-      )
-    );
+      (
+        inputRect.height -
+        buttonRect.height
+      ) / 2;
 
     top = Math.max(
       8,
       Math.min(
         top,
         window.innerHeight -
-        buttonRect.height - 8
+        buttonRect.height -
+        8
       )
     );
 
+    const startLeft =
+      inputRect.right +
+      CONFIG.BUTTON_START_GAP;
+
+    let chosenLeft =
+      startLeft;
+
+    let foundSafe =
+      false;
+
+    for (
+      let shift = 0;
+      shift <= CONFIG.BUTTON_MAX_SHIFT;
+      shift += CONFIG.BUTTON_SEARCH_STEP
+    ) {
+      const candidateLeft =
+        startLeft + shift;
+
+      if (
+        candidateLeft +
+        buttonRect.width >
+        window.innerWidth - 8
+      ) {
+        break;
+      }
+
+      if (
+        positionIsSafe(
+          candidateLeft,
+          top,
+          buttonRect.width,
+          buttonRect.height,
+          blockers
+        )
+      ) {
+        chosenLeft =
+          candidateLeft;
+
+        foundSafe =
+          true;
+
+        break;
+      }
+    }
+
+    /*
+     * 如果右侧暂时没有完整安全位置，
+     * 就尽量贴近视口右侧，但不让按钮跑出屏幕。
+     */
+    if (!foundSafe) {
+      chosenLeft =
+        Math.max(
+          8,
+          window.innerWidth -
+          buttonRect.width -
+          16
+        );
+    }
+
     button.style.left =
-      `${Math.round(left)}px`;
+      `${Math.round(chosenLeft)}px`;
 
     button.style.top =
       `${Math.round(top)}px`;
   }
 
   function initLauncherWatcher() {
-    const scheduleSync = () => {
-      requestAnimationFrame(
-        positionLauncher
+    /*
+     * 不判断 URL，不监听 history，不分析路由。
+     * 脚本从 /register_list 首次加载后常驻，
+     * 每 200ms 只检查一次 #vid。
+     */
+    launcherSyncTimer =
+      window.setInterval(
+        positionLauncher,
+        200
       );
-    };
 
-    // 页面滚动、窗口缩放时持续跟随 #vid。
     window.addEventListener(
       "resize",
-      scheduleSync,
-      { passive: true }
+      positionLauncher,
+      {
+        passive: true
+      }
     );
 
     window.addEventListener(
       "scroll",
-      scheduleSync,
+      positionLauncher,
       {
         passive: true,
         capture: true
       }
     );
 
-    // SPA 切换时 #vid 会被重新挂载。
-    // 观察 DOM 即可在不刷新页面的情况下自动恢复按钮。
-    const observer =
-      new MutationObserver(
-        scheduleSync
-      );
-
-    observer.observe(
-      document.body,
-      {
-        childList: true,
-        subtree: true
-      }
-    );
-
-    // 兜底检测 URL 与异步渲染，避免不同路由框架漏掉。
-    launcherSyncTimer =
-      window.setInterval(
-        positionLauncher,
-        400
-      );
-
     positionLauncher();
   }
 
+  let initialized = false;
+
   function init() {
-    createUI();
-    initAntMessageObserver();
+    if (initialized) {
+      return;
+    }
+
+    if (!document.body) {
+      return;
+    }
+
+    initialized = true;
+
+    if (!antObserverStarted) {
+      initAntMessageObserver();
+      antObserverStarted = true;
+    }
+
     initLauncherWatcher();
 
     console.log(
-      "[SOA批量预约] v1.4 已加载。已支持 SPA 页面切换，按钮会自动固定在 #vid 输入框右侧。"
+      "[SOA批量预约] v1.8 已加载。全域 document-start 常驻；后续仅检测 #vid，不依赖路由。"
     );
   }
 
-  if (
-    document.readyState ===
-    "loading"
-  ) {
+  function waitForBodyAndInit() {
+    if (document.body) {
+      init();
+      return;
+    }
+
+    const timer =
+      window.setInterval(
+        () => {
+          if (!document.body) {
+            return;
+          }
+
+          clearInterval(timer);
+          init();
+        },
+        50
+      );
+
     document.addEventListener(
       "DOMContentLoaded",
-      init,
+      () => {
+        clearInterval(timer);
+        init();
+      },
       {
         once: true
       }
     );
-  } else {
-    init();
   }
+
+  waitForBodyAndInit();
 })();
