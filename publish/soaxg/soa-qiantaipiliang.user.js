@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SOA.2.4前台批量模块
 // @namespace    https://tampermonkey.net/
-// @version      1.12
-// @description  批量预约单号；支持SPA常驻、14位预约单号智能提取、可调宽度窗口及自动避让定位。
+// @version      1.15
+// @description  批量预约单号；支持SPA常驻、14位预约单号智能提取、可调宽度窗口及“已到检”首次查询自动仅当日。
 
 // @match        *://checkup-register.health-100.cn/*
 // @grant        none
@@ -18,24 +18,23 @@
 /*
  * 更新记录
  *
- * v1.12  -  2026-8-29
- * - 优化：工具按钮改为以预约单号输入框 #vid 右侧为起点自动寻找空位，避免覆盖页面已有按钮、菜单和表单元素。
- * - 优化：如果当前位置发生遮挡，工具会按固定步长继续向右偏移，优先选择第一个安全位置。
- * - 保留：14位预约单号智能提取、窗口宽度拖动记忆、SPA常驻、批量预约及异常处理等功能不变。
+ * v1.15  -  2026-8-29
+ * - 修复：进入“已到检”后手动取消“仅当日”再点击查询时，不再被脚本重新强制勾选。
+ * - 优化：“仅当日”改为一次性保护；仅在从其他页签切换进入“已到检”时启用，并只改写进入页面后自动发出的第一条 CHECKED 列表查询。
+ * - 优化：首次 CHECKED 查询处理完成后立即解除强制状态；后续手动查询完全尊重页面当前“仅当日”选择。
  *
- * v1.11  -  2026-8-29
- * - 优化：重写工具窗口使用说明，突出“粘贴 → 自动提取 → 开始运行 → 查看结果”的操作流程。
+ * v1.14  -  2026-8-29
+ * - 新增：进入“已到检”时从请求层将首次列表查询改为仅当日，并同步页面复选框状态。
  *
- * v1.10  -  2026-8-29
- * - 修复：从每行内容中提取独立的连续14位预约单号，自动忽略前后文字、空格和符号。
- * - 修复：不会从15位及以上连续数字中误截取14位。
+ * v1.13  -  2026-8-29
+ * - 新增：点击“已到检”页签时自动尝试勾选“仅当日”。
  */
 
 (function () {
   "use strict";
 
   const INSTANCE_KEY =
-    "__SOA_BATCH_BOOKING_V18__";
+    "__SOA_BATCH_BOOKING_V115__";
 
   if (window[INSTANCE_KEY]) {
     return;
@@ -50,6 +49,18 @@
   const CONFIG = {
     INPUT_SELECTOR: "#vid",
     LIST_SELECTOR: ".appointment-card .ant-table-tbody",
+
+    // 点击“已到检”前先确保“仅当日”已勾选
+    CHECKED_TAB_SELECTOR:
+      '[role="tab"][id$="-tab-CHECKED"]',
+    ONLY_TODAY_SELECTOR:
+      "#search_form_onlyToday",
+    ONLY_TODAY_WAIT_TIMEOUT: 1200,
+    ONLY_TODAY_POLL_INTERVAL: 30,
+
+    // “已到检”列表查询接口：请求层统一强制为仅当日
+    CHECKIN_QUERY_PATH:
+      "/checkup-hc/api/checkin/query/list",
 
     // 工具按钮定位：从 #vid 右侧开始自动向右寻找不遮挡页面元素的位置
     BUTTON_START_GAP: 12,
@@ -308,6 +319,645 @@
 
     input.dispatchEvent(
       new KeyboardEvent("keyup", options)
+    );
+  }
+
+  /* =========================================================
+   * 3.1 “已到检”列表请求强制仅当日
+   * ========================================================= */
+
+  let onlyTodayGuardArmed = false;
+  let onlyTodayGuardExpiresAt = 0;
+
+  function armOnlyTodayGuard() {
+    onlyTodayGuardArmed = true;
+
+    // 防止页面没有发出自动查询时，标记残留到之后的手动查询。
+    onlyTodayGuardExpiresAt =
+      Date.now() + 5000;
+
+    console.log(
+      "[SOA批量预约] 已进入“已到检”，仅对接下来的首次 CHECKED 查询启用仅当日保护"
+    );
+  }
+
+  function consumeOnlyTodayGuard() {
+    const active =
+      onlyTodayGuardArmed &&
+      Date.now() <=
+        onlyTodayGuardExpiresAt;
+
+    onlyTodayGuardArmed = false;
+    onlyTodayGuardExpiresAt = 0;
+
+    return active;
+  }
+
+  function isOnlyTodayGuardActive() {
+    if (
+      !onlyTodayGuardArmed
+    ) {
+      return false;
+    }
+
+    if (
+      Date.now() >
+      onlyTodayGuardExpiresAt
+    ) {
+      onlyTodayGuardArmed = false;
+      onlyTodayGuardExpiresAt = 0;
+      return false;
+    }
+
+    return true;
+  }
+
+  function padDatePart(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function getTodayCheckinRange() {
+    const now = new Date();
+
+    const date =
+      [
+        now.getFullYear(),
+        padDatePart(
+          now.getMonth() + 1
+        ),
+        padDatePart(
+          now.getDate()
+        )
+      ].join("-");
+
+    return {
+      start:
+        `${date} 00:00:00`,
+      end:
+        `${date} 23:59:59`
+    };
+  }
+
+  function isCheckinQueryUrl(url) {
+    try {
+      const absolute =
+        new URL(
+          String(url || ""),
+          location.href
+        );
+
+      return (
+        absolute.origin ===
+          location.origin &&
+        absolute.pathname ===
+          CONFIG.CHECKIN_QUERY_PATH
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function rewriteCheckedQueryBody(body) {
+    if (
+      typeof body !== "string" ||
+      !body.trim()
+    ) {
+      return {
+        changed: false,
+        body
+      };
+    }
+
+    let parsed;
+
+    try {
+      parsed =
+        JSON.parse(body);
+    } catch {
+      return {
+        changed: false,
+        body
+      };
+    }
+
+    const req =
+      parsed?.pageRequest?.req;
+
+    if (
+      !req ||
+      req.appointmentStatus !==
+        "CHECKED"
+    ) {
+      return {
+        changed: false,
+        body
+      };
+    }
+
+    /*
+     * 只处理“刚切换进入已到检”后的首次自动查询。
+     * 已经进入页面后的手动查询，不再强制修改。
+     */
+    if (
+      !isOnlyTodayGuardActive()
+    ) {
+      return {
+        changed: false,
+        body
+      };
+    }
+
+    // 无论这条首次请求本来是否已经是仅当日，都消费掉本次一次性保护。
+    consumeOnlyTodayGuard();
+
+    const range =
+      getTodayCheckinRange();
+
+    const alreadyCorrect =
+      req.onlyToday === true &&
+      req.checkinStartDate ===
+        range.start &&
+      req.checkinEndDate ===
+        range.end;
+
+    if (alreadyCorrect) {
+      return {
+        changed: false,
+        body
+      };
+    }
+
+    req.onlyToday = true;
+    req.checkinStartDate =
+      range.start;
+    req.checkinEndDate =
+      range.end;
+
+    console.log(
+      "[SOA批量预约] 已将“已到检”查询强制改为仅当日：",
+      {
+        onlyToday:
+          req.onlyToday,
+        checkinStartDate:
+          req.checkinStartDate,
+        checkinEndDate:
+          req.checkinEndDate
+      }
+    );
+
+    queueMicrotask(
+      syncOnlyTodayCheckboxUI
+    );
+
+    return {
+      changed: true,
+      body: JSON.stringify(parsed)
+    };
+  }
+
+  function installFetchOnlyTodayInterceptor() {
+    const originalFetch =
+      window.fetch;
+
+    if (
+      typeof originalFetch !==
+        "function" ||
+      originalFetch
+        .__soaOnlyTodayPatched
+    ) {
+      return;
+    }
+
+    const wrappedFetch =
+      async function (
+        input,
+        init
+      ) {
+        const url =
+          input instanceof Request
+            ? input.url
+            : input;
+
+        if (
+          !isCheckinQueryUrl(url)
+        ) {
+          return originalFetch.apply(
+            this,
+            arguments
+          );
+        }
+
+        /*
+         * 常见调用形式：
+         * fetch(url, { body: "..." })
+         */
+        if (
+          init &&
+          typeof init.body ===
+            "string"
+        ) {
+          const rewritten =
+            rewriteCheckedQueryBody(
+              init.body
+            );
+
+          if (rewritten.changed) {
+            init = {
+              ...init,
+              body: rewritten.body
+            };
+          }
+
+          return originalFetch.call(
+            this,
+            input,
+            init
+          );
+        }
+
+        /*
+         * 兼容 fetch(new Request(...))。
+         * 这里只在 POST 且 body 可读取时重建 Request。
+         */
+        if (
+          input instanceof Request &&
+          input.method.toUpperCase() ===
+            "POST"
+        ) {
+          try {
+            const originalBody =
+              await input
+                .clone()
+                .text();
+
+            const rewritten =
+              rewriteCheckedQueryBody(
+                originalBody
+              );
+
+            if (rewritten.changed) {
+              const nextRequest =
+                new Request(
+                  input,
+                  {
+                    body:
+                      rewritten.body
+                  }
+                );
+
+              return originalFetch.call(
+                this,
+                nextRequest,
+                init
+              );
+            }
+          } catch (error) {
+            console.warn(
+              "[SOA批量预约] fetch 请求体读取失败，保持原请求：",
+              error
+            );
+          }
+        }
+
+        return originalFetch.apply(
+          this,
+          arguments
+        );
+      };
+
+    wrappedFetch
+      .__soaOnlyTodayPatched =
+      true;
+
+    window.fetch =
+      wrappedFetch;
+  }
+
+  function installXhrOnlyTodayInterceptor() {
+    const proto =
+      XMLHttpRequest.prototype;
+
+    if (
+      proto.send
+        .__soaOnlyTodayPatched
+    ) {
+      return;
+    }
+
+    const originalOpen =
+      proto.open;
+
+    const originalSend =
+      proto.send;
+
+    proto.open =
+      function (
+        method,
+        url,
+        ...rest
+      ) {
+        this
+          .__soaRequestMethod =
+          String(
+            method || ""
+          ).toUpperCase();
+
+        this
+          .__soaRequestUrl =
+          String(url || "");
+
+        return originalOpen.call(
+          this,
+          method,
+          url,
+          ...rest
+        );
+      };
+
+    const wrappedSend =
+      function (body) {
+        let nextBody =
+          body;
+
+        if (
+          this.__soaRequestMethod ===
+            "POST" &&
+          isCheckinQueryUrl(
+            this.__soaRequestUrl
+          )
+        ) {
+          const rewritten =
+            rewriteCheckedQueryBody(
+              body
+            );
+
+          if (rewritten.changed) {
+            nextBody =
+              rewritten.body;
+          }
+        }
+
+        return originalSend.call(
+          this,
+          nextBody
+        );
+      };
+
+    wrappedSend
+      .__soaOnlyTodayPatched =
+      true;
+
+    proto.send =
+      wrappedSend;
+  }
+
+  function syncOnlyTodayCheckboxUI() {
+    const checkbox =
+      document.querySelector(
+        CONFIG.ONLY_TODAY_SELECTOR
+      );
+
+    if (
+      !checkbox ||
+      checkbox.checked
+    ) {
+      return;
+    }
+
+    try {
+      checkbox.click();
+    } catch (_) {
+      // UI 同步失败不影响请求层强制仅当日。
+    }
+  }
+
+  function installOnlyTodayNetworkGuard() {
+    installFetchOnlyTodayInterceptor();
+    installXhrOnlyTodayInterceptor();
+
+    console.log(
+      "[SOA批量预约] 已启用“已到检”请求层仅当日保护"
+    );
+  }
+
+  /* =========================================================
+   * 3.2 “已到检”自动勾选“仅当日”
+   * ========================================================= */
+
+  let checkedTabReplayRunning = false;
+
+  function getOnlyTodayCheckbox() {
+    return document.querySelector(
+      CONFIG.ONLY_TODAY_SELECTOR
+    );
+  }
+
+  function isOnlyTodayChecked() {
+    const checkbox =
+      getOnlyTodayCheckbox();
+
+    if (!checkbox) {
+      return false;
+    }
+
+    if (checkbox.checked) {
+      return true;
+    }
+
+    const label =
+      checkbox.closest(
+        ".ant-checkbox-wrapper"
+      );
+
+    return Boolean(
+      label?.classList.contains(
+        "ant-checkbox-wrapper-checked"
+      )
+    );
+  }
+
+  function waitForOnlyTodayChecked() {
+    return new Promise(resolve => {
+      const startedAt =
+        Date.now();
+
+      const timer =
+        window.setInterval(
+          () => {
+            if (isOnlyTodayChecked()) {
+              clearInterval(timer);
+              resolve(true);
+              return;
+            }
+
+            if (
+              Date.now() - startedAt >=
+              CONFIG.ONLY_TODAY_WAIT_TIMEOUT
+            ) {
+              clearInterval(timer);
+              resolve(false);
+            }
+          },
+          CONFIG.ONLY_TODAY_POLL_INTERVAL
+        );
+    });
+  }
+
+  function clickOnlyTodayCheckbox() {
+    const checkbox =
+      getOnlyTodayCheckbox();
+
+    if (!checkbox) {
+      return false;
+    }
+
+    if (isOnlyTodayChecked()) {
+      return true;
+    }
+
+    /*
+     * 让 Ant Design / React 自己处理状态，
+     * 不直接写 checkbox.checked。
+     */
+    checkbox.click();
+
+    return true;
+  }
+
+  function findCheckedTabFromEventTarget(target) {
+    if (!(target instanceof Element)) {
+      return null;
+    }
+
+    let tab =
+      target.closest(
+        CONFIG.CHECKED_TAB_SELECTOR
+      );
+
+    if (!tab) {
+      const tabWrap =
+        target.closest(
+          ".ant-tabs-tab"
+        );
+
+      tab =
+        tabWrap?.querySelector(
+          CONFIG.CHECKED_TAB_SELECTOR
+        ) || null;
+    }
+
+    if (!tab) {
+      return null;
+    }
+
+    const text =
+      String(
+        tab.textContent || ""
+      )
+        .replace(/\s+/g, "")
+        .trim();
+
+    return text === "已到检"
+      ? tab
+      : null;
+  }
+
+  async function replayCheckedTabClick(tab) {
+    try {
+      const checkboxFound =
+        clickOnlyTodayCheckbox();
+
+      if (!checkboxFound) {
+        console.warn(
+          "[SOA批量预约] 未找到“仅当日”复选框，直接继续进入“已到检”"
+        );
+
+        checkedTabReplayRunning =
+          true;
+
+        tab.click();
+        return;
+      }
+
+      const checked =
+        await waitForOnlyTodayChecked();
+
+      if (checked) {
+        console.log(
+          "[SOA批量预约] 已自动勾选“仅当日”，继续进入“已到检”"
+        );
+      } else {
+        console.warn(
+          "[SOA批量预约] 等待“仅当日”勾选确认超时，继续进入“已到检”"
+        );
+      }
+
+      checkedTabReplayRunning =
+        true;
+
+      tab.click();
+    } finally {
+      queueMicrotask(() => {
+        checkedTabReplayRunning =
+          false;
+      });
+    }
+  }
+
+  function initCheckedTabOnlyTodayGuard() {
+    document.addEventListener(
+      "click",
+      event => {
+        const tab =
+          findCheckedTabFromEventTarget(
+            event.target
+          );
+
+        if (!tab) {
+          return;
+        }
+
+        // 脚本自动重放的第二次点击直接放行。
+        if (checkedTabReplayRunning) {
+          return;
+        }
+
+        /*
+         * 只有从其他页签切换进入“已到检”时，
+         * 才启用一次性的请求层保护。
+         * 当前页签已经是“已到检”时不重新武装，
+         * 避免影响用户后续手动查询。
+         */
+        const alreadySelected =
+          tab.getAttribute(
+            "aria-selected"
+          ) === "true" ||
+          tab.closest(
+            ".ant-tabs-tab"
+          )?.classList.contains(
+            "ant-tabs-tab-active"
+          );
+
+        if (!alreadySelected) {
+          armOnlyTodayGuard();
+        }
+
+        // 已经是“仅当日”则原样放行。
+        if (isOnlyTodayChecked()) {
+          return;
+        }
+
+        /*
+         * 捕获阶段先阻止“已到检”自己的查询逻辑，
+         * 等“仅当日”真正勾选后再自动点击一次。
+         */
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        replayCheckedTabClick(tab);
+      },
+      true
     );
   }
 
@@ -2698,15 +3348,22 @@
 
     initialized = true;
 
+    /*
+     * 先安装网络请求保护，再初始化其他 UI 功能。
+     * 即使“仅当日”复选框尚未渲染，CHECKED 查询也会被强制为当天。
+     */
+    installOnlyTodayNetworkGuard();
+
     if (!antObserverStarted) {
       initAntMessageObserver();
       antObserverStarted = true;
     }
 
+    initCheckedTabOnlyTodayGuard();
     initLauncherWatcher();
 
     console.log(
-      "[SOA批量预约] v1.8 已加载。全域 document-start 常驻；后续仅检测 #vid，不依赖路由。"
+      "[SOA批量预约] v1.15 已加载。已启用“已到检”首次查询一次性仅当日保护及批量预约功能。"
     );
   }
 
