@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOA.2.1全局发票页面
 // @namespace    https://tampermonkey.net/
-// @version      6.13
+// @version      6.14
 // @description  优化SOA发票页面的表格布局、文案显示和复制功能，支持动态加载内容的处理。
 
 // @match        https://checkup-soa3.health-100.cn/*

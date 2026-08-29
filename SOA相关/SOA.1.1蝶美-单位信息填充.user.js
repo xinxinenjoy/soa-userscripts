@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOA.1.1蝶美-单位信息填充
 // @namespace    https://dime.health-100.cn/
-// @version      7.7.23
+// @version      7.7.24
 // @description  自动填充单位信息，支持地区、行业、经济类型、单位类型、社会信用代码、企业规模、职工人数、接害人数等字段。
 //
 // @match        https://dime.health-100.cn/*

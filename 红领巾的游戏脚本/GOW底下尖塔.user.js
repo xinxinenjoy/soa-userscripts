@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GOW底下尖塔
 // @namespace    http://tampermonkey.net/
-// @version      4.2.24
+// @version      4.2.25
 // @description  GOW底下尖塔火把管理与节点同步工具
 
 // @match        https://solofandy.github.io/*
