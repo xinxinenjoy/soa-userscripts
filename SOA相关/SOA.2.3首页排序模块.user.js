@@ -2,7 +2,7 @@
 // @name         SOA.2.3首页排序模块
 // @namespace    https://tampermonkey.net/
 // @version      4.5
-// @description  4-8列左对齐固定宽度网格 + 可调模块宽度/列间距 + 淡蓝悬浮高亮 + 网格槽位锁定拖拽 + 本地自动保存
+// @description  SOA首页模块排序，支持拖拽排序、保存顺序、恢复默认顺序、设置每行显示列数、设置模块宽度、设置列间距。
 
 // @match        *://*home.health-100.cn/*
 // @grant        none
@@ -13,6 +13,14 @@
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-shouyepaixu.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-shouyepaixu.user.js
 // ==/UserScript==
+
+/*
+ * 更新记录
+ *
+ * v4.5  -  2026-8-29
+ * - 更新：测试版本
+ *
+ */
 
 (function () {
   "use strict";

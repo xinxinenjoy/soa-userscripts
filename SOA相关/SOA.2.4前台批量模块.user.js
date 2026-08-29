@@ -2,7 +2,7 @@
 // @name         SOA.2.4前台批量模块
 // @namespace    https://tampermonkey.net/
 // @version      1.2
-// @description  批量输入预约单号并回车，实时监听Ant Design提示；异常自动记录并跳过，完成后统一汇总
+// @description  批量预约单号，自动提交并等待结果，支持异常记录和跳过。
 
 // @match        *://checkup-register.health-100.cn/group/register*
 // @grant        none
@@ -14,6 +14,14 @@
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-qiantaipiliang.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-qiantaipiliang.user.js
 // ==/UserScript==
+
+/*
+ * 更新记录
+ *
+ * v1.2  -  2026-8-29
+ * - 更新：测试版本
+ *
+ */
 
 (function () {
   "use strict";

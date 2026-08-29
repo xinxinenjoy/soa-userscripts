@@ -2,7 +2,7 @@
 // @name         CurseForge增强
 // @namespace    http://tampermonkey.net/
 // @version      4.1
-// @description  测试一下内容看看会不会生效
+// @description  增强CurseForge网站的中文显示，翻译部分英文为中文，支持动态加载内容的翻译。
 
 // @match        https://www.curseforge.com/*
 // @run-at       document-end
@@ -14,6 +14,14 @@
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-curseforge.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-curseforge.user.js
 // ==/UserScript==
+
+/*
+ * 更新记录
+ *
+ * v4.1 - 2026-8-29
+ * - 更新：测试版本
+ *
+ */
 
 (function () {
     'use strict';

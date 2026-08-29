@@ -2,7 +2,7 @@
 // @name         GOW底下尖塔
 // @namespace    http://tampermonkey.net/
 // @version      4.2.24
-// @description  自动校准与购买建议；重点房间按数字顺序优先导航、F最后；主线与每个目标独立计算总火把；新增地图指引开关，关闭后恢复网页原始地图视觉并保留缩放与位移；主线路完成后显示全部未处理守卫
+// @description  GOW底下尖塔火把管理与节点同步工具
 
 // @match        https://solofandy.github.io/*
 // @grant        none
@@ -13,6 +13,14 @@
 // @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-gowdxjt.user.js
 // @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-gowdxjt.user.js
 // ==/UserScript==
+
+/*
+ * 更新记录
+ *
+ * v4.2.24 - 2026-8-29
+ * - 更新：测试版本
+ *
+ */
 
 (function () {
     'use strict';
