@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         SOA.2.4前台批量模块
 // @namespace    https://tampermonkey.net/
-// @version      1.3
-// @description  批量预约单号，自动提交并等待结果，支持异常记录和跳过。
+// @version      1.4
+// @description  批量预约单号，自动提交并等待结果，支持异常记录和跳过；兼容SPA页面切换并将工具按钮固定在预约单号输入框右侧。
 
+// @match        *://checkup-register.health-100.cn/register_list*
 // @match        *://checkup-register.health-100.cn/group/register*
+// @match        *://checkup-register.health-100.cn/group/submit*
 // @grant        none
 // @run-at       document-idle
 
@@ -17,6 +19,12 @@
 
 /*
  * 更新记录
+ *
+ * v1.4  -  2026-8-29
+ * - 优化：增加 /register_list 初始页匹配，脚本可在单页应用首次打开时提前加载。
+ * - 优化：自动识别 /group/register 与 /group/submit 页面，SPA 内部切换后无需 F5 刷新即可显示工具。
+ * - 优化：批量预约按钮取消自由悬浮拖动，固定显示在预约单号输入框 #vid 的右侧并自动跟随页面布局。
+ * - 优化：离开可用页面时自动隐藏工具；进入可用页面后自动恢复，不影响原批量预约处理逻辑。
  *
  * v1.2  -  2026-8-29
  * - 更新：测试版本
@@ -34,6 +42,16 @@
     INPUT_SELECTOR: "#vid",
     LIST_SELECTOR: ".appointment-card .ant-table-tbody",
     BUTTON_POS_KEY: "__soa_batch_booking_button_pos_v11",
+
+    // SPA 页面：脚本会在初始列表页提前加载，
+    // 仅在以下两个业务页面显示工具。
+    ACTIVE_PATHS: [
+      "/group/register",
+      "/group/submit"
+    ],
+
+    // 按钮与预约单号输入框右侧的间距。
+    BUTTON_GAP: 10,
 
     // 单次提交后等待预约号出现在“预约列表”的最长时间
     RESULT_TIMEOUT: 4000,
@@ -1247,26 +1265,24 @@
     style.textContent = `
       #${IDS.button} {
         position: fixed;
-        left: 18px;
-        top: 120px;
+        left: 0;
+        top: 0;
         z-index: 100000;
-        min-width: 128px;
-        height: 44px;
-        padding: 0 18px;
+        display: none;
+        min-width: 112px;
+        height: 32px;
+        padding: 0 14px;
         border: 0;
-        border-radius: 9px;
+        border-radius: 4px;
         background: #1890ff;
         color: #fff;
-        font-size: 16px;
-        font-weight: 700;
-        letter-spacing: .5px;
-        cursor: grab;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: .2px;
+        cursor: pointer;
         user-select: none;
-        box-shadow: 0 6px 20px rgba(24,144,255,.30);
-      }
-
-      #${IDS.button}.__soa_dragging {
-        cursor: grabbing;
+        box-shadow: 0 2px 8px rgba(24,144,255,.24);
+        white-space: nowrap;
       }
 
       #${IDS.button}:hover {
@@ -1950,13 +1966,8 @@
       }, 50);
     };
 
-    loadButtonPosition(button);
-    requestAnimationFrame(() => {
-      clampButton(button);
-    });
-
-    initDraggableButton(
-      button,
+    button.addEventListener(
+      "click",
       openPanel
     );
 
@@ -1986,15 +1997,226 @@
   }
 
   /* =========================================================
-   * 14. 初始化
+   * 14. SPA 页面识别 / 按钮定位 / 初始化
    * ========================================================= */
+
+  let lastActiveRoute = false;
+  let launcherSyncTimer = null;
+
+  function normalizePathname(pathname) {
+    const value =
+      String(pathname || "/")
+        .replace(/\/+$/g, "");
+
+    return value || "/";
+  }
+
+  function isActiveRoute() {
+    const current =
+      normalizePathname(
+        location.pathname
+      );
+
+    return CONFIG.ACTIVE_PATHS.some(
+      path =>
+        normalizePathname(path) ===
+        current
+    );
+  }
+
+  function hideLauncher() {
+    const button =
+      document.getElementById(
+        IDS.button
+      );
+
+    const mask =
+      document.getElementById(
+        IDS.mask
+      );
+
+    if (button) {
+      button.style.display =
+        "none";
+    }
+
+    if (mask) {
+      mask.style.display =
+        "none";
+    }
+  }
+
+  function stopTaskWhenLeavingPage() {
+    if (!state.running) {
+      return;
+    }
+
+    state.running = false;
+    state.paused = false;
+    state.currentCode = "";
+    state.token++;
+
+    appendLog(
+      "warn",
+      "已离开批量预约页面，当前任务已安全停止"
+    );
+
+    setStatus(
+      "页面已切换，任务已停止",
+      "warn"
+    );
+
+    updateUI();
+  }
+
+  function positionLauncher() {
+    const active =
+      isActiveRoute();
+
+    if (
+      lastActiveRoute &&
+      !active
+    ) {
+      stopTaskWhenLeavingPage();
+    }
+
+    lastActiveRoute = active;
+
+    if (!active) {
+      hideLauncher();
+      return;
+    }
+
+    const input = getInput();
+    const button =
+      document.getElementById(
+        IDS.button
+      );
+
+    if (
+      !input ||
+      !button ||
+      !isVisible(input)
+    ) {
+      if (button) {
+        button.style.display =
+          "none";
+      }
+      return;
+    }
+
+    button.style.display =
+      "block";
+
+    const inputRect =
+      input.getBoundingClientRect();
+
+    const buttonRect =
+      button.getBoundingClientRect();
+
+    const gap =
+      CONFIG.BUTTON_GAP;
+
+    let left =
+      inputRect.right + gap;
+
+    let top =
+      inputRect.top +
+      (inputRect.height -
+        buttonRect.height) / 2;
+
+    // 极窄窗口下如果右侧放不下，退到输入框左侧，
+    // 正常页面仍固定显示在输入框右边。
+    if (
+      left + buttonRect.width >
+      window.innerWidth - 8
+    ) {
+      left =
+        inputRect.left -
+        buttonRect.width -
+        gap;
+    }
+
+    left = Math.max(
+      8,
+      Math.min(
+        left,
+        window.innerWidth -
+        buttonRect.width - 8
+      )
+    );
+
+    top = Math.max(
+      8,
+      Math.min(
+        top,
+        window.innerHeight -
+        buttonRect.height - 8
+      )
+    );
+
+    button.style.left =
+      `${Math.round(left)}px`;
+
+    button.style.top =
+      `${Math.round(top)}px`;
+  }
+
+  function initLauncherWatcher() {
+    const scheduleSync = () => {
+      requestAnimationFrame(
+        positionLauncher
+      );
+    };
+
+    // 页面滚动、窗口缩放时持续跟随 #vid。
+    window.addEventListener(
+      "resize",
+      scheduleSync,
+      { passive: true }
+    );
+
+    window.addEventListener(
+      "scroll",
+      scheduleSync,
+      {
+        passive: true,
+        capture: true
+      }
+    );
+
+    // SPA 切换时 #vid 会被重新挂载。
+    // 观察 DOM 即可在不刷新页面的情况下自动恢复按钮。
+    const observer =
+      new MutationObserver(
+        scheduleSync
+      );
+
+    observer.observe(
+      document.body,
+      {
+        childList: true,
+        subtree: true
+      }
+    );
+
+    // 兜底检测 URL 与异步渲染，避免不同路由框架漏掉。
+    launcherSyncTimer =
+      window.setInterval(
+        positionLauncher,
+        400
+      );
+
+    positionLauncher();
+  }
 
   function init() {
     createUI();
     initAntMessageObserver();
+    initLauncherWatcher();
 
     console.log(
-      "[SOA批量预约] v1.2 已加载。预约单号输入框：#vid，已启用 .ant-message 实时监听"
+      "[SOA批量预约] v1.4 已加载。已支持 SPA 页面切换，按钮会自动固定在 #vid 输入框右侧。"
     );
   }
 
