@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOA.2.5订单流程自动化
 // @namespace    https://tampermonkey.net/
-// @version      1.5
+// @version      1.6
 // @description  SOA订单流程自动化：内勤复核、合同补充、发起落单、落单审核、落单完成及数据提取；支持文件绑定、异常等待和流程状态判定。
 
 // @match        https://checkup-soa3.health-100.cn/*
@@ -27,17 +27,14 @@
  *
  * 更新记录
  *
+ * v1.6  -  2026-8-30
+ * - UI：底部区域改为动态流程状态区，实时显示当前订单阶段。
+ * - UI：“当前阶段：”靠左小号显示，阶段名称根据不同阶段使用独立颜色与字号突出显示。
+ * - 新增：报价单设计、授权审批、报价确认、内勤复核、合同补充、落单审核、落单中、已落单均配置独立提示。
+ * - 优化：仅在“已落单”阶段显示落单数据按钮；进入已落单时自动刷新 processlogs。
+ *
  * v1.5  -  2026-8-30
- * - UI：落单数据区域标题改为居中显示“已落单：点击提取数据”，下方提取按钮保持不变。
- *
- * v1.4  -  2026-8-30
- * - UI：新增“查看说明”；审批备注改为隐藏式设置，仅显示“已配置 / 需要补充”状态。
- * - UI：新增“网页提示”区域，捕获页面消息、通知、确认框及弹窗标题，便于观察自动处理过程。
- * - 优化：进一步压缩常驻面板内容，备注配置默认不展开。
- *
- * v1.3  -  2026-8-30
- * - 优化：页面/面板打开时自动刷新落单数据；状态提示上移；文件绑定与当前文件合并为一行。
- * - 调整：统一使用“立即处理订单”作为业务处理入口。
+ * - UI：落单区域标题居中显示，下方提取按钮保持不变。
  *
  * v1.0  -  2026-8-30
  * - 首个 Tampermonkey 正式版：支持状态驱动审批、合同补充、发起落单、落单审核、文件绑定及 processlogs 落单数据提取。
@@ -159,7 +156,14 @@
       WEB_NOTICE_ID:
         "__soa_flow_web_notice_v14",
       WEB_NOTICE_LIST_ID:
-        "__soa_flow_web_notice_list_v14"
+        "__soa_flow_web_notice_list_v14",
+
+      FLOW_STAGE_LABEL_ID:
+        "__soa_flow_stage_label_v16",
+      FLOW_STAGE_VALUE_ID:
+        "__soa_flow_stage_value_v16",
+      FLOW_STAGE_HINT_ID:
+        "__soa_flow_stage_hint_v16"
     };
   
     let boundFileHandle = null;
@@ -177,6 +181,8 @@
     let webNoticeSeen = new WeakMap();
     let lastWebNoticeSignature = "";
     let lastWebNoticeAt = 0;
+
+    let lastDisplayedFlowStage = "";
   
     function updatePanelStatus(
       message,
@@ -3543,69 +3549,55 @@
         document.getElementById(
           UI.EXTRACT_OPTIONS_ID
         );
-  
+
       if (!container) {
         return [];
       }
-  
-      const waiting =
-        document.getElementById(
-          "__soa_flow_extract_waiting_v010"
-        );
-  
+
       container.innerHTML =
         "";
-  
+
       container.style.display =
         "none";
-  
-      if (waiting) {
-        waiting.style.display =
-          "block";
-      }
-  
+
       const options =
         Array.isArray(
           suppliedOptions
         )
           ? suppliedOptions
           : getLandingTimeOptions();
-  
+
       if (!options.length) {
+        updateFlowStageDisplay();
         return options;
       }
-  
-      if (waiting) {
-        waiting.style.display =
-          "none";
-      }
-  
+
       container.style.display =
         "grid";
-  
+
       container.style.gridTemplateColumns =
         options.length > 1
           ? "1fr 1fr"
           : "1fr";
-  
+
       container.style.gap =
         "8px";
-  
+
       container.style.marginTop =
         "0";
-  
+
       options.forEach(option => {
         const button =
           document.createElement(
             "button"
           );
-  
+
         button.type =
           "button";
-  
+
         button.textContent =
           `${option.label}｜${option.time}`;
-  
+
         button.style.cssText = [
           "min-height:34px",
           "padding:5px 7px",
@@ -3617,7 +3609,7 @@
           "font-size:12px",
           "line-height:1.35"
         ].join(";");
-  
+
         button.addEventListener(
           "click",
           () => {
@@ -3631,15 +3623,17 @@
             });
           }
         );
-  
+
         container.appendChild(
           button
         );
       });
-  
+
+      updateFlowStageDisplay();
+
       return options;
     }
-  
+
     function getCurrentFlowStage() {
       const active =
         document.querySelector(
@@ -3652,6 +3646,187 @@
       );
     }
   
+    function getFlowStagePresentation(
+      stage
+    ) {
+      const presentations = {
+        "报价单设计": {
+          color: "#595959",
+          size: "13px",
+          weight: "600",
+          hint:
+            "当前处于报价单设计阶段，暂不执行自动审批。"
+        },
+
+        "授权审批": {
+          color: "#1677ff",
+          size: "14px",
+          weight: "600",
+          hint:
+            "当前处于授权审批阶段，等待流程进入报价确认。"
+        },
+
+        "报价确认": {
+          color: "#08979c",
+          size: "14px",
+          weight: "700",
+          hint:
+            "当前处于报价确认阶段，等待流程进入内勤复核。"
+        },
+
+        "内勤复核": {
+          color: "#d46b08",
+          size: "15px",
+          weight: "700",
+          hint:
+            "点击“立即处理订单”可自动填写内勤复核备注并继续流程。"
+        },
+
+        "合同补充": {
+          color: "#722ed1",
+          size: "15px",
+          weight: "700",
+          hint:
+            "点击“立即处理订单”可自动完成合同补充、上传文件并发起落单。"
+        },
+
+        "落单审核": {
+          color: "#cf1322",
+          size: "15px",
+          weight: "700",
+          hint:
+            "点击“立即处理订单”可自动填写落单审核备注并确认落单。"
+        },
+
+        "落单中": {
+          color: "#d48806",
+          size: "15px",
+          weight: "700",
+          hint:
+            "订单正在落单，等待页面进入“已落单”状态。"
+        },
+
+        "已落单": {
+          color: "#389e0d",
+          size: "16px",
+          weight: "700",
+          hint:
+            "点击下方按钮提取并复制落单数据。"
+        }
+      };
+
+      return (
+        presentations[stage] ||
+        {
+          color: "#595959",
+          size: "14px",
+          weight: "600",
+          hint:
+            stage
+              ? "当前阶段尚未配置专用提示，请以页面流程进度为准。"
+              : "正在读取页面流程状态..."
+        }
+      );
+    }
+
+    function updateFlowStageDisplay(
+      {
+        refreshOnLanding =
+          false
+      } = {}
+    ) {
+      const labelElement =
+        document.getElementById(
+          UI.FLOW_STAGE_LABEL_ID
+        );
+
+      const valueElement =
+        document.getElementById(
+          UI.FLOW_STAGE_VALUE_ID
+        );
+
+      const hintElement =
+        document.getElementById(
+          UI.FLOW_STAGE_HINT_ID
+        );
+
+      if (
+        !labelElement ||
+        !valueElement ||
+        !hintElement
+      ) {
+        return "";
+      }
+
+      const stage =
+        getCurrentFlowStage();
+
+      const presentation =
+        getFlowStagePresentation(
+          stage
+        );
+
+      labelElement.textContent =
+        "当前阶段：";
+
+      valueElement.textContent =
+        stage || "识别中";
+
+      valueElement.style.color =
+        presentation.color;
+
+      valueElement.style.fontSize =
+        presentation.size;
+
+      valueElement.style.fontWeight =
+        presentation.weight;
+
+      hintElement.textContent =
+        presentation.hint;
+
+      if (
+        stage !== "已落单"
+      ) {
+        cachedLandingTimeOptions = [];
+
+        const extractContainer =
+          document.getElementById(
+            UI.EXTRACT_OPTIONS_ID
+          );
+
+        if (extractContainer) {
+          extractContainer.innerHTML =
+            "";
+
+          extractContainer.style.display =
+            "none";
+        }
+      }
+
+      const changed =
+        stage !==
+        lastDisplayedFlowStage;
+
+      lastDisplayedFlowStage =
+        stage;
+
+      if (
+        refreshOnLanding &&
+        changed &&
+        stage === "已落单"
+      ) {
+        refreshLandingTimeOptions()
+          .catch(error => {
+            console.warn(
+              "[SOA流程自动化] 进入已落单后刷新落单数据失败：",
+              error
+            );
+          });
+      }
+
+      return stage;
+    }
+
     function getStoredText(
       key,
       fallback = ""
@@ -5078,7 +5253,7 @@
             min-width:0;
             font-size:15px;
           ">
-            SOA订单流程自动化 v1.5
+            SOA订单流程自动化 v1.6
           </strong>
   
           <button
@@ -5211,7 +5386,7 @@
                 点击“立即处理订单”，脚本根据当前流程阶段自动审批、合同补充、发起落单并等待状态变化。
               </li>
               <li>
-                订单已落单后，下方会自动显示首次/修改后落单数据按钮，点击即可按 Tab 格式复制。
+                面板底部会实时显示当前流程阶段；不同阶段使用不同颜色突出显示，订单已落单后会自动出现首次/修改后落单数据按钮。
               </li>
               <li>
                 网页出现消息、通知或确认提示时，会同步显示在“网页提示”区域，便于观察处理过程。
@@ -5423,31 +5598,58 @@
             border-top:1px solid #eee;
           ">
             <div style="
-              margin-bottom:6px;
-              text-align:center;
-              color:#333;
-              font-size:13px;
-              font-weight:600;
+              display:flex;
+              align-items:baseline;
+              justify-content:flex-start;
+              gap:4px;
+              margin-bottom:3px;
+              padding-left:1px;
+              text-align:left;
             ">
-              已落单：点击提取数据
+              <span
+                id="${UI.FLOW_STAGE_LABEL_ID}"
+                style="
+                  flex:0 0 auto;
+                  color:#999;
+                  font-size:11px;
+                  font-weight:400;
+                "
+              >
+                当前阶段：
+              </span>
+
+              <strong
+                id="${UI.FLOW_STAGE_VALUE_ID}"
+                style="
+                  min-width:0;
+                  color:#595959;
+                  font-size:14px;
+                  font-weight:600;
+                "
+              >
+                识别中
+              </strong>
             </div>
-  
+
+            <div
+              id="${UI.FLOW_STAGE_HINT_ID}"
+              style="
+                margin-bottom:6px;
+                padding-left:1px;
+                color:#999;
+                font-size:11px;
+                line-height:1.5;
+                text-align:left;
+              "
+            >
+              正在读取页面流程状态...
+            </div>
+
             <div
               id="${UI.EXTRACT_OPTIONS_ID}"
               style="display:none;"
             ></div>
-  
-            <div
-              id="__soa_flow_extract_waiting_v010"
-              style="
-                color:#999;
-                font-size:11px;
-                line-height:1.5;
-              "
-            >
-              订单进入“已落单”后自动读取流程日志并显示复制按钮
-            </div>
-  
+
             <div
               id="${UI.EXTRACT_PREVIEW_ID}"
               style="
@@ -5728,6 +5930,8 @@
        * 每次打开工具面板，都重新获取一次当前订单落单数据。
        */
       if (panelVisible) {
+        updateFlowStageDisplay();
+
         refreshLandingTimeOptions()
           .catch(error => {
             console.warn(
@@ -5899,6 +6103,11 @@
               return;
             }
   
+            updateFlowStageDisplay({
+              refreshOnLanding:
+                true
+            });
+
             scheduleEnsureRouteUi();
           }
         );
@@ -5931,6 +6140,9 @@
       panelVisible =
         false;
   
+      lastDisplayedFlowStage =
+        "";
+
       resetWebNoticeHistory();
   
       removeAutomationSwitch();
@@ -6055,7 +6267,7 @@
     routeCheck();
   
     console.log(
-      "[SOA流程自动化] v1.5 已加载"
+      "[SOA流程自动化] v1.6 已加载"
     );
   })();
   
