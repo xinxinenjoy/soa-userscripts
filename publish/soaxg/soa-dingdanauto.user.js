@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOA.2.5订单流程自动化
 // @namespace    https://tampermonkey.net/
-// @version      1.6
+// @version      1.14
 // @description  SOA订单流程自动化：内勤复核、合同补充、发起落单、落单审核、落单完成及数据提取；支持文件绑定、异常等待和流程状态判定。
 
 // @match        https://checkup-soa3.health-100.cn/*
@@ -27,1733 +27,1985 @@
  *
  * 更新记录
  *
- * v1.6  -  2026-8-30
- * - UI：底部区域改为动态流程状态区，实时显示当前订单阶段。
- * - UI：“当前阶段：”靠左小号显示，阶段名称根据不同阶段使用独立颜色与字号突出显示。
- * - 新增：报价单设计、授权审批、报价确认、内勤复核、合同补充、落单审核、落单中、已落单均配置独立提示。
- * - 优化：仅在“已落单”阶段显示落单数据按钮；进入已落单时自动刷新 processlogs。
+ * v1.14  -  2026-8-30
+ * - UI：网页提示区域新增“清空”按钮，可手动清除本次提示记录。
+ * - 优化：网页提示仅保留当前订单上下文；SPA 直接切换订单时自动清空上一订单提示，并过滤“流程进度”弹窗等低价值噪声。
+ * - UI：体检区间时长字体加深；不足1个月显示天数、不足1年显示月数、1年以上仅显示整数年。
+ * - 保持：提示记录仅存在当前脚本会话内，不做持久化；仍最多保留最近5条。
  *
- * v1.5  -  2026-8-30
- * - UI：落单区域标题居中显示，下方提取按钮保持不变。
+ * v1.13  -  2026-8-30
+ * - UI：备注与文件改为两个并排状态按钮；正常体检日期增加区间时长显示。
  *
  * v1.0  -  2026-8-30
- * - 首个 Tampermonkey 正式版：支持状态驱动审批、合同补充、发起落单、落单审核、文件绑定及 processlogs 落单数据提取。
+ * - 首个 Tampermonkey 正式版：支持状态驱动审批、合同补充、落单处理、文件绑定及 processlogs 落单数据提取。
  */
 
 (function () {
-    "use strict";
-  
-    const TARGET_HASH_PREFIX =
-      "#/order/info";
-  
-    const isTargetRoute =
-      () =>
-        location.hash.startsWith(
-          TARGET_HASH_PREFIX
-        );
-  
-    const CONFIG = {
-      SWITCH_ANCHOR_SELECTOR:
-        "#root > div > div > div > div > section > section > div:nth-of-type(6)",
-  
-      EDIT_SPAN_SELECTOR:
-        "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(4) > div > div > div:nth-of-type(2) > button > span",
-  
-      CONTRACT_COMPANY_SELECTOR:
-        "#contractCompanyCode",
-  
-      CONTRACT_BEGIN_SELECTOR:
-        "#contractBeginDate",
-  
-      CONTRACT_END_SELECTOR:
-        "#contractEndDate",
-  
-      INSPECTION_DAY_SELECTOR:
-        "#inspectionPeopleDay",
-  
-      EDIT_TIMEOUT: 6000,
-      OPTION_TIMEOUT: 5000,
-      PICKER_TIMEOUT: 3500,
-      SAVE_TIMEOUT: 6000,
-      UPLOAD_CONFIRM_TIMEOUT: 8000,
-      POLL_INTERVAL: 100,
-  
-      REACTIVE_POLL_INTERVAL:
-        400,
-      STALL_NOTICE_INTERVAL:
-        12000,
-  
-      PROCESS_LOG_API:
-        "/soa/api/v1/order/processlogs",
-  
-      EXTRACT_ORDER_NAME_SELECTOR:
-        "#register > div",
-      EXTRACT_ORDER_CODE_SELECTOR:
-        "#register > div:nth-of-type(2) > div:nth-of-type(8) > div:nth-of-type(2) > div > div",
-      EXTRACT_OPPORTUNITY_CODE_SELECTOR:
-        "#register > div:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(2) > div > div",
-      EXTRACT_SALESMAN_SELECTOR:
-        "#register > div:nth-of-type(2) > div > div:nth-of-type(2) > div > div > span"
-    };
-  
-    const FILE_BINDING = {
-      DB_NAME:
-        "__SOA_CONTRACT_FILE_BINDING_DB__",
-      DB_VERSION: 1,
-      STORE_NAME: "handles",
-      HANDLE_KEY:
-        "sharedContractFile"
-    };
-  
-    const UI = {
-      PANEL_ID:
-        "__soa_contract_console_panel_v04",
-      FILE_NAME_ID:
-        "__soa_contract_console_filename_v04",
-      STATUS_ID:
-        "__soa_contract_console_status_v04",
-      BIND_BUTTON_ID:
-        "__soa_contract_console_bind_v04",
-      COLLAPSE_BUTTON_ID:
-        "__soa_flow_panel_collapse_v10",
-      PANEL_BODY_ID:
-        "__soa_flow_panel_body_v10",
-      PANEL_COLLAPSED_KEY:
-        "__soa_flow_panel_collapsed_v10",
-      AUTO_SWITCH_ID:
-        "__soa_flow_page_switch_v10",
-      DRAG_HANDLE_ID:
-        "__soa_contract_console_drag_handle_v06",
-      POSITION_KEY:
-        "__soa_contract_console_panel_position_v06",
-      REVIEW_REMARK_ID:
-        "__soa_flow_review_remark_v07",
-      ORDER_REMARK_ID:
-        "__soa_flow_order_remark_v07",
-      FLOW_RUN_BUTTON_ID:
-        "__soa_flow_run_v07",
-      REVIEW_REMARK_KEY:
-        "__soa_flow_review_remark_text_v07",
-      ORDER_REMARK_KEY:
-        "__soa_flow_order_remark_text_v07",
-      EXTRACT_OPTIONS_ID:
-        "__soa_flow_extract_options_v09",
-      EXTRACT_PREVIEW_ID:
-        "__soa_flow_extract_preview_v09",
-  
-      HELP_BUTTON_ID:
-        "__soa_flow_help_button_v14",
-      HELP_PANEL_ID:
-        "__soa_flow_help_panel_v14",
-  
-      REMARK_BUTTON_ID:
-        "__soa_flow_remark_button_v14",
-      REMARK_PANEL_ID:
-        "__soa_flow_remark_panel_v14",
-      REMARK_STATUS_ID:
-        "__soa_flow_remark_status_v14",
-  
-      WEB_NOTICE_ID:
-        "__soa_flow_web_notice_v14",
-      WEB_NOTICE_LIST_ID:
-        "__soa_flow_web_notice_list_v14",
+  "use strict";
 
-      FLOW_STAGE_LABEL_ID:
-        "__soa_flow_stage_label_v16",
-      FLOW_STAGE_VALUE_ID:
-        "__soa_flow_stage_value_v16",
-      FLOW_STAGE_HINT_ID:
-        "__soa_flow_stage_hint_v16"
-    };
-  
-    let boundFileHandle = null;
-    let processRunning = false;
-  
-    let panelVisible = false;
-  
-    let routeObserver = null;
-    let uiEnsureScheduled = false;
-    let boundFileInitialized = false;
-  
-    let webNoticeObserver = null;
-    let webNoticeScanScheduled = false;
-    let webNoticeHistory = [];
-    let webNoticeSeen = new WeakMap();
-    let lastWebNoticeSignature = "";
-    let lastWebNoticeAt = 0;
+  const TARGET_HASH_PREFIX =
+    "#/order/info";
 
-    let lastDisplayedFlowStage = "";
-  
-    function updatePanelStatus(
-      message,
-      type = "normal"
-    ) {
-      const status =
-        document.getElementById(
-          UI.STATUS_ID
-        );
-  
-      if (!status) {
-        return;
-      }
-  
-      status.textContent =
-        String(message || "");
-  
-      status.style.color =
+  const isTargetRoute =
+    () =>
+      location.hash.startsWith(
+        TARGET_HASH_PREFIX
+      );
+
+  const CONFIG = {
+    SWITCH_ORDER_DESC_SELECTOR:
+      ".tabs-wrap > .tabs > .order-desc",
+
+    EDIT_SPAN_SELECTOR:
+      "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(4) > div > div > div:nth-of-type(2) > button > span",
+
+    CONTRACT_COMPANY_SELECTOR:
+      "#contractCompanyCode",
+
+    CONTRACT_BEGIN_SELECTOR:
+      "#contractBeginDate",
+
+    CONTRACT_END_SELECTOR:
+      "#contractEndDate",
+
+    INSPECTION_DAY_SELECTOR:
+      "#inspectionPeopleDay",
+
+    EDIT_TIMEOUT: 6000,
+    OPTION_TIMEOUT: 5000,
+    PICKER_TIMEOUT: 3500,
+    SAVE_TIMEOUT: 6000,
+    UPLOAD_CONFIRM_TIMEOUT: 8000,
+    POLL_INTERVAL: 100,
+
+    REACTIVE_POLL_INTERVAL:
+      400,
+    STALL_NOTICE_INTERVAL:
+      12000,
+
+    PROCESS_LOG_API:
+      "/soa/api/v1/order/processlogs",
+
+    EXTRACT_ORDER_NAME_SELECTOR:
+      "#register > div",
+    EXTRACT_ORDER_CODE_SELECTOR:
+      "#register > div:nth-of-type(2) > div:nth-of-type(8) > div:nth-of-type(2) > div > div",
+    EXTRACT_OPPORTUNITY_CODE_SELECTOR:
+      "#register > div:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(2) > div > div",
+    EXTRACT_SALESMAN_SELECTOR:
+      "#register > div:nth-of-type(2) > div > div:nth-of-type(2) > div > div > span",
+
+    REGISTER_BEGIN_DATE_SELECTOR:
+      "#register_begin_date",
+    REGISTER_END_DATE_SELECTOR:
+      "#register_end_date",
+
+    REGISTER_EDIT_BUTTON_SELECTOR:
+      "#root > div > div > div > div > div:nth-of-type(2) > div > div:nth-of-type(2) > button:nth-of-type(3)"
+  };
+
+  const FILE_BINDING = {
+    DB_NAME:
+      "__SOA_CONTRACT_FILE_BINDING_DB__",
+    DB_VERSION: 1,
+    STORE_NAME: "handles",
+    HANDLE_KEY:
+      "sharedContractFile"
+  };
+
+  const UI = {
+    PANEL_ID:
+      "__soa_contract_console_panel_v04",
+    FILE_NAME_ID:
+      "__soa_contract_console_filename_v04",
+    STATUS_ID:
+      "__soa_contract_console_status_v04",
+    BIND_BUTTON_ID:
+      "__soa_contract_console_bind_v04",
+    COLLAPSE_BUTTON_ID:
+      "__soa_flow_panel_collapse_v10",
+    PANEL_BODY_ID:
+      "__soa_flow_panel_body_v10",
+    PANEL_COLLAPSED_KEY:
+      "__soa_flow_panel_collapsed_v10",
+    AUTO_SWITCH_ID:
+      "__soa_flow_page_switch_v10",
+    DRAG_HANDLE_ID:
+      "__soa_contract_console_drag_handle_v06",
+    POSITION_KEY:
+      "__soa_contract_console_panel_position_v06",
+    REVIEW_REMARK_ID:
+      "__soa_flow_review_remark_v07",
+    ORDER_REMARK_ID:
+      "__soa_flow_order_remark_v07",
+    FLOW_RUN_BUTTON_ID:
+      "__soa_flow_run_v07",
+    REVIEW_REMARK_KEY:
+      "__soa_flow_review_remark_text_v07",
+    ORDER_REMARK_KEY:
+      "__soa_flow_order_remark_text_v07",
+    EXTRACT_OPTIONS_ID:
+      "__soa_flow_extract_options_v09",
+    EXTRACT_PREVIEW_ID:
+      "__soa_flow_extract_preview_v09",
+
+    HELP_BUTTON_ID:
+      "__soa_flow_help_button_v14",
+    HELP_PANEL_ID:
+      "__soa_flow_help_panel_v14",
+
+    REMARK_BUTTON_ID:
+      "__soa_flow_remark_button_v14",
+    REMARK_PANEL_ID:
+      "__soa_flow_remark_panel_v14",
+
+    WEB_NOTICE_ID:
+      "__soa_flow_web_notice_v14",
+    WEB_NOTICE_LIST_ID:
+      "__soa_flow_web_notice_list_v14",
+    WEB_NOTICE_CLEAR_ID:
+      "__soa_flow_web_notice_clear_v114",
+
+    FLOW_STAGE_LABEL_ID:
+      "__soa_flow_stage_label_v16",
+    FLOW_STAGE_VALUE_ID:
+      "__soa_flow_stage_value_v16",
+    FLOW_STAGE_HINT_ID:
+      "__soa_flow_stage_hint_v16",
+
+    EXAM_DATE_SUMMARY_ID:
+      "__soa_flow_exam_date_summary_v18",
+    EXAM_BEGIN_DATE_ID:
+      "__soa_flow_exam_begin_date_v110",
+    EXAM_END_DATE_ID:
+      "__soa_flow_exam_end_date_v110",
+    EXAM_DURATION_ID:
+      "__soa_flow_exam_duration_v113",
+    EXAM_DATE_FIX_BUTTON_ID:
+      "__soa_flow_exam_date_fix_button_v110"
+  };
+
+  let boundFileHandle = null;
+  let processRunning = false;
+
+  let panelVisible = false;
+
+  let routeObserver = null;
+  let uiEnsureScheduled = false;
+  let boundFileInitialized = false;
+
+  let webNoticeObserver = null;
+  let webNoticeScanScheduled = false;
+  let webNoticeHistory = [];
+  let webNoticeSeen = new WeakMap();
+  let lastWebNoticeSignature = "";
+  let lastWebNoticeAt = 0;
+  let lastWebNoticeOrderCode = "";
+
+  let lastDisplayedFlowStage = "";
+
+  let panelStatusHideTimer = null;
+
+  function hidePanelStatus() {
+    const status =
+      document.getElementById(
+        UI.STATUS_ID
+      );
+
+    if (!status) {
+      return;
+    }
+
+    status.style.display =
+      "none";
+
+    status.textContent =
+      "";
+  }
+
+  function updatePanelStatus(
+    message,
+    type = "normal",
+    {
+      persistent =
         type === "error"
-          ? "#cf1322"
-          : type === "success"
-            ? "#389e0d"
-            : "#555";
-    }
-  
-    function log(message, data) {
-      updatePanelStatus(
-        message
+    } = {}
+  ) {
+    const status =
+      document.getElementById(
+        UI.STATUS_ID
       );
-  
-      if (data !== undefined) {
-        console.log(
-          `[SOA流程自动化] ${message}`,
-          data
-        );
-      } else {
-        console.log(
-          `[SOA流程自动化] ${message}`
-        );
-      }
+
+    if (!status) {
+      return;
     }
-  
-    function warn(message, data) {
-      updatePanelStatus(
-        message,
-        "error"
+
+    if (panelStatusHideTimer) {
+      clearTimeout(
+        panelStatusHideTimer
       );
-  
-      if (data !== undefined) {
-        console.warn(
-          `[SOA流程自动化] ${message}`,
-          data
-        );
-      } else {
-        console.warn(
-          `[SOA流程自动化] ${message}`
-        );
-      }
+
+      panelStatusHideTimer =
+        null;
     }
-  
-    function renderWebNoticeHistory() {
-      const wrapper =
-        document.getElementById(
-          UI.WEB_NOTICE_ID
+
+    const text =
+      String(message || "")
+        .trim();
+
+    if (!text) {
+      hidePanelStatus();
+      return;
+    }
+
+    status.style.display =
+      "block";
+
+    status.textContent =
+      text;
+
+    status.style.color =
+      type === "error"
+        ? "#cf1322"
+        : type === "success"
+          ? "#389e0d"
+          : "#555";
+
+    status.style.borderColor =
+      type === "error"
+        ? "#ffccc7"
+        : type === "success"
+          ? "#b7eb8f"
+          : "#eee";
+
+    status.style.background =
+      type === "error"
+        ? "#fff2f0"
+        : type === "success"
+          ? "#f6ffed"
+          : "#fcfcfc";
+
+    /*
+     * 顶部状态区只承担“当前动作/异常”提示。
+     * 普通和成功信息自动收起，错误保留供人工观察。
+     */
+    if (!persistent) {
+      const delay =
+        type === "success"
+          ? 5000
+          : 4000;
+
+      panelStatusHideTimer =
+        setTimeout(
+          () => {
+            hidePanelStatus();
+            panelStatusHideTimer =
+              null;
+          },
+          delay
         );
-  
-      const list =
-        document.getElementById(
-          UI.WEB_NOTICE_LIST_ID
-        );
-  
-      if (
-        !wrapper ||
-        !list
-      ) {
-        return;
-      }
-  
-      if (
-        !webNoticeHistory.length
-      ) {
-        wrapper.style.display =
-          "none";
-  
-        list.textContent =
-          "";
-  
-        return;
-      }
-  
+    }
+  }
+
+  function log(message, data) {
+    updatePanelStatus(
+      message
+    );
+
+    if (data !== undefined) {
+      console.log(
+        `[SOA流程自动化] ${message}`,
+        data
+      );
+    } else {
+      console.log(
+        `[SOA流程自动化] ${message}`
+      );
+    }
+  }
+
+  function warn(message, data) {
+    updatePanelStatus(
+      message,
+      "error"
+    );
+
+    if (data !== undefined) {
+      console.warn(
+        `[SOA流程自动化] ${message}`,
+        data
+      );
+    } else {
+      console.warn(
+        `[SOA流程自动化] ${message}`
+      );
+    }
+  }
+
+  function renderWebNoticeHistory() {
+    const wrapper =
+      document.getElementById(
+        UI.WEB_NOTICE_ID
+      );
+
+    const list =
+      document.getElementById(
+        UI.WEB_NOTICE_LIST_ID
+      );
+
+    if (
+      !wrapper ||
+      !list
+    ) {
+      return;
+    }
+
+    if (
+      !webNoticeHistory.length
+    ) {
       wrapper.style.display =
-        "block";
-  
+        "none";
+
       list.textContent =
-        webNoticeHistory
-          .map(item =>
-            `[${item.time}] ${item.type}：${item.text}`
-          )
-          .join("\n");
-  
-      list.scrollTop =
-        list.scrollHeight;
+        "";
+
+      return;
     }
-  
-    function pushWebNotice(
-      text,
-      type = "提示"
-    ) {
-      const normalized =
-        cleanText(
-          text
-        ).slice(
-          0,
-          180
-        );
-  
-      if (!normalized) {
-        return;
-      }
-  
-      const signature =
-        `${type}|${normalized}`;
-  
-      const now =
-        Date.now();
-  
-      if (
-        signature ===
-          lastWebNoticeSignature &&
-        now -
-          lastWebNoticeAt <
-          1500
-      ) {
-        return;
-      }
-  
-      lastWebNoticeSignature =
-        signature;
-  
-      lastWebNoticeAt =
-        now;
-  
-      webNoticeHistory.push({
-        type,
-        text:
-          normalized,
-        time:
-          new Date()
-            .toLocaleTimeString(
-              "zh-CN",
-              {
-                hour12: false
-              }
-            )
-      });
-  
-      if (
-        webNoticeHistory.length >
-        5
-      ) {
-        webNoticeHistory =
-          webNoticeHistory.slice(
-            -5
-          );
-      }
-  
-      renderWebNoticeHistory();
-    }
-  
-    function getWebNoticeNodeText(
-      node,
-      type
-    ) {
-      if (!node) {
-        return "";
-      }
-  
-      if (
-        node.closest?.(
-          `#${UI.PANEL_ID}`
+
+    wrapper.style.display =
+      "block";
+
+    list.textContent =
+      webNoticeHistory
+        .map(item =>
+          `[${item.time}] ${item.type}：${item.text}`
         )
+        .join("\n");
+
+    list.scrollTop =
+      list.scrollHeight;
+  }
+
+  function syncWebNoticeOrderContext() {
+    const orderCode =
+      getCurrentOrderCode();
+
+    if (!orderCode) {
+      return;
+    }
+
+    if (
+      lastWebNoticeOrderCode &&
+      lastWebNoticeOrderCode !==
+        orderCode
+    ) {
+      resetWebNoticeHistory();
+    }
+
+    lastWebNoticeOrderCode =
+      orderCode;
+  }
+
+  function pushWebNotice(
+    text,
+    type = "提示"
+  ) {
+    syncWebNoticeOrderContext();
+
+    const normalized =
+      cleanText(
+        text
+      ).slice(
+        0,
+        180
+      );
+
+    if (!normalized) {
+      return;
+    }
+
+    const signature =
+      `${type}|${normalized}`;
+
+    const now =
+      Date.now();
+
+    if (
+      signature ===
+        lastWebNoticeSignature &&
+      now -
+        lastWebNoticeAt <
+        1500
+    ) {
+      return;
+    }
+
+    lastWebNoticeSignature =
+      signature;
+
+    lastWebNoticeAt =
+      now;
+
+    webNoticeHistory.push({
+      type,
+      text:
+        normalized,
+      time:
+        new Date()
+          .toLocaleTimeString(
+            "zh-CN",
+            {
+              hour12: false
+            }
+          )
+    });
+
+    if (
+      webNoticeHistory.length >
+      5
+    ) {
+      webNoticeHistory =
+        webNoticeHistory.slice(
+          -5
+        );
+    }
+
+    renderWebNoticeHistory();
+  }
+
+  function getWebNoticeNodeText(
+    node,
+    type
+  ) {
+    if (!node) {
+      return "";
+    }
+
+    if (
+      node.closest?.(
+        `#${UI.PANEL_ID}`
+      )
+    ) {
+      return "";
+    }
+
+    if (
+      type === "弹窗"
+    ) {
+      const title =
+        cleanText(
+          node.querySelector(
+            ".ant-modal-title"
+          )?.textContent
+        );
+
+      if (
+        title ===
+        "流程进度"
       ) {
         return "";
       }
-  
-      if (
-        type === "弹窗"
-      ) {
-        const title =
-          cleanText(
-            node.querySelector(
-              ".ant-modal-title"
-            )?.textContent
-          );
-  
-        return title;
-      }
-  
-      return cleanText(
-        node.innerText ||
-        node.textContent
-      );
+
+      return title;
     }
-  
-    function scanWebNotices() {
-      if (
-        !isTargetRoute()
-      ) {
-        return;
+
+    return cleanText(
+      node.innerText ||
+      node.textContent
+    );
+  }
+
+  function scanWebNotices() {
+    if (
+      !isTargetRoute()
+    ) {
+      return;
+    }
+
+    syncWebNoticeOrderContext();
+
+    const groups = [
+      {
+        selector:
+          ".ant-message-notice-content",
+        type:
+          "消息"
+      },
+      {
+        selector:
+          ".ant-notification-notice",
+        type:
+          "通知"
+      },
+      {
+        selector:
+          ".ant-popconfirm",
+        type:
+          "确认提示"
+      },
+      {
+        selector:
+          ".ant-modal-confirm",
+        type:
+          "确认弹窗"
+      },
+      {
+        selector:
+          ".ant-modal",
+        type:
+          "弹窗"
       }
-  
-      const groups = [
-        {
-          selector:
-            ".ant-message-notice-content",
-          type:
-            "消息"
-        },
-        {
-          selector:
-            ".ant-notification-notice",
-          type:
-            "通知"
-        },
-        {
-          selector:
-            ".ant-popconfirm",
-          type:
-            "确认提示"
-        },
-        {
-          selector:
-            ".ant-modal-confirm",
-          type:
-            "确认弹窗"
-        },
-        {
-          selector:
-            ".ant-modal",
-          type:
-            "弹窗"
-        }
-      ];
-  
-      groups.forEach(group => {
-        document
-          .querySelectorAll(
-            group.selector
-          )
-          .forEach(node => {
-            if (
-              !isVisible(node)
-            ) {
-              return;
-            }
-  
-            const text =
-              getWebNoticeNodeText(
-                node,
-                group.type
-              );
-  
-            if (!text) {
-              return;
-            }
-  
-            const previous =
-              webNoticeSeen.get(
-                node
-              );
-  
-            if (
-              previous === text
-            ) {
-              return;
-            }
-  
-            webNoticeSeen.set(
+    ];
+
+    groups.forEach(group => {
+      document
+        .querySelectorAll(
+          group.selector
+        )
+        .forEach(node => {
+          if (
+            !isVisible(node)
+          ) {
+            return;
+          }
+
+          const text =
+            getWebNoticeNodeText(
               node,
-              text
-            );
-  
-            pushWebNotice(
-              text,
               group.type
             );
-          });
-      });
-    }
-  
-    function scheduleWebNoticeScan() {
-      if (
-        webNoticeScanScheduled
-      ) {
-        return;
-      }
-  
-      webNoticeScanScheduled =
-        true;
-  
-      requestAnimationFrame(
-        () => {
-          webNoticeScanScheduled =
-            false;
-  
-          scanWebNotices();
-        }
-      );
-    }
-  
-    function connectWebNoticeObserver() {
-      if (
-        webNoticeObserver ||
-        !document.body
-      ) {
-        return;
-      }
-  
-      webNoticeObserver =
-        new MutationObserver(
-          () => {
-            scheduleWebNoticeScan();
+
+          if (!text) {
+            return;
           }
-        );
-  
-      webNoticeObserver.observe(
-        document.body,
-        {
-          childList: true,
-          subtree: true,
-          characterData: true
-        }
-      );
-  
-      scheduleWebNoticeScan();
-    }
-  
-    function disconnectWebNoticeObserver() {
-      if (
-        webNoticeObserver
-      ) {
-        webNoticeObserver.disconnect();
-        webNoticeObserver =
-          null;
-      }
-  
-      webNoticeScanScheduled =
-        false;
-    }
-  
-    function resetWebNoticeHistory() {
-      webNoticeHistory = [];
-      webNoticeSeen =
-        new WeakMap();
-  
-      lastWebNoticeSignature =
-        "";
-  
-      lastWebNoticeAt =
-        0;
-  
-      renderWebNoticeHistory();
-    }
-  
-    function sleep(ms) {
-      return new Promise(
-        resolve => setTimeout(resolve, ms)
-      );
-    }
-  
-    function cleanText(value) {
-      return String(
-        value ?? ""
-      )
-        .replace(/\s+/g, " ")
-        .trim();
-    }
-  
-    function compactText(value) {
-      return cleanText(value)
-        .replace(/\s+/g, "");
-    }
-  
-    function isVisible(element) {
-      if (!element) {
-        return false;
-      }
-  
-      const style =
-        getComputedStyle(element);
-  
-      if (
-        style.display === "none" ||
-        style.visibility === "hidden" ||
-        Number(style.opacity) === 0
-      ) {
-        return false;
-      }
-  
-      const rect =
-        element.getBoundingClientRect();
-  
-      return (
-        rect.width > 0 &&
-        rect.height > 0
-      );
-    }
-  
-    async function waitFor(
-      getter,
-      timeout,
-      interval = CONFIG.POLL_INTERVAL
-    ) {
-      const startedAt =
-        Date.now();
-  
-      while (
-        Date.now() - startedAt < timeout
-      ) {
-        const result =
-          getter();
-  
-        if (result) {
-          return result;
-        }
-  
-        await sleep(interval);
-      }
-  
-      return null;
-    }
-  
-    class FlowBlockedError extends Error {
-      constructor(message) {
-        super(message);
-        this.name =
-          "FlowBlockedError";
-      }
-    }
-  
-    function nextPaint(
-      count = 2
-    ) {
-      return new Promise(resolve => {
-        const step =
-          remaining => {
-            if (
-              remaining <= 0
-            ) {
-              resolve();
-              return;
-            }
-  
-            requestAnimationFrame(
-              () =>
-                step(
-                  remaining - 1
-                )
+
+          const previous =
+            webNoticeSeen.get(
+              node
             );
-          };
-  
-        step(count);
-      });
-    }
-  
-    function isAutomationTokenActive(
-      token
-    ) {
-      return isTargetRoute();
-    }
-  
-    function getVisibleErrorFeedback() {
-      const selectors = [
-        ".ant-message-notice-content",
-        ".ant-notification-notice",
-        ".ant-form-item-explain-error",
-        ".ant-alert-error",
-        ".ant-modal-confirm-error"
-      ];
-  
-      const keywords = [
-        "失败",
-        "错误",
-        "异常",
-        "网络",
-        "超时",
-        "重试",
-        "不能为空",
-        "必填",
-        "校验",
-        "无权限",
-        "未成功",
-        "系统繁忙",
-        "请求失败"
-      ];
-  
-      for (
-        const selector of selectors
-      ) {
-        const nodes =
-          Array.from(
-            document.querySelectorAll(
-              selector
-            )
-          ).filter(isVisible);
-  
-        for (const node of nodes) {
-          const text =
-            cleanText(
-              node.textContent
-            );
-  
+
           if (
-            text &&
-            keywords.some(
-              word =>
-                text.includes(word)
-            )
+            previous === text
           ) {
-            return text;
+            return;
           }
-        }
-      }
-  
-      return "";
+
+          webNoticeSeen.set(
+            node,
+            text
+          );
+
+          pushWebNotice(
+            text,
+            group.type
+          );
+        });
+    });
+  }
+
+  function scheduleWebNoticeScan() {
+    if (
+      webNoticeScanScheduled
+    ) {
+      return;
     }
-  
-    function getUnexpectedModalText() {
-      const modals =
+
+    webNoticeScanScheduled =
+      true;
+
+    requestAnimationFrame(
+      () => {
+        webNoticeScanScheduled =
+          false;
+
+        scanWebNotices();
+      }
+    );
+  }
+
+  function connectWebNoticeObserver() {
+    if (
+      webNoticeObserver ||
+      !document.body
+    ) {
+      return;
+    }
+
+    webNoticeObserver =
+      new MutationObserver(
+        () => {
+          scheduleWebNoticeScan();
+        }
+      );
+
+    webNoticeObserver.observe(
+      document.body,
+      {
+        childList: true,
+        subtree: true,
+        characterData: true
+      }
+    );
+
+    scheduleWebNoticeScan();
+  }
+
+  function disconnectWebNoticeObserver() {
+    if (
+      webNoticeObserver
+    ) {
+      webNoticeObserver.disconnect();
+      webNoticeObserver =
+        null;
+    }
+
+    webNoticeScanScheduled =
+      false;
+  }
+
+  function resetWebNoticeHistory() {
+    webNoticeHistory = [];
+    webNoticeSeen =
+      new WeakMap();
+
+    lastWebNoticeSignature =
+      "";
+
+    lastWebNoticeAt =
+      0;
+
+    renderWebNoticeHistory();
+  }
+
+  function sleep(ms) {
+    return new Promise(
+      resolve => setTimeout(resolve, ms)
+    );
+  }
+
+  function cleanText(value) {
+    return String(
+      value ?? ""
+    )
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function compactText(value) {
+    return cleanText(value)
+      .replace(/\s+/g, "");
+  }
+
+  function isVisible(element) {
+    if (!element) {
+      return false;
+    }
+
+    const style =
+      getComputedStyle(element);
+
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      Number(style.opacity) === 0
+    ) {
+      return false;
+    }
+
+    const rect =
+      element.getBoundingClientRect();
+
+    return (
+      rect.width > 0 &&
+      rect.height > 0
+    );
+  }
+
+  async function waitFor(
+    getter,
+    timeout,
+    interval = CONFIG.POLL_INTERVAL
+  ) {
+    const startedAt =
+      Date.now();
+
+    while (
+      Date.now() - startedAt < timeout
+    ) {
+      const result =
+        getter();
+
+      if (result) {
+        return result;
+      }
+
+      await sleep(interval);
+    }
+
+    return null;
+  }
+
+  class FlowBlockedError extends Error {
+    constructor(message) {
+      super(message);
+      this.name =
+        "FlowBlockedError";
+    }
+  }
+
+  function nextPaint(
+    count = 2
+  ) {
+    return new Promise(resolve => {
+      const step =
+        remaining => {
+          if (
+            remaining <= 0
+          ) {
+            resolve();
+            return;
+          }
+
+          requestAnimationFrame(
+            () =>
+              step(
+                remaining - 1
+              )
+          );
+        };
+
+      step(count);
+    });
+  }
+
+  function isAutomationTokenActive(
+    token
+  ) {
+    return isTargetRoute();
+  }
+
+  function getVisibleErrorFeedback() {
+    const selectors = [
+      ".ant-message-notice-content",
+      ".ant-notification-notice",
+      ".ant-form-item-explain-error",
+      ".ant-alert-error",
+      ".ant-modal-confirm-error"
+    ];
+
+    const keywords = [
+      "失败",
+      "错误",
+      "异常",
+      "网络",
+      "超时",
+      "重试",
+      "不能为空",
+      "必填",
+      "校验",
+      "无权限",
+      "未成功",
+      "系统繁忙",
+      "请求失败"
+    ];
+
+    for (
+      const selector of selectors
+    ) {
+      const nodes =
         Array.from(
           document.querySelectorAll(
-            ".ant-modal"
+            selector
           )
         ).filter(isVisible);
-  
-      for (const modal of modals) {
-        if (
-          modal ===
-          getVisibleApprovalModal()
-        ) {
-          continue;
-        }
-  
-        const title =
-          cleanText(
-            modal.querySelector(
-              ".ant-modal-title"
-            )?.textContent
-          );
-  
+
+      for (const node of nodes) {
         const text =
           cleanText(
-            modal.textContent
+            node.textContent
           );
-  
+
         if (
-          title === "流程进度"
+          text &&
+          keywords.some(
+            word =>
+              text.includes(word)
+          )
         ) {
-          continue;
+          return text;
         }
-  
-        if (
+      }
+    }
+
+    return "";
+  }
+
+  function getUnexpectedModalText() {
+    const modals =
+      Array.from(
+        document.querySelectorAll(
+          ".ant-modal"
+        )
+      ).filter(isVisible);
+
+    for (const modal of modals) {
+      if (
+        modal ===
+        getVisibleApprovalModal()
+      ) {
+        continue;
+      }
+
+      const title =
+        cleanText(
+          modal.querySelector(
+            ".ant-modal-title"
+          )?.textContent
+        );
+
+      const text =
+        cleanText(
+          modal.textContent
+        );
+
+      if (
+        title === "流程进度"
+      ) {
+        continue;
+      }
+
+      if (
+        title ||
+        text
+      ) {
+        return (
           title ||
-          text
-        ) {
-          return (
-            title ||
-            text.slice(0, 120)
-          );
-        }
+          text.slice(0, 120)
+        );
       }
-  
-      return "";
     }
-  
-    function getPageBlocker(
-      {
-        allowApprovalModal = true,
-        allowLandingPopconfirm = true
-      } = {}
-    ) {
-      const errorText =
-        getVisibleErrorFeedback();
-  
-      if (errorText) {
-        return errorText;
-      }
-  
-      if (
-        !allowApprovalModal
-      ) {
-        const approval =
-          getVisibleApprovalModal();
-  
-        if (approval) {
-          return "页面存在未处理的审批弹窗";
-        }
-      }
-  
-      if (
-        !allowLandingPopconfirm &&
-        getVisibleLandingPopconfirm()
-      ) {
-        return "页面存在未处理的发起落单确认框";
-      }
-  
-      const unexpected =
-        getUnexpectedModalText();
-  
-      if (unexpected) {
-        return `检测到非预期弹窗：${unexpected}`;
-      }
-  
-      return "";
+
+    return "";
+  }
+
+  function getPageBlocker(
+    {
+      allowApprovalModal = true,
+      allowLandingPopconfirm = true
+    } = {}
+  ) {
+    const errorText =
+      getVisibleErrorFeedback();
+
+    if (errorText) {
+      return errorText;
     }
-  
-    function waitForReactiveCondition(
-      test,
-      {
-        label = "页面状态",
-        token = null,
-        blockerCheck = null
-      } = {}
+
+    if (
+      !allowApprovalModal
     ) {
-      return new Promise(
-        (resolve, reject) => {
-          let finished = false;
-          let observer = null;
-          let pollTimer = null;
-          let noticeTimer = null;
-  
-          const cleanup =
-            () => {
-              if (observer) {
-                observer.disconnect();
-                observer = null;
-              }
-  
-              if (pollTimer) {
-                clearInterval(
-                  pollTimer
-                );
-                pollTimer = null;
-              }
-  
-              if (noticeTimer) {
-                clearInterval(
-                  noticeTimer
-                );
-                noticeTimer = null;
-              }
-            };
-  
-          const finishResolve =
-            value => {
-              if (finished) {
-                return;
-              }
-  
-              finished = true;
-              cleanup();
-              resolve(value);
-            };
-  
-          const finishReject =
-            error => {
-              if (finished) {
-                return;
-              }
-  
-              finished = true;
-              cleanup();
-              reject(error);
-            };
-  
-          const check =
-            () => {
-              if (blockerCheck) {
-                const blocker =
-                  blockerCheck();
-  
-                if (blocker) {
-                  finishReject(
-                    new FlowBlockedError(
-                      blocker
-                    )
-                  );
-                  return;
-                }
-              }
-  
-              try {
-                const result =
-                  test();
-  
-                if (result) {
-                  finishResolve(
-                    result
-                  );
-                }
-              } catch (error) {
-                finishReject(error);
-              }
-            };
-  
-          observer =
-            new MutationObserver(
-              check
-            );
-  
-          observer.observe(
-            document.documentElement,
-            {
-              childList: true,
-              subtree: true,
-              attributes: true,
-              characterData: true
+      const approval =
+        getVisibleApprovalModal();
+
+      if (approval) {
+        return "页面存在未处理的审批弹窗";
+      }
+    }
+
+    if (
+      !allowLandingPopconfirm &&
+      getVisibleLandingPopconfirm()
+    ) {
+      return "页面存在未处理的发起落单确认框";
+    }
+
+    const unexpected =
+      getUnexpectedModalText();
+
+    if (unexpected) {
+      return `检测到非预期弹窗：${unexpected}`;
+    }
+
+    return "";
+  }
+
+  function waitForReactiveCondition(
+    test,
+    {
+      label = "页面状态",
+      token = null,
+      blockerCheck = null
+    } = {}
+  ) {
+    return new Promise(
+      (resolve, reject) => {
+        let finished = false;
+        let observer = null;
+        let pollTimer = null;
+        let noticeTimer = null;
+
+        const cleanup =
+          () => {
+            if (observer) {
+              observer.disconnect();
+              observer = null;
             }
-          );
-  
-          /*
-           * MutationObserver 是主触发方式；
-           * 轮询只用于 React/样式变化未产生合适 mutation 时的兜底。
-           */
-          pollTimer =
-            setInterval(
-              check,
-              CONFIG.REACTIVE_POLL_INTERVAL
-            );
-  
-          /*
-           * 这里只提示“仍在等待”，不会因为时间到了就自动点下一步。
-           */
-          noticeTimer =
-            setInterval(
-              () => {
-                updatePanelStatus(
-                  `仍在等待：${label}。页面较慢时会继续等待，不会重复提交。`
+
+            if (pollTimer) {
+              clearInterval(
+                pollTimer
+              );
+              pollTimer = null;
+            }
+
+            if (noticeTimer) {
+              clearInterval(
+                noticeTimer
+              );
+              noticeTimer = null;
+            }
+          };
+
+        const finishResolve =
+          value => {
+            if (finished) {
+              return;
+            }
+
+            finished = true;
+            cleanup();
+            resolve(value);
+          };
+
+        const finishReject =
+          error => {
+            if (finished) {
+              return;
+            }
+
+            finished = true;
+            cleanup();
+            reject(error);
+          };
+
+        const check =
+          () => {
+            if (blockerCheck) {
+              const blocker =
+                blockerCheck();
+
+              if (blocker) {
+                finishReject(
+                  new FlowBlockedError(
+                    blocker
+                  )
                 );
-              },
-              CONFIG.STALL_NOTICE_INTERVAL
-            );
-  
-          check();
-        }
-      );
-    }
-  
-    async function waitForStableControlledValue(
-      element,
-      expected
-    ) {
-      const expectedText =
-        String(expected);
-  
-      for (
-        let attempt = 0;
-        attempt < 4;
-        attempt++
-      ) {
-        if (
-          String(
-            element.value
-          ) !== expectedText
-        ) {
-          setNativeInputValue(
-            element,
-            expectedText
+                return;
+              }
+            }
+
+            try {
+              const result =
+                test();
+
+              if (result) {
+                finishResolve(
+                  result
+                );
+              }
+            } catch (error) {
+              finishReject(error);
+            }
+          };
+
+        observer =
+          new MutationObserver(
+            check
           );
-        }
-  
+
+        observer.observe(
+          document.documentElement,
+          {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            characterData: true
+          }
+        );
+
         /*
-         * 等 React 完成一次或多次绘制，而不是固定 sleep。
+         * MutationObserver 是主触发方式；
+         * 轮询只用于 React/样式变化未产生合适 mutation 时的兜底。
          */
+        pollTimer =
+          setInterval(
+            check,
+            CONFIG.REACTIVE_POLL_INTERVAL
+          );
+
+        /*
+         * 这里只提示“仍在等待”，不会因为时间到了就自动点下一步。
+         */
+        noticeTimer =
+          setInterval(
+            () => {
+              updatePanelStatus(
+                `仍在等待：${label}。页面较慢时会继续等待，不会重复提交。`
+              );
+            },
+            CONFIG.STALL_NOTICE_INTERVAL
+          );
+
+        check();
+      }
+    );
+  }
+
+  async function waitForStableControlledValue(
+    element,
+    expected
+  ) {
+    const expectedText =
+      String(expected);
+
+    for (
+      let attempt = 0;
+      attempt < 4;
+      attempt++
+    ) {
+      if (
+        String(
+          element.value
+        ) !== expectedText
+      ) {
+        setNativeInputValue(
+          element,
+          expectedText
+        );
+      }
+
+      /*
+       * 等 React 完成一次或多次绘制，而不是固定 sleep。
+       */
+      await nextPaint(2);
+
+      if (
+        String(
+          element.value
+        ) === expectedText
+      ) {
         await nextPaint(2);
-  
+
         if (
           String(
             element.value
           ) === expectedText
         ) {
-          await nextPaint(2);
-  
-          if (
-            String(
-              element.value
-            ) === expectedText
-          ) {
-            return true;
-          }
+          return true;
         }
       }
-  
-      return false;
     }
-  
-    function formatDate(date) {
-      const year =
-        date.getFullYear();
-  
-      const month =
-        String(
-          date.getMonth() + 1
-        ).padStart(2, "0");
-  
-      const day =
-        String(
-          date.getDate()
-        ).padStart(2, "0");
-  
-      return `${year}-${month}-${day}`;
-    }
-  
-    function addOneYear(date) {
-      const source =
-        new Date(date);
-  
-      const targetYear =
-        source.getFullYear() + 1;
-  
-      const month =
-        source.getMonth();
-  
-      const day =
-        source.getDate();
-  
-      const lastDay =
-        new Date(
-          targetYear,
-          month + 1,
-          0
-        ).getDate();
-  
-      return new Date(
+
+    return false;
+  }
+
+  function formatDate(date) {
+    const year =
+      date.getFullYear();
+
+    const month =
+      String(
+        date.getMonth() + 1
+      ).padStart(2, "0");
+
+    const day =
+      String(
+        date.getDate()
+      ).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+  }
+
+  function addOneYear(date) {
+    const source =
+      new Date(date);
+
+    const targetYear =
+      source.getFullYear() + 1;
+
+    const month =
+      source.getMonth();
+
+    const day =
+      source.getDate();
+
+    const lastDay =
+      new Date(
         targetYear,
-        month,
-        Math.min(
-          day,
-          lastDay
-        )
+        month + 1,
+        0
+      ).getDate();
+
+    return new Date(
+      targetYear,
+      month,
+      Math.min(
+        day,
+        lastDay
+      )
+    );
+  }
+
+  function addCalendarYears(
+    date,
+    years
+  ) {
+    const source =
+      new Date(date);
+
+    const targetYear =
+      source.getFullYear() +
+      Number(years || 0);
+
+    const month =
+      source.getMonth();
+
+    const day =
+      source.getDate();
+
+    const lastDay =
+      new Date(
+        targetYear,
+        month + 1,
+        0
+      ).getDate();
+
+    return new Date(
+      targetYear,
+      month,
+      Math.min(
+        day,
+        lastDay
+      )
+    );
+  }
+
+  function parseYmdDate(
+    value
+  ) {
+    const text =
+      cleanText(value);
+
+    const match =
+      text.match(
+        /^(\d{4})-(\d{1,2})-(\d{1,2})$/
       );
+
+    if (!match) {
+      return null;
     }
-  
-    function setNativeInputValue(
-      element,
-      value
+
+    const year =
+      Number(match[1]);
+
+    const month =
+      Number(match[2]);
+
+    const day =
+      Number(match[3]);
+
+    const date =
+      new Date(
+        year,
+        month - 1,
+        day
+      );
+
+    if (
+      date.getFullYear() !== year ||
+      date.getMonth() !== month - 1 ||
+      date.getDate() !== day
     ) {
-      if (!element) {
-        throw new Error(
-          "setNativeInputValue: element 为空"
-        );
-      }
-  
-      let prototype = null;
-  
-      if (
-        element instanceof
-          HTMLTextAreaElement
-      ) {
-        prototype =
-          HTMLTextAreaElement
-            .prototype;
-      } else if (
-        element instanceof
-          HTMLInputElement
-      ) {
-        prototype =
-          HTMLInputElement
-            .prototype;
-      } else {
-        prototype =
-          Object.getPrototypeOf(
-            element
-          );
-      }
-  
-      const descriptor =
-        prototype
-          ? Object
-              .getOwnPropertyDescriptor(
-                prototype,
-                "value"
-              )
-          : null;
-  
-      if (
-        descriptor &&
-        typeof descriptor.set ===
-          "function"
-      ) {
-        descriptor.set.call(
-          element,
-          String(value)
-        );
-      } else {
-        element.value =
-          String(value);
-      }
-  
-      element.dispatchEvent(
-        new Event(
-          "input",
-          {
-            bubbles: true
-          }
-        )
-      );
-  
-      element.dispatchEvent(
-        new Event(
-          "change",
-          {
-            bubbles: true
-          }
-        )
-      );
+      return null;
     }
-  
-    function fireMouseSequence(
-      element
+
+    return {
+      date,
+      text:
+        formatDate(date),
+      key:
+        year * 10000 +
+        month * 100 +
+        day
+    };
+  }
+
+  function addCalendarMonths(
+    date,
+    months
+  ) {
+    const source =
+      new Date(date);
+
+    const firstOfTarget =
+      new Date(
+        source.getFullYear(),
+        source.getMonth() +
+          Number(months || 0),
+        1
+      );
+
+    const targetYear =
+      firstOfTarget.getFullYear();
+
+    const targetMonth =
+      firstOfTarget.getMonth();
+
+    const lastDay =
+      new Date(
+        targetYear,
+        targetMonth + 1,
+        0
+      ).getDate();
+
+    return new Date(
+      targetYear,
+      targetMonth,
+      Math.min(
+        source.getDate(),
+        lastDay
+      )
+    );
+  }
+
+  function dateDiffDays(
+    beginDate,
+    endDate
+  ) {
+    const beginUtc =
+      Date.UTC(
+        beginDate.getFullYear(),
+        beginDate.getMonth(),
+        beginDate.getDate()
+      );
+
+    const endUtc =
+      Date.UTC(
+        endDate.getFullYear(),
+        endDate.getMonth(),
+        endDate.getDate()
+      );
+
+    return Math.max(
+      0,
+      Math.floor(
+        (
+          endUtc -
+          beginUtc
+        ) /
+        86400000
+      )
+    );
+  }
+
+  function getExamDurationText(
+    beginDate,
+    endDate
+  ) {
+    if (
+      !(beginDate instanceof Date) ||
+      !(endDate instanceof Date) ||
+      endDate <
+        beginDate
     ) {
-      if (!element) {
-        return;
-      }
-  
-      [
-        "mousedown",
-        "mouseup",
-        "click"
-      ].forEach(type => {
-        element.dispatchEvent(
-          new MouseEvent(
-            type,
-            {
-              bubbles: true,
-              cancelable: true,
-              view: window
-            }
-          )
-        );
-      });
+      return "";
     }
-  
-    function getContractContainer() {
-      const nodes =
-        Array.from(
-          document.querySelectorAll(
-            ".contractcontainer"
-          )
-        );
-  
-      return (
-        nodes.find(isVisible) ||
-        nodes[0] ||
-        null
+
+    let totalMonths =
+      (
+        endDate.getFullYear() -
+        beginDate.getFullYear()
+      ) * 12 +
+      (
+        endDate.getMonth() -
+        beginDate.getMonth()
       );
-    }
-  
-    function contractPageVisible() {
-      const container =
-        getContractContainer();
-  
-      return Boolean(
-        container &&
-        isVisible(container)
+
+    let anchor =
+      addCalendarMonths(
+        beginDate,
+        totalMonths
       );
+
+    if (
+      anchor >
+      endDate
+    ) {
+      totalMonths -= 1;
+
+      anchor =
+        addCalendarMonths(
+          beginDate,
+          totalMonths
+        );
     }
-  
-    function getEditButton() {
-      const preferredSpan =
-        document.querySelector(
-          CONFIG.EDIT_SPAN_SELECTOR
+
+    if (
+      totalMonths >= 12
+    ) {
+      const years =
+        Math.floor(
+          totalMonths / 12
         );
-  
-      const preferredButton =
-        preferredSpan?.closest(
-          "button"
-        );
-  
-      if (
-        preferredButton &&
-        isVisible(preferredButton) &&
-        compactText(
-          preferredButton.textContent
-        ) === "编辑"
-      ) {
-        return preferredButton;
-      }
-  
-      const container =
-        getContractContainer();
-  
-      if (!container) {
-        return null;
-      }
-  
-      return (
-        Array.from(
-          container.querySelectorAll(
-            "button"
-          )
-        ).find(button => {
-          return (
-            isVisible(button) &&
-            compactText(
-              button.textContent
-            ) === "编辑"
-          );
-        }) ||
-        null
+
+      return `${years}年`;
+    }
+
+    if (
+      totalMonths >= 1
+    ) {
+      return `${totalMonths}个月`;
+    }
+
+    return `${dateDiffDays(
+      beginDate,
+      endDate
+    )}天`;
+  }
+
+  function readDateInputText(
+    selector
+  ) {
+    const element =
+      document.querySelector(
+        selector
       );
+
+    if (!element) {
+      return "";
     }
-  
-    function formLooksEditable() {
-      const company =
-        document.querySelector(
-          CONFIG.CONTRACT_COMPANY_SELECTOR
-        );
-  
-      const begin =
-        document.querySelector(
-          CONFIG.CONTRACT_BEGIN_SELECTOR
-        );
-  
-      const end =
-        document.querySelector(
-          CONFIG.CONTRACT_END_SELECTOR
-        );
-  
-      return Boolean(
-        company &&
+
+    return cleanText(
+      element.value ||
+      element.getAttribute(
+        "title"
+      ) ||
+      element.textContent ||
+      ""
+    );
+  }
+
+  function shouldCheckExamDates(
+    stage
+  ) {
+    const sequence = [
+      "报价单设计",
+      "授权审批",
+      "报价确认",
+      "内勤复核",
+      "合同补充",
+      "落单审核",
+      "落单中",
+      "已落单"
+    ];
+
+    const threshold =
+      sequence.indexOf(
+        "报价确认"
+      );
+
+    const current =
+      sequence.indexOf(
+        stage
+      );
+
+    return (
+      current >= threshold &&
+      threshold >= 0
+    );
+  }
+
+  function getExamDateState(
+    stage =
+      getCurrentFlowStage()
+  ) {
+    const beginElement =
+      document.querySelector(
+        CONFIG.REGISTER_BEGIN_DATE_SELECTOR
+      );
+
+    const endElement =
+      document.querySelector(
+        CONFIG.REGISTER_END_DATE_SELECTOR
+      );
+
+    if (
+      !shouldCheckExamDates(stage) ||
+      !beginElement ||
+      !endElement
+    ) {
+      return {
+        stage,
+        applicable: false,
+        abnormal: false,
+        beginAbnormal: false,
+        endAbnormal: false,
+        reason:
+          "not-applicable"
+      };
+    }
+
+    const beginText =
+      readDateInputText(
+        CONFIG.REGISTER_BEGIN_DATE_SELECTOR
+      );
+
+    const endText =
+      readDateInputText(
+        CONFIG.REGISTER_END_DATE_SELECTOR
+      );
+
+    const begin =
+      parseYmdDate(
+        beginText
+      );
+
+    const end =
+      parseYmdDate(
+        endText
+      );
+
+    const today =
+      new Date();
+
+    today.setHours(
+      0,
+      0,
+      0,
+      0
+    );
+
+    const todayInfo =
+      parseYmdDate(
+        formatDate(today)
+      );
+
+    const beginInvalid =
+      !begin ||
+      !todayInfo;
+
+    const endInvalid =
+      !end ||
+      !todayInfo;
+
+    const startsAfterToday =
+      Boolean(
+        begin &&
+        todayInfo &&
+        begin.key >
+          todayInfo.key
+      );
+
+    const endsBeforeToday =
+      Boolean(
+        end &&
+        todayInfo &&
+        end.key <
+          todayInfo.key
+      );
+
+    /*
+     * 若结束日期早于开始日期，将异常归到结束日期，
+     * 避免两个日期一起标红。
+     */
+    const endBeforeBegin =
+      Boolean(
         begin &&
         end &&
-        !company.disabled &&
-        !begin.disabled &&
-        !end.disabled &&
-        !company
-          .closest(
-            ".ant-select"
-          )
-          ?.classList.contains(
-            "ant-select-disabled"
-          ) &&
-        !begin
-          .closest(
-            ".ant-picker"
-          )
-          ?.classList.contains(
-            "ant-picker-disabled"
-          ) &&
-        !end
-          .closest(
-            ".ant-picker"
-          )
-          ?.classList.contains(
-            "ant-picker-disabled"
-          )
+        end.key <
+          begin.key
+      );
+
+    const beginAbnormal =
+      beginInvalid ||
+      startsAfterToday;
+
+    const endAbnormal =
+      endInvalid ||
+      endsBeforeToday ||
+      endBeforeBegin;
+
+    const abnormal =
+      beginAbnormal ||
+      endAbnormal;
+
+    const reasons = [];
+
+    if (beginInvalid) {
+      reasons.push(
+        "begin-invalid"
+      );
+    } else if (startsAfterToday) {
+      reasons.push(
+        "start-after-today"
       );
     }
-  
-    async function enterEditMode(
-      token = null
-    ) {
-      if (
-        formLooksEditable()
-      ) {
-        log(
-          "表单已处于编辑状态，跳过编辑按钮。"
-        );
-        return;
-      }
-  
-      const editButton =
-        await waitForReactiveCondition(
-          () =>
-            getEditButton() ||
-            null,
-          {
-            label:
-              "合同页编辑按钮",
-            token,
-            blockerCheck:
-              () =>
-                getVisibleErrorFeedback()
-          }
-        );
-  
-      log(
-        "合同补充：点击“编辑”，等待表单真正进入可编辑状态..."
+
+    if (endInvalid) {
+      reasons.push(
+        "end-invalid"
       );
-  
-      editButton.click();
-  
+    } else if (endsBeforeToday) {
+      reasons.push(
+        "end-before-today"
+      );
+    } else if (endBeforeBegin) {
+      reasons.push(
+        "end-before-begin"
+      );
+    }
+
+    return {
+      stage,
+      applicable: true,
+      valid:
+        !beginInvalid &&
+        !endInvalid &&
+        !endBeforeBegin,
+      abnormal,
+      beginAbnormal,
+      endAbnormal,
+      startsAfterToday,
+      endsBeforeToday,
+      endBeforeBegin,
+      reason:
+        reasons.join(",") ||
+        "normal",
+      beginText:
+        begin?.text ||
+        beginText ||
+        "未读取",
+      endText:
+        end?.text ||
+        endText ||
+        "未读取",
+      beginDate:
+        begin?.date ||
+        null,
+      endDate:
+        end?.date ||
+        null
+    };
+  }
+
+  function updateExamDateFixButton(
+    state =
+      getExamDateState()
+  ) {
+    const button =
+      document.getElementById(
+        UI.EXAM_DATE_FIX_BUTTON_ID
+      );
+
+    if (!button) {
+      return;
+    }
+
+    const shouldShow =
+      state.applicable &&
+      state.stage ===
+        "报价确认" &&
+      state.abnormal;
+
+    button.style.display =
+      shouldShow
+        ? "inline-flex"
+        : "none";
+
+    if (!button.disabled) {
+      button.textContent =
+        "修改时间";
+    }
+  }
+
+  function refreshExamDateInfo(
+    stage =
+      getCurrentFlowStage()
+  ) {
+    const summary =
+      document.getElementById(
+        UI.EXAM_DATE_SUMMARY_ID
+      );
+
+    const beginSpan =
+      document.getElementById(
+        UI.EXAM_BEGIN_DATE_ID
+      );
+
+    const endSpan =
+      document.getElementById(
+        UI.EXAM_END_DATE_ID
+      );
+
+    const durationSpan =
+      document.getElementById(
+        UI.EXAM_DURATION_ID
+      );
+
+    const state =
+      getExamDateState(
+        stage
+      );
+
+    if (
+      !summary ||
+      !beginSpan ||
+      !endSpan ||
+      !durationSpan
+    ) {
+      updateExamDateFixButton(
+        state
+      );
+
+      return state;
+    }
+
+    if (!state.applicable) {
+      summary.style.display =
+        "none";
+
+      beginSpan.textContent =
+        "";
+
+      endSpan.textContent =
+        "";
+
+      durationSpan.textContent =
+        "";
+
+      durationSpan.style.display =
+        "none";
+
+      updateExamDateFixButton(
+        state
+      );
+
+      return state;
+    }
+
+    /*
+     * 从报价确认开始统一显示在“当前阶段”右侧。
+     * 开始/结束日期分别着色，互不连带。
+     */
+    summary.style.display =
+      "inline-flex";
+
+    beginSpan.textContent =
+      state.beginText;
+
+    endSpan.textContent =
+      state.endText;
+
+    beginSpan.style.color =
+      state.beginAbnormal
+        ? "#cf1322"
+        : "#262626";
+
+    beginSpan.style.fontWeight =
+      state.beginAbnormal
+        ? "700"
+        : "400";
+
+    endSpan.style.color =
+      state.endAbnormal
+        ? "#cf1322"
+        : "#262626";
+
+    endSpan.style.fontWeight =
+      state.endAbnormal
+        ? "700"
+        : "400";
+
+    beginSpan.title =
+      state.beginAbnormal
+        ? "体检开始日期异常"
+        : "体检开始日期";
+
+    endSpan.title =
+      state.endAbnormal
+        ? "体检结束日期异常"
+        : "体检结束日期";
+
+    /*
+     * 区间时长只针对完全正常的日期计算。
+     * 任一日期异常时隐藏，避免错误日期产生误导。
+     */
+    if (
+      !state.abnormal &&
+      state.beginDate &&
+      state.endDate
+    ) {
+      const durationText =
+        getExamDurationText(
+          state.beginDate,
+          state.endDate
+        );
+
+      durationSpan.textContent =
+        durationText
+          ? `· ${durationText}`
+          : "";
+
+      durationSpan.style.display =
+        durationText
+          ? "inline"
+          : "none";
+    } else {
+      durationSpan.textContent =
+        "";
+
+      durationSpan.style.display =
+        "none";
+    }
+
+    updateExamDateFixButton(
+      state
+    );
+
+    return state;
+  }
+
+  function registerDatesEditable() {
+    const begin =
+      document.querySelector(
+        CONFIG.REGISTER_BEGIN_DATE_SELECTOR
+      );
+
+    const end =
+      document.querySelector(
+        CONFIG.REGISTER_END_DATE_SELECTOR
+      );
+
+    if (
+      !begin ||
+      !end
+    ) {
+      return false;
+    }
+
+    const beginPicker =
+      begin.closest(
+        ".ant-picker"
+      );
+
+    const endPicker =
+      end.closest(
+        ".ant-picker"
+      );
+
+    return Boolean(
+      !begin.disabled &&
+      !end.disabled &&
+      !beginPicker
+        ?.classList.contains(
+          "ant-picker-disabled"
+        ) &&
+      !endPicker
+        ?.classList.contains(
+          "ant-picker-disabled"
+        )
+    );
+  }
+
+  function getRegisterEditButton() {
+    const exact =
+      document.querySelector(
+        CONFIG.REGISTER_EDIT_BUTTON_SELECTOR
+      );
+
+    if (
+      exact &&
+      isVisible(exact) &&
+      !exact.disabled &&
+      compactText(
+        exact.textContent
+      ) === "编辑"
+    ) {
+      return exact;
+    }
+
+    const candidates =
+      Array.from(
+        document.querySelectorAll(
+          "button"
+        )
+      ).filter(button => {
+        return (
+          isVisible(button) &&
+          !button.disabled &&
+          compactText(
+            button.textContent
+          ) === "编辑"
+        );
+      });
+
+    return (
+      candidates.reverse()[0] ||
+      null
+    );
+  }
+
+  async function enterRegisterEditMode() {
+    if (
+      registerDatesEditable()
+    ) {
+      return true;
+    }
+
+    const button =
       await waitForReactiveCondition(
         () =>
-          formLooksEditable() ||
+          getRegisterEditButton() ||
           null,
         {
           label:
-            "合同表单进入编辑状态",
-          token,
+            "报价确认页面编辑按钮",
           blockerCheck:
             () =>
               getVisibleErrorFeedback()
         }
       );
-  
-      log(
-        "✓ 已进入编辑状态"
-      );
-    }
-  
-    function getSelectVisibleText(input) {
-      const select =
-        input?.closest(
-          ".ant-select"
-        );
-  
-      return cleanText(
-        select
-          ?.querySelector(
-            ".ant-select-selection-item"
-          )
-          ?.textContent
-      );
-    }
-  
-    function findFirstVisibleOption(
-      input
-    ) {
-      const controlsId =
-        input?.getAttribute(
-          "aria-controls"
-        );
-  
-      if (controlsId) {
-        const list =
-          document.getElementById(
-            controlsId
-          );
-  
-        if (list) {
-          const option =
-            Array.from(
-              list.querySelectorAll(
-                ".ant-select-item-option:not(.ant-select-item-option-disabled)"
-              )
-            ).find(isVisible);
-  
-          if (option) {
-            return option;
-          }
-        }
-      }
-  
-      const dropdowns =
-        Array.from(
-          document.querySelectorAll(
-            ".ant-select-dropdown"
-          )
-        )
-          .filter(isVisible)
-          .reverse();
-  
-      for (const dropdown of dropdowns) {
-        const option =
-          Array.from(
-            dropdown.querySelectorAll(
-              ".ant-select-item-option:not(.ant-select-item-option-disabled)"
-            )
-          ).find(isVisible);
-  
-        if (option) {
-          return option;
-        }
-      }
-  
-      return null;
-    }
-  
-    async function selectFirstContractCompany(
-      token = null
-    ) {
-      const input =
-        document.querySelector(
-          CONFIG.CONTRACT_COMPANY_SELECTOR
-        );
-  
-      if (
-        !input ||
-        input.disabled
-      ) {
-        throw new Error(
-          "己方签单主体（乙方）当前不可编辑"
-        );
-      }
-  
-      const selector =
-        input
-          .closest(
-            ".ant-select"
-          )
-          ?.querySelector(
-            ".ant-select-selector"
-          );
-  
-      if (!selector) {
-        throw new Error(
-          "未找到己方签单主体下拉框"
-        );
-      }
-  
-      log(
-        "2/5 选择己方签单主体第一个选项..."
-      );
-  
-      fireMouseSequence(
-        selector
-      );
-  
-      const option =
-        await waitForReactiveCondition(
+
+    updatePanelStatus(
+      "正在进入编辑状态..."
+    );
+
+    button.click();
+
+    await waitForReactiveCondition(
+      () =>
+        registerDatesEditable() ||
+        null,
+      {
+        label:
+          "基本信息进入编辑状态",
+        blockerCheck:
           () =>
-            findFirstVisibleOption(
-              input
-            ) ||
-            null,
-          {
-            label:
-              "己方签单主体下拉选项",
-            token,
-            blockerCheck:
-              () =>
-                getVisibleErrorFeedback()
-          }
-        );
-  
-      const expectedText =
-        cleanText(
-          option.textContent
-        );
-  
-      fireMouseSequence(
-        option
-      );
-  
-      const selected =
-        await waitFor(
-          () =>
-            getSelectVisibleText(
-              input
-            ) || null,
-          2500,
-          80
-        );
-  
-      if (!selected) {
-        throw new Error(
-          "已点击乙方第一项，但页面未确认选中结果"
-        );
+            getVisibleErrorFeedback()
       }
-  
-      log(
-        `✓ 己方签单主体：${selected || expectedText}`
-      );
-    }
-  
-    function getVisiblePickerDropdown() {
-      return (
-        Array.from(
-          document.querySelectorAll(
-            ".ant-picker-dropdown"
-          )
-        )
-          .filter(isVisible)
-          .reverse()[0] ||
-        null
-      );
-    }
-  
-    function getPickerDateCell(
-      dropdown,
-      dateText
+    );
+
+    return true;
+  }
+
+  async function setRegisterExamDates() {
+    const stage =
+      getCurrentFlowStage();
+
+    if (
+      stage !==
+      "报价确认"
     ) {
-      if (!dropdown) {
-        return null;
-      }
-  
-      return (
-        Array.from(
-          dropdown.querySelectorAll(
-            ".ant-picker-cell[title]"
-          )
-        ).find(cell => {
-          return (
-            cell.getAttribute(
-              "title"
-            ) === dateText &&
-            !cell.classList.contains(
-              "ant-picker-cell-disabled"
-            )
-          );
-        }) ||
-        null
+      throw new Error(
+        `当前阶段为“${stage || "未知"}”，仅报价确认阶段允许修改体检时间`
       );
     }
-  
-    async function chooseDateByPicker(
-      input,
-      targetDate
-    ) {
-      const targetText =
-        formatDate(
-          targetDate
-        );
-  
-      fireMouseSequence(
-        input.closest(
-          ".ant-picker"
-        ) || input
+
+    const currentState =
+      getExamDateState(
+        stage
       );
-  
-      let dropdown =
-        await waitFor(
-          getVisiblePickerDropdown,
-          CONFIG.PICKER_TIMEOUT,
-          80
-        );
-  
-      if (!dropdown) {
-        return false;
-      }
-  
-      let cell =
-        getPickerDateCell(
-          dropdown,
-          targetText
-        );
-  
-      if (!cell) {
-        const targetYear =
-          targetDate.getFullYear();
-  
-        const targetMonth =
-          targetDate.getMonth();
-  
-        let safety = 30;
-  
-        while (
-          !cell &&
-          safety-- > 0
-        ) {
-          const headerText =
-            compactText(
-              dropdown
-                .querySelector(
-                  ".ant-picker-header-view"
-                )
-                ?.textContent
-            );
-  
-          const yearMatch =
-            headerText.match(
-              /(\d{4})年/
-            );
-  
-          const monthMatch =
-            headerText.match(
-              /(\d{1,2})月/
-            );
-  
-          const currentYear =
-            yearMatch
-              ? Number(
-                  yearMatch[1]
-                )
-              : NaN;
-  
-          const currentMonth =
-            monthMatch
-              ? Number(
-                  monthMatch[1]
-                ) - 1
-              : NaN;
-  
-          if (
-            Number.isFinite(
-              currentYear
-            ) &&
-            currentYear !==
-              targetYear
-          ) {
-            const button =
-              dropdown.querySelector(
-                currentYear <
-                  targetYear
-                  ? ".ant-picker-header-super-next-btn"
-                  : ".ant-picker-header-super-prev-btn"
-              );
-  
-            if (!button) {
-              break;
-            }
-  
-            button.click();
-            await sleep(120);
-          } else if (
-            Number.isFinite(
-              currentMonth
-            ) &&
-            currentMonth !==
-              targetMonth
-          ) {
-            const button =
-              dropdown.querySelector(
-                currentMonth <
-                  targetMonth
-                  ? ".ant-picker-header-next-btn"
-                  : ".ant-picker-header-prev-btn"
-              );
-  
-            if (!button) {
-              break;
-            }
-  
-            button.click();
-            await sleep(120);
-          } else {
-            break;
-          }
-  
-          dropdown =
-            getVisiblePickerDropdown() ||
-            dropdown;
-  
-          cell =
-            getPickerDateCell(
-              dropdown,
-              targetText
-            );
-        }
-      }
-  
-      if (!cell) {
-        return false;
-      }
-  
-      fireMouseSequence(
-        cell.querySelector(
-          ".ant-picker-cell-inner"
-        ) || cell
-      );
-  
-      const confirmed =
-        await waitFor(
-          () =>
-            input.value ===
-              targetText,
-          2200,
-          80
-        );
-  
-      return Boolean(
-        confirmed
+
+    if (!currentState.applicable) {
+      throw new Error(
+        "当前未能读取体检开始/结束日期"
       );
     }
-  
-    async function setDateFallback(
-      input,
-      targetDate
-    ) {
-      const targetText =
-        formatDate(
-          targetDate
-        );
-  
-      const wasReadonly =
-        input.hasAttribute(
-          "readonly"
-        );
-  
-      if (wasReadonly) {
-        input.removeAttribute(
-          "readonly"
-        );
-      }
-  
-      try {
-        input.focus();
-  
-        setNativeInputValue(
-          input,
-          targetText
-        );
-  
-        input.dispatchEvent(
-          new KeyboardEvent(
-            "keydown",
-            {
-              key: "Enter",
-              code: "Enter",
-              keyCode: 13,
-              which: 13,
-              bubbles: true
-            }
-          )
-        );
-  
-        input.blur();
-  
-        await sleep(250);
-  
-        return (
-          input.value ===
-          targetText
-        );
-      } finally {
-        if (wasReadonly) {
-          input.setAttribute(
-            "readonly",
-            ""
-          );
-        }
-      }
+
+    if (!currentState.abnormal) {
+      refreshExamDateInfo(
+        stage
+      );
+
+      updatePanelStatus(
+        "体检时间当前正常，无需修改。",
+        "success"
+      );
+
+      return;
     }
-  
-    async function setContractDates() {
+
+    const actionButton =
+      document.getElementById(
+        UI.EXAM_DATE_FIX_BUTTON_ID
+      );
+
+    if (actionButton) {
+      actionButton.disabled =
+        true;
+
+      actionButton.textContent =
+        "修改中...";
+    }
+
+    try {
+      await enterRegisterEditMode();
+
       const begin =
         document.querySelector(
-          CONFIG.CONTRACT_BEGIN_SELECTOR
+          CONFIG.REGISTER_BEGIN_DATE_SELECTOR
         );
-  
+
       const end =
         document.querySelector(
-          CONFIG.CONTRACT_END_SELECTOR
+          CONFIG.REGISTER_END_DATE_SELECTOR
         );
-  
-      if (!begin || !end) {
+
+      if (
+        !begin ||
+        !end
+      ) {
         throw new Error(
-          "未找到合同开始/结束日期"
+          "进入编辑后未找到体检开始/结束日期"
         );
       }
-  
+
       const today =
         new Date();
-  
-      const oneYearLater =
-        addOneYear(
-          today
+
+      today.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      const threeYearsLater =
+        addYearsClamped(
+          today,
+          3
         );
-  
+
       const beginText =
         formatDate(
           today
         );
-  
+
       const endText =
         formatDate(
-          oneYearLater
+          threeYearsLater
         );
-  
-      log(
-        `3/5 填写合同日期：${beginText} → ${endText}`
+
+      updatePanelStatus(
+        `正在修改体检时间：${beginText} ～ ${endText}`
       );
-  
+
       let beginOk =
         await chooseDateByPicker(
           begin,
           today
         );
-  
+
       if (!beginOk) {
         beginOk =
           await setDateFallback(
@@ -1761,2728 +2013,3773 @@
             today
           );
       }
-  
+
       if (!beginOk) {
         throw new Error(
-          `合同开始日期未能写入 ${beginText}`
+          `体检开始日期未能修改为 ${beginText}`
         );
       }
-  
-      await sleep(180);
-  
+
       let endOk =
         await chooseDateByPicker(
           end,
-          oneYearLater
+          threeYearsLater
         );
-  
+
       if (!endOk) {
         endOk =
           await setDateFallback(
             end,
-            oneYearLater
+            threeYearsLater
           );
       }
-  
+
       if (!endOk) {
         throw new Error(
-          `合同结束日期未能写入 ${endText}`
+          `体检结束日期未能修改为 ${endText}`
         );
       }
-  
-      log(
-        `✓ 合同日期：${begin.value} → ${end.value}`
+
+      refreshExamDateInfo(
+        stage
       );
-    }
-  
-    async function fillInspectionPeopleDay() {
-      const input =
-        document.querySelector(
-          CONFIG.INSPECTION_DAY_SELECTOR
-        );
-  
-      if (!input) {
-        log(
-          "4/5 当前不存在 #inspectionPeopleDay，跳过。"
-        );
-        return;
-      }
-  
-      if (
-        input.disabled ||
-        input.readOnly
-      ) {
-        warn(
-          "4/5 #inspectionPeopleDay 存在但不可编辑，跳过。"
-        );
-        return;
-      }
-  
-      setNativeInputValue(
-        input,
-        "1"
+
+      updatePanelStatus(
+        `✓ 已修改体检时间：${beginText} ～ ${endText}。请核对页面后按原流程保存。`,
+        "success"
       );
-  
-      input.focus();
-      input.blur();
-  
-      await sleep(150);
-  
-      log(
-        `✓ 提交名单时限：${input.value}`
-      );
-    }
-  
-    function getContractSaveButton() {
-      const container =
-        getContractContainer();
-  
-      if (!container) {
-        return null;
-      }
-  
-      return (
-        Array.from(
-          container.querySelectorAll(
-            "button"
+    } finally {
+      const latest =
+        getExamDateState(
+          getCurrentFlowStage()
+        );
+
+      if (actionButton) {
+        actionButton.disabled =
+          false;
+
+        actionButton.textContent =
+          "修改时间";
+
+        actionButton.style.display =
+          (
+            latest.stage ===
+              "报价确认" &&
+            latest.abnormal
           )
-        ).find(button => {
-          return (
-            isVisible(button) &&
-            compactText(
-              button.textContent
-            ) === "合同保存"
-          );
-        }) ||
-        null
+            ? "inline-flex"
+            : "none";
+      }
+    }
+  }
+
+  function setNativeInputValue(
+    element,
+    value
+  ) {
+    if (!element) {
+      throw new Error(
+        "setNativeInputValue: element 为空"
       );
     }
-  
-    async function saveContractForm(
-      token = null
+
+    let prototype = null;
+
+    if (
+      element instanceof
+        HTMLTextAreaElement
     ) {
-      const saveButton =
-        await waitForReactiveCondition(
-          () =>
-            getContractSaveButton() ||
-            (
-              !formLooksEditable()
-                ? true
-                : null
-            ),
-          {
-            label:
-              "合同保存按钮",
-            token,
-            blockerCheck:
-              () =>
-                getVisibleErrorFeedback()
-          }
+      prototype =
+        HTMLTextAreaElement
+          .prototype;
+    } else if (
+      element instanceof
+        HTMLInputElement
+    ) {
+      prototype =
+        HTMLInputElement
+          .prototype;
+    } else {
+      prototype =
+        Object.getPrototypeOf(
+          element
         );
-  
-      if (
-        saveButton === true
-      ) {
-        log(
-          "合同表单当前已经退出编辑状态，视为已保存。"
-        );
-        return;
-      }
-  
-      log(
-        "合同补充：点击“合同保存”，等待页面确认保存完成..."
+    }
+
+    const descriptor =
+      prototype
+        ? Object
+            .getOwnPropertyDescriptor(
+              prototype,
+              "value"
+            )
+        : null;
+
+    if (
+      descriptor &&
+      typeof descriptor.set ===
+        "function"
+    ) {
+      descriptor.set.call(
+        element,
+        String(value)
       );
-  
-      saveButton.click();
-  
-      await waitForReactiveCondition(
-        () => {
-          const currentButton =
-            getContractSaveButton();
-  
-          if (
-            !currentButton ||
-            !isVisible(
-              currentButton
-            ) ||
-            !formLooksEditable()
-          ) {
-            return true;
+    } else {
+      element.value =
+        String(value);
+    }
+
+    element.dispatchEvent(
+      new Event(
+        "input",
+        {
+          bubbles: true
+        }
+      )
+    );
+
+    element.dispatchEvent(
+      new Event(
+        "change",
+        {
+          bubbles: true
+        }
+      )
+    );
+  }
+
+  function fireMouseSequence(
+    element
+  ) {
+    if (!element) {
+      return;
+    }
+
+    [
+      "mousedown",
+      "mouseup",
+      "click"
+    ].forEach(type => {
+      element.dispatchEvent(
+        new MouseEvent(
+          type,
+          {
+            bubbles: true,
+            cancelable: true,
+            view: window
           }
-  
-          return null;
-        },
+        )
+      );
+    });
+  }
+
+  function getContractContainer() {
+    const nodes =
+      Array.from(
+        document.querySelectorAll(
+          ".contractcontainer"
+        )
+      );
+
+    return (
+      nodes.find(isVisible) ||
+      nodes[0] ||
+      null
+    );
+  }
+
+  function contractPageVisible() {
+    const container =
+      getContractContainer();
+
+    return Boolean(
+      container &&
+      isVisible(container)
+    );
+  }
+
+  function getEditButton() {
+    const preferredSpan =
+      document.querySelector(
+        CONFIG.EDIT_SPAN_SELECTOR
+      );
+
+    const preferredButton =
+      preferredSpan?.closest(
+        "button"
+      );
+
+    if (
+      preferredButton &&
+      isVisible(preferredButton) &&
+      compactText(
+        preferredButton.textContent
+      ) === "编辑"
+    ) {
+      return preferredButton;
+    }
+
+    const container =
+      getContractContainer();
+
+    if (!container) {
+      return null;
+    }
+
+    return (
+      Array.from(
+        container.querySelectorAll(
+          "button"
+        )
+      ).find(button => {
+        return (
+          isVisible(button) &&
+          compactText(
+            button.textContent
+          ) === "编辑"
+        );
+      }) ||
+      null
+    );
+  }
+
+  function formLooksEditable() {
+    const company =
+      document.querySelector(
+        CONFIG.CONTRACT_COMPANY_SELECTOR
+      );
+
+    const begin =
+      document.querySelector(
+        CONFIG.CONTRACT_BEGIN_SELECTOR
+      );
+
+    const end =
+      document.querySelector(
+        CONFIG.CONTRACT_END_SELECTOR
+      );
+
+    return Boolean(
+      company &&
+      begin &&
+      end &&
+      !company.disabled &&
+      !begin.disabled &&
+      !end.disabled &&
+      !company
+        .closest(
+          ".ant-select"
+        )
+        ?.classList.contains(
+          "ant-select-disabled"
+        ) &&
+      !begin
+        .closest(
+          ".ant-picker"
+        )
+        ?.classList.contains(
+          "ant-picker-disabled"
+        ) &&
+      !end
+        .closest(
+          ".ant-picker"
+        )
+        ?.classList.contains(
+          "ant-picker-disabled"
+        )
+    );
+  }
+
+  async function enterEditMode(
+    token = null
+  ) {
+    if (
+      formLooksEditable()
+    ) {
+      log(
+        "表单已处于编辑状态，跳过编辑按钮。"
+      );
+      return;
+    }
+
+    const editButton =
+      await waitForReactiveCondition(
+        () =>
+          getEditButton() ||
+          null,
         {
           label:
-            "合同保存完成",
+            "合同页编辑按钮",
           token,
           blockerCheck:
             () =>
               getVisibleErrorFeedback()
         }
       );
-  
-      log(
-        "✓ 合同保存动作已完成"
+
+    log(
+      "合同补充：点击“编辑”，等待表单真正进入可编辑状态..."
+    );
+
+    editButton.click();
+
+    await waitForReactiveCondition(
+      () =>
+        formLooksEditable() ||
+        null,
+      {
+        label:
+          "合同表单进入编辑状态",
+        token,
+        blockerCheck:
+          () =>
+            getVisibleErrorFeedback()
+      }
+    );
+
+    log(
+      "✓ 已进入编辑状态"
+    );
+  }
+
+  function getSelectVisibleText(input) {
+    const select =
+      input?.closest(
+        ".ant-select"
       );
-    }
-  
-    function getUploaderTitle(
-      uploader
-    ) {
-      return cleanText(
-        uploader
-          ?.querySelector(
-            ".custom-uploader-header-title"
-          )
-          ?.textContent
+
+    return cleanText(
+      select
+        ?.querySelector(
+          ".ant-select-selection-item"
+        )
+        ?.textContent
+    );
+  }
+
+  function findFirstVisibleOption(
+    input
+  ) {
+    const controlsId =
+      input?.getAttribute(
+        "aria-controls"
       );
+
+    if (controlsId) {
+      const list =
+        document.getElementById(
+          controlsId
+        );
+
+      if (list) {
+        const option =
+          Array.from(
+            list.querySelectorAll(
+              ".ant-select-item-option:not(.ant-select-item-option-disabled)"
+            )
+          ).find(isVisible);
+
+        if (option) {
+          return option;
+        }
+      }
     }
-  
-    function findUploader(kind) {
-      const uploaders =
+
+    const dropdowns =
+      Array.from(
+        document.querySelectorAll(
+          ".ant-select-dropdown"
+        )
+      )
+        .filter(isVisible)
+        .reverse();
+
+    for (const dropdown of dropdowns) {
+      const option =
         Array.from(
-          document.querySelectorAll(
-            ".contractfiles-uploader"
+          dropdown.querySelectorAll(
+            ".ant-select-item-option:not(.ant-select-item-option-disabled)"
           )
-        );
-  
-      if (kind === "contract") {
-        return (
-          uploaders.find(
-            uploader =>
-              [
-                "合同文件",
-                "已盖章合同文件回传",
-                "已盖章合同文件"
-              ].includes(
-                getUploaderTitle(
-                  uploader
-                )
-              )
-          ) ||
-          uploaders.find(
-            uploader => {
-              const text =
-                compactText(
-                  uploader.textContent
-                );
-  
-              return (
-                text.includes(
-                  "上传合同"
-                ) &&
-                !text.includes(
-                  "上传证明文件"
-                )
-              );
-            }
-          ) ||
-          null
-        );
+        ).find(isVisible);
+
+      if (option) {
+        return option;
       }
-  
-      if (kind === "auth") {
-        return (
-          uploaders.find(
-            uploader =>
-              getUploaderTitle(
-                uploader
-              ).includes(
-                "企业查看员工体检报告补充授权书"
-              )
-          ) ||
-          uploaders.find(
-            uploader =>
-              compactText(
-                uploader.textContent
-              ).includes(
-                "上传授权书"
-              )
-          ) ||
-          null
+    }
+
+    return null;
+  }
+
+  async function selectFirstContractCompany(
+    token = null
+  ) {
+    const input =
+      document.querySelector(
+        CONFIG.CONTRACT_COMPANY_SELECTOR
+      );
+
+    if (
+      !input ||
+      input.disabled
+    ) {
+      throw new Error(
+        "己方签单主体（乙方）当前不可编辑"
+      );
+    }
+
+    const selector =
+      input
+        .closest(
+          ".ant-select"
+        )
+        ?.querySelector(
+          ".ant-select-selector"
         );
-      }
-  
+
+    if (!selector) {
+      throw new Error(
+        "未找到己方签单主体下拉框"
+      );
+    }
+
+    log(
+      "2/5 选择己方签单主体第一个选项..."
+    );
+
+    fireMouseSequence(
+      selector
+    );
+
+    const option =
+      await waitForReactiveCondition(
+        () =>
+          findFirstVisibleOption(
+            input
+          ) ||
+          null,
+        {
+          label:
+            "己方签单主体下拉选项",
+          token,
+          blockerCheck:
+            () =>
+              getVisibleErrorFeedback()
+        }
+      );
+
+    const expectedText =
+      cleanText(
+        option.textContent
+      );
+
+    fireMouseSequence(
+      option
+    );
+
+    const selected =
+      await waitFor(
+        () =>
+          getSelectVisibleText(
+            input
+          ) || null,
+        2500,
+        80
+      );
+
+    if (!selected) {
+      throw new Error(
+        "已点击乙方第一项，但页面未确认选中结果"
+      );
+    }
+
+    log(
+      `✓ 己方签单主体：${selected || expectedText}`
+    );
+  }
+
+  function getVisiblePickerDropdown() {
+    return (
+      Array.from(
+        document.querySelectorAll(
+          ".ant-picker-dropdown"
+        )
+      )
+        .filter(isVisible)
+        .reverse()[0] ||
+      null
+    );
+  }
+
+  function getPickerDateCell(
+    dropdown,
+    dateText
+  ) {
+    if (!dropdown) {
       return null;
     }
-  
-    function getUploaderInput(
-      kind
-    ) {
+
+    return (
+      Array.from(
+        dropdown.querySelectorAll(
+          ".ant-picker-cell[title]"
+        )
+      ).find(cell => {
+        return (
+          cell.getAttribute(
+            "title"
+          ) === dateText &&
+          !cell.classList.contains(
+            "ant-picker-cell-disabled"
+          )
+        );
+      }) ||
+      null
+    );
+  }
+
+  async function chooseDateByPicker(
+    input,
+    targetDate
+  ) {
+    const targetText =
+      formatDate(
+        targetDate
+      );
+
+    fireMouseSequence(
+      input.closest(
+        ".ant-picker"
+      ) || input
+    );
+
+    let dropdown =
+      await waitFor(
+        getVisiblePickerDropdown,
+        CONFIG.PICKER_TIMEOUT,
+        80
+      );
+
+    if (!dropdown) {
+      return false;
+    }
+
+    let cell =
+      getPickerDateCell(
+        dropdown,
+        targetText
+      );
+
+    if (!cell) {
+      const targetYear =
+        targetDate.getFullYear();
+
+      const targetMonth =
+        targetDate.getMonth();
+
+      let safety = 30;
+
+      while (
+        !cell &&
+        safety-- > 0
+      ) {
+        const headerText =
+          compactText(
+            dropdown
+              .querySelector(
+                ".ant-picker-header-view"
+              )
+              ?.textContent
+          );
+
+        const yearMatch =
+          headerText.match(
+            /(\d{4})年/
+          );
+
+        const monthMatch =
+          headerText.match(
+            /(\d{1,2})月/
+          );
+
+        const currentYear =
+          yearMatch
+            ? Number(
+                yearMatch[1]
+              )
+            : NaN;
+
+        const currentMonth =
+          monthMatch
+            ? Number(
+                monthMatch[1]
+              ) - 1
+            : NaN;
+
+        if (
+          Number.isFinite(
+            currentYear
+          ) &&
+          currentYear !==
+            targetYear
+        ) {
+          const button =
+            dropdown.querySelector(
+              currentYear <
+                targetYear
+                ? ".ant-picker-header-super-next-btn"
+                : ".ant-picker-header-super-prev-btn"
+            );
+
+          if (!button) {
+            break;
+          }
+
+          button.click();
+          await sleep(120);
+        } else if (
+          Number.isFinite(
+            currentMonth
+          ) &&
+          currentMonth !==
+            targetMonth
+        ) {
+          const button =
+            dropdown.querySelector(
+              currentMonth <
+                targetMonth
+                ? ".ant-picker-header-next-btn"
+                : ".ant-picker-header-prev-btn"
+            );
+
+          if (!button) {
+            break;
+          }
+
+          button.click();
+          await sleep(120);
+        } else {
+          break;
+        }
+
+        dropdown =
+          getVisiblePickerDropdown() ||
+          dropdown;
+
+        cell =
+          getPickerDateCell(
+            dropdown,
+            targetText
+          );
+      }
+    }
+
+    if (!cell) {
+      return false;
+    }
+
+    fireMouseSequence(
+      cell.querySelector(
+        ".ant-picker-cell-inner"
+      ) || cell
+    );
+
+    const confirmed =
+      await waitFor(
+        () =>
+          input.value ===
+            targetText,
+        2200,
+        80
+      );
+
+    return Boolean(
+      confirmed
+    );
+  }
+
+  async function setDateFallback(
+    input,
+    targetDate
+  ) {
+    const targetText =
+      formatDate(
+        targetDate
+      );
+
+    const wasReadonly =
+      input.hasAttribute(
+        "readonly"
+      );
+
+    if (wasReadonly) {
+      input.removeAttribute(
+        "readonly"
+      );
+    }
+
+    try {
+      input.focus();
+
+      setNativeInputValue(
+        input,
+        targetText
+      );
+
+      input.dispatchEvent(
+        new KeyboardEvent(
+          "keydown",
+          {
+            key: "Enter",
+            code: "Enter",
+            keyCode: 13,
+            which: 13,
+            bubbles: true
+          }
+        )
+      );
+
+      input.blur();
+
+      await sleep(250);
+
       return (
-        findUploader(kind)
-          ?.querySelector(
-            'input[type="file"]'
+        input.value ===
+        targetText
+      );
+    } finally {
+      if (wasReadonly) {
+        input.setAttribute(
+          "readonly",
+          ""
+        );
+      }
+    }
+  }
+
+  async function setContractDates() {
+    const begin =
+      document.querySelector(
+        CONFIG.CONTRACT_BEGIN_SELECTOR
+      );
+
+    const end =
+      document.querySelector(
+        CONFIG.CONTRACT_END_SELECTOR
+      );
+
+    if (!begin || !end) {
+      throw new Error(
+        "未找到合同开始/结束日期"
+      );
+    }
+
+    const today =
+      new Date();
+
+    const oneYearLater =
+      addOneYear(
+        today
+      );
+
+    const beginText =
+      formatDate(
+        today
+      );
+
+    const endText =
+      formatDate(
+        oneYearLater
+      );
+
+    log(
+      `3/5 填写合同日期：${beginText} → ${endText}`
+    );
+
+    let beginOk =
+      await chooseDateByPicker(
+        begin,
+        today
+      );
+
+    if (!beginOk) {
+      beginOk =
+        await setDateFallback(
+          begin,
+          today
+        );
+    }
+
+    if (!beginOk) {
+      throw new Error(
+        `合同开始日期未能写入 ${beginText}`
+      );
+    }
+
+    await sleep(180);
+
+    let endOk =
+      await chooseDateByPicker(
+        end,
+        oneYearLater
+      );
+
+    if (!endOk) {
+      endOk =
+        await setDateFallback(
+          end,
+          oneYearLater
+        );
+    }
+
+    if (!endOk) {
+      throw new Error(
+        `合同结束日期未能写入 ${endText}`
+      );
+    }
+
+    log(
+      `✓ 合同日期：${begin.value} → ${end.value}`
+    );
+  }
+
+  async function fillInspectionPeopleDay() {
+    const input =
+      document.querySelector(
+        CONFIG.INSPECTION_DAY_SELECTOR
+      );
+
+    if (!input) {
+      log(
+        "4/5 当前不存在 #inspectionPeopleDay，跳过。"
+      );
+      return;
+    }
+
+    if (
+      input.disabled ||
+      input.readOnly
+    ) {
+      warn(
+        "4/5 #inspectionPeopleDay 存在但不可编辑，跳过。"
+      );
+      return;
+    }
+
+    setNativeInputValue(
+      input,
+      "1"
+    );
+
+    input.focus();
+    input.blur();
+
+    await sleep(150);
+
+    log(
+      `✓ 提交名单时限：${input.value}`
+    );
+  }
+
+  function getContractSaveButton() {
+    const container =
+      getContractContainer();
+
+    if (!container) {
+      return null;
+    }
+
+    return (
+      Array.from(
+        container.querySelectorAll(
+          "button"
+        )
+      ).find(button => {
+        return (
+          isVisible(button) &&
+          compactText(
+            button.textContent
+          ) === "合同保存"
+        );
+      }) ||
+      null
+    );
+  }
+
+  async function saveContractForm(
+    token = null
+  ) {
+    const saveButton =
+      await waitForReactiveCondition(
+        () =>
+          getContractSaveButton() ||
+          (
+            !formLooksEditable()
+              ? true
+              : null
+          ),
+        {
+          label:
+            "合同保存按钮",
+          token,
+          blockerCheck:
+            () =>
+              getVisibleErrorFeedback()
+        }
+      );
+
+    if (
+      saveButton === true
+    ) {
+      log(
+        "合同表单当前已经退出编辑状态，视为已保存。"
+      );
+      return;
+    }
+
+    log(
+      "合同补充：点击“合同保存”，等待页面确认保存完成..."
+    );
+
+    saveButton.click();
+
+    await waitForReactiveCondition(
+      () => {
+        const currentButton =
+          getContractSaveButton();
+
+        if (
+          !currentButton ||
+          !isVisible(
+            currentButton
           ) ||
+          !formLooksEditable()
+        ) {
+          return true;
+        }
+
+        return null;
+      },
+      {
+        label:
+          "合同保存完成",
+        token,
+        blockerCheck:
+          () =>
+            getVisibleErrorFeedback()
+      }
+    );
+
+    log(
+      "✓ 合同保存动作已完成"
+    );
+  }
+
+  function getUploaderTitle(
+    uploader
+  ) {
+    return cleanText(
+      uploader
+        ?.querySelector(
+          ".custom-uploader-header-title"
+        )
+        ?.textContent
+    );
+  }
+
+  function findUploader(kind) {
+    const uploaders =
+      Array.from(
+        document.querySelectorAll(
+          ".contractfiles-uploader"
+        )
+      );
+
+    if (kind === "contract") {
+      return (
+        uploaders.find(
+          uploader =>
+            [
+              "合同文件",
+              "已盖章合同文件回传",
+              "已盖章合同文件"
+            ].includes(
+              getUploaderTitle(
+                uploader
+              )
+            )
+        ) ||
+        uploaders.find(
+          uploader => {
+            const text =
+              compactText(
+                uploader.textContent
+              );
+
+            return (
+              text.includes(
+                "上传合同"
+              ) &&
+              !text.includes(
+                "上传证明文件"
+              )
+            );
+          }
+        ) ||
         null
       );
     }
-  
-    function openBindingDb() {
-      return new Promise(
-        (resolve, reject) => {
-          const request =
-            indexedDB.open(
-              FILE_BINDING.DB_NAME,
-              FILE_BINDING.DB_VERSION
-            );
-  
-          request.onupgradeneeded =
-            () => {
-              const db =
-                request.result;
-  
-              if (
-                !db.objectStoreNames
-                  .contains(
-                    FILE_BINDING.STORE_NAME
-                  )
-              ) {
-                db.createObjectStore(
+
+    if (kind === "auth") {
+      return (
+        uploaders.find(
+          uploader =>
+            getUploaderTitle(
+              uploader
+            ).includes(
+              "企业查看员工体检报告补充授权书"
+            )
+        ) ||
+        uploaders.find(
+          uploader =>
+            compactText(
+              uploader.textContent
+            ).includes(
+              "上传授权书"
+            )
+        ) ||
+        null
+      );
+    }
+
+    return null;
+  }
+
+  function getUploaderInput(
+    kind
+  ) {
+    return (
+      findUploader(kind)
+        ?.querySelector(
+          'input[type="file"]'
+        ) ||
+      null
+    );
+  }
+
+  function openBindingDb() {
+    return new Promise(
+      (resolve, reject) => {
+        const request =
+          indexedDB.open(
+            FILE_BINDING.DB_NAME,
+            FILE_BINDING.DB_VERSION
+          );
+
+        request.onupgradeneeded =
+          () => {
+            const db =
+              request.result;
+
+            if (
+              !db.objectStoreNames
+                .contains(
                   FILE_BINDING.STORE_NAME
-                );
-              }
+                )
+            ) {
+              db.createObjectStore(
+                FILE_BINDING.STORE_NAME
+              );
+            }
+          };
+
+        request.onsuccess =
+          () => {
+            resolve(
+              request.result
+            );
+          };
+
+        request.onerror =
+          () => {
+            reject(
+              request.error ||
+              new Error(
+                "打开文件绑定数据库失败"
+              )
+            );
+          };
+      }
+    );
+  }
+
+  async function saveBoundFileHandle(
+    handle
+  ) {
+    const db =
+      await openBindingDb();
+
+    try {
+      await new Promise(
+        (resolve, reject) => {
+          const transaction =
+            db.transaction(
+              FILE_BINDING.STORE_NAME,
+              "readwrite"
+            );
+
+          const store =
+            transaction.objectStore(
+              FILE_BINDING.STORE_NAME
+            );
+
+          store.put(
+            handle,
+            FILE_BINDING.HANDLE_KEY
+          );
+
+          transaction.oncomplete =
+            () => resolve();
+
+          transaction.onerror =
+            () => {
+              reject(
+                transaction.error ||
+                new Error(
+                  "保存文件绑定失败"
+                )
+              );
             };
-  
+
+          transaction.onabort =
+            () => {
+              reject(
+                transaction.error ||
+                new Error(
+                  "保存文件绑定已中止"
+                )
+              );
+            };
+        }
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  async function loadBoundFileHandle() {
+    const db =
+      await openBindingDb();
+
+    try {
+      return await new Promise(
+        (resolve, reject) => {
+          const transaction =
+            db.transaction(
+              FILE_BINDING.STORE_NAME,
+              "readonly"
+            );
+
+          const store =
+            transaction.objectStore(
+              FILE_BINDING.STORE_NAME
+            );
+
+          const request =
+            store.get(
+              FILE_BINDING.HANDLE_KEY
+            );
+
           request.onsuccess =
             () => {
               resolve(
-                request.result
+                request.result ||
+                null
               );
             };
-  
+
           request.onerror =
             () => {
               reject(
                 request.error ||
                 new Error(
-                  "打开文件绑定数据库失败"
+                  "读取文件绑定失败"
                 )
               );
             };
         }
       );
+    } finally {
+      db.close();
     }
-  
-    async function saveBoundFileHandle(
+  }
+
+  function updateBoundFileDisplay() {
+    const element =
+      document.getElementById(
+        UI.FILE_NAME_ID
+      );
+
+    const button =
+      document.getElementById(
+        UI.BIND_BUTTON_ID
+      );
+
+    if (
+      !element ||
+      !button
+    ) {
+      return;
+    }
+
+    if (boundFileHandle) {
+      const name =
+        boundFileHandle.name ||
+        "已绑定文件";
+
+      element.textContent =
+        `文件已绑定 · ${name}`;
+
+      button.title =
+        `点击更换文件：${name}`;
+
+      button.style.color =
+        "#389e0d";
+
+      button.style.borderColor =
+        "#b7eb8f";
+
+      button.style.background =
+        "#f6ffed";
+    } else {
+      element.textContent =
+        "点击绑定文件";
+
+      button.title =
+        "尚未绑定共用文件，点击选择文件";
+
+      button.style.color =
+        "#cf1322";
+
+      button.style.borderColor =
+        "#ffccc7";
+
+      button.style.background =
+        "#fff2f0";
+    }
+  }
+
+  async function bindSharedFile() {
+    if (
+      typeof window
+        .showOpenFilePicker !==
+      "function"
+    ) {
+      throw new Error(
+        "当前浏览器不支持 File System Access API，请使用新版 Chrome/Edge 并确保页面为 HTTPS"
+      );
+    }
+
+    /*
+     * showOpenFilePicker 必须直接由真实用户点击触发。
+     * 本函数在“绑定/更换共用文件”按钮事件中第一时间调用。
+     */
+    const handles =
+      await window
+        .showOpenFilePicker({
+          multiple: false
+        });
+
+    const handle =
+      handles?.[0] ||
+      null;
+
+    if (!handle) {
+      return false;
+    }
+
+    boundFileHandle =
+      handle;
+
+    await saveBoundFileHandle(
       handle
+    );
+
+    updateBoundFileDisplay();
+
+    log(
+      `✓ 已绑定共用文件：${handle.name}`
+    );
+
+    return true;
+  }
+
+  async function getBoundFileForRun(
+    {
+      allowPermissionPrompt =
+        false
+    } = {}
+  ) {
+    if (!boundFileHandle) {
+      throw new Error(
+        "尚未绑定共用文件，请先点击“绑定/更换共用文件”"
+      );
+    }
+
+    let permission =
+      "granted";
+
+    if (
+      typeof boundFileHandle
+        .queryPermission ===
+      "function"
     ) {
-      const db =
-        await openBindingDb();
-  
-      try {
-        await new Promise(
-          (resolve, reject) => {
-            const transaction =
-              db.transaction(
-                FILE_BINDING.STORE_NAME,
-                "readwrite"
-              );
-  
-            const store =
-              transaction.objectStore(
-                FILE_BINDING.STORE_NAME
-              );
-  
-            store.put(
-              handle,
-              FILE_BINDING.HANDLE_KEY
-            );
-  
-            transaction.oncomplete =
-              () => resolve();
-  
-            transaction.onerror =
-              () => {
-                reject(
-                  transaction.error ||
-                  new Error(
-                    "保存文件绑定失败"
-                  )
-                );
-              };
-  
-            transaction.onabort =
-              () => {
-                reject(
-                  transaction.error ||
-                  new Error(
-                    "保存文件绑定已中止"
-                  )
-                );
-              };
-          }
-        );
-      } finally {
-        db.close();
-      }
-    }
-  
-    async function loadBoundFileHandle() {
-      const db =
-        await openBindingDb();
-  
-      try {
-        return await new Promise(
-          (resolve, reject) => {
-            const transaction =
-              db.transaction(
-                FILE_BINDING.STORE_NAME,
-                "readonly"
-              );
-  
-            const store =
-              transaction.objectStore(
-                FILE_BINDING.STORE_NAME
-              );
-  
-            const request =
-              store.get(
-                FILE_BINDING.HANDLE_KEY
-              );
-  
-            request.onsuccess =
-              () => {
-                resolve(
-                  request.result ||
-                  null
-                );
-              };
-  
-            request.onerror =
-              () => {
-                reject(
-                  request.error ||
-                  new Error(
-                    "读取文件绑定失败"
-                  )
-                );
-              };
-          }
-        );
-      } finally {
-        db.close();
-      }
-    }
-  
-    function updateBoundFileDisplay() {
-      const element =
-        document.getElementById(
-          UI.FILE_NAME_ID
-        );
-  
-      if (!element) {
-        return;
-      }
-  
-      if (boundFileHandle) {
-        const name =
-          boundFileHandle.name ||
-          "已绑定文件";
-  
-        element.textContent =
-          name;
-  
-        element.title =
-          name;
-  
-        element.style.color =
-          "#1677ff";
-      } else {
-        element.textContent =
-          "尚未绑定";
-  
-        element.title =
-          "";
-  
-        element.style.color =
-          "#999";
-      }
-    }
-  
-    async function bindSharedFile() {
-      if (
-        typeof window
-          .showOpenFilePicker !==
-        "function"
-      ) {
-        throw new Error(
-          "当前浏览器不支持 File System Access API，请使用新版 Chrome/Edge 并确保页面为 HTTPS"
-        );
-      }
-  
-      /*
-       * showOpenFilePicker 必须直接由真实用户点击触发。
-       * 本函数在“绑定/更换共用文件”按钮事件中第一时间调用。
-       */
-      const handles =
-        await window
-          .showOpenFilePicker({
-            multiple: false
+      permission =
+        await boundFileHandle
+          .queryPermission({
+            mode: "read"
           });
-  
-      const handle =
-        handles?.[0] ||
-        null;
-  
-      if (!handle) {
-        return false;
-      }
-  
-      boundFileHandle =
-        handle;
-  
-      await saveBoundFileHandle(
-        handle
-      );
-  
-      updateBoundFileDisplay();
-  
-      log(
-        `✓ 已绑定共用文件：${handle.name}`
-      );
-  
-      return true;
     }
-  
-    async function getBoundFileForRun(
-      {
-        allowPermissionPrompt =
-          false
-      } = {}
+
+    if (
+      permission !==
+      "granted"
     ) {
-      if (!boundFileHandle) {
-        throw new Error(
-          "尚未绑定共用文件，请先点击“绑定/更换共用文件”"
-        );
-      }
-  
-      let permission =
-        "granted";
-  
       if (
+        allowPermissionPrompt &&
         typeof boundFileHandle
-          .queryPermission ===
-        "function"
+          .requestPermission ===
+          "function" &&
+        (
+          navigator.userActivation
+            ?.isActive ??
+          true
+        )
       ) {
         permission =
           await boundFileHandle
-            .queryPermission({
+            .requestPermission({
               mode: "read"
             });
       }
-  
-      if (
-        permission !==
-        "granted"
-      ) {
-        if (
-          allowPermissionPrompt &&
-          typeof boundFileHandle
-            .requestPermission ===
-            "function" &&
-          (
-            navigator.userActivation
-              ?.isActive ??
-            true
-          )
-        ) {
-          permission =
-            await boundFileHandle
-              .requestPermission({
-                mode: "read"
-              });
-        }
-      }
-  
-      if (
-        permission !==
-        "granted"
-      ) {
-        throw new Error(
-          "已绑定文件的读取权限需要重新授权。请点击“绑定/更换共用文件”后再开启自动流程。"
-        );
-      }
-  
-      try {
-        const file =
-          await boundFileHandle
-            .getFile();
-  
-        if (!file) {
-          throw new Error(
-            "读取文件失败"
-          );
-        }
-  
-        return file;
-      } catch (error) {
-        throw new Error(
-          "已绑定文件可能被移动、删除或权限失效，请重新绑定文件"
-        );
-      }
     }
-  
-    function assignFileToInput(
-      input,
-      file
+
+    if (
+      permission !==
+      "granted"
     ) {
-      const transfer =
-        new DataTransfer();
-  
-      transfer.items.add(
-        file
-      );
-  
-      try {
-        input.files =
-          transfer.files;
-      } catch {
-        Object.defineProperty(
-          input,
-          "files",
-          {
-            configurable: true,
-            value:
-              transfer.files
-          }
-        );
-      }
-  
-      input.dispatchEvent(
-        new Event(
-          "input",
-          {
-            bubbles: true
-          }
-        )
-      );
-  
-      input.dispatchEvent(
-        new Event(
-          "change",
-          {
-            bubbles: true
-          }
-        )
+      throw new Error(
+        "已绑定文件的读取权限需要重新授权。请点击“绑定/更换共用文件”后再开启自动流程。"
       );
     }
-  
-    async function waitUploadVisible(
-      kind,
-      file
-    ) {
-      const uploader =
-        findUploader(kind);
-  
-      if (!uploader) {
-        return false;
-      }
-  
-      const fileName =
-        cleanText(
-          file.name
-        );
-  
-      const confirmed =
-        await waitFor(
-          () => {
-            const text =
-              cleanText(
-                uploader.textContent
-              );
-  
-            if (
-              fileName &&
-              text.includes(
-                fileName
-              )
-            ) {
-              return true;
-            }
-  
-            const list =
-              uploader.querySelector(
-                ".contract-list"
-              );
-  
-            if (
-              list &&
-              !compactText(
-                list.textContent
-              ).includes(
-                "暂无数据"
-              )
-            ) {
-              return true;
-            }
-  
-            return false;
-          },
-          CONFIG.UPLOAD_CONFIRM_TIMEOUT,
-          200
-        );
-  
-      return Boolean(
-        confirmed
-      );
-    }
-  
-    async function uploadOne(
-      kind,
-      file,
-      label
-    ) {
+
+    try {
+      const file =
+        await boundFileHandle
+          .getFile();
+
       if (!file) {
-        warn(
-          `未选择${label}，本次跳过。`
+        throw new Error(
+          "读取文件失败"
         );
-        return;
       }
-  
-      const uploader =
-        findUploader(kind);
-  
-      if (!uploader) {
-        log(
-          `当前页面不存在${label}上传模块，已跳过。`
-        );
-  
-        return {
-          skipped: true,
-          reason: "module-missing"
-        };
-      }
-  
-      const input =
-        uploader.querySelector(
-          'input[type="file"]'
-        );
-  
-      if (!input) {
-        log(
-          `${label}上传模块存在，但未发现文件选择控件，已跳过。`
-        );
-  
-        return {
-          skipped: true,
-          reason: "input-missing"
-        };
-      }
-  
-      log(
-        `6/6 发送${label}到网页上传控件：${file.name}`
+
+      return file;
+    } catch (error) {
+      throw new Error(
+        "已绑定文件可能被移动、删除或权限失效，请重新绑定文件"
       );
-  
-      assignFileToInput(
+    }
+  }
+
+  function assignFileToInput(
+    input,
+    file
+  ) {
+    const transfer =
+      new DataTransfer();
+
+    transfer.items.add(
+      file
+    );
+
+    try {
+      input.files =
+        transfer.files;
+    } catch {
+      Object.defineProperty(
         input,
-        file
+        "files",
+        {
+          configurable: true,
+          value:
+            transfer.files
+        }
       );
-  
-      const confirmed =
-        await waitUploadVisible(
-          kind,
-          file
-        );
-  
-      if (confirmed) {
-        log(
-          `✓ ${label}已进入上传列表：${file.name}`
-        );
-  
-        return {
-          skipped: false,
-          confirmed: true
-        };
-      }
-  
+    }
+
+    input.dispatchEvent(
+      new Event(
+        "input",
+        {
+          bubbles: true
+        }
+      )
+    );
+
+    input.dispatchEvent(
+      new Event(
+        "change",
+        {
+          bubbles: true
+        }
+      )
+    );
+  }
+
+  async function waitUploadVisible(
+    kind,
+    file
+  ) {
+    const uploader =
+      findUploader(kind);
+
+    if (!uploader) {
+      return false;
+    }
+
+    const fileName =
+      cleanText(
+        file.name
+      );
+
+    const confirmed =
+      await waitFor(
+        () => {
+          const text =
+            cleanText(
+              uploader.textContent
+            );
+
+          if (
+            fileName &&
+            text.includes(
+              fileName
+            )
+          ) {
+            return true;
+          }
+
+          const list =
+            uploader.querySelector(
+              ".contract-list"
+            );
+
+          if (
+            list &&
+            !compactText(
+              list.textContent
+            ).includes(
+              "暂无数据"
+            )
+          ) {
+            return true;
+          }
+
+          return false;
+        },
+        CONFIG.UPLOAD_CONFIRM_TIMEOUT,
+        200
+      );
+
+    return Boolean(
+      confirmed
+    );
+  }
+
+  async function uploadOne(
+    kind,
+    file,
+    label
+  ) {
+    if (!file) {
       warn(
-        `${label}已触发 change，但 8 秒内未从上传列表确认；请人工检查。`
+        `未选择${label}，本次跳过。`
       );
-  
+      return;
+    }
+
+    const uploader =
+      findUploader(kind);
+
+    if (!uploader) {
+      log(
+        `当前页面不存在${label}上传模块，已跳过。`
+      );
+
       return {
-        skipped: false,
-        confirmed: false
+        skipped: true,
+        reason: "module-missing"
       };
     }
-  
-    function findTabByText(
-      text
-    ) {
-      return (
-        Array.from(
-          document.querySelectorAll(
-            ".tabs-wrap .tabs .tab"
-          )
-        ).find(tab => {
-          return (
-            isVisible(tab) &&
-            compactText(
-              tab.textContent
-            ) === compactText(text)
-          );
-        }) ||
-        null
+
+    const input =
+      uploader.querySelector(
+        'input[type="file"]'
       );
-    }
-  
-    async function ensureContractTabVisible(
-      token = null
-    ) {
-      if (
-        contractPageVisible()
-      ) {
-        return true;
-      }
-  
-      const contractTab =
-        await waitForReactiveCondition(
-          () =>
-            findTabByText(
-              "合同"
-            ) ||
-            null,
-          {
-            label:
-              "合同页签",
-            token,
-            blockerCheck:
-              () =>
-                getVisibleErrorFeedback()
-          }
-        );
-  
+
+    if (!input) {
       log(
-        "合同补充：自动切换到“合同”页签..."
+        `${label}上传模块存在，但未发现文件选择控件，已跳过。`
       );
-  
-      contractTab.click();
-  
+
+      return {
+        skipped: true,
+        reason: "input-missing"
+      };
+    }
+
+    log(
+      `6/6 发送${label}到网页上传控件：${file.name}`
+    );
+
+    assignFileToInput(
+      input,
+      file
+    );
+
+    const confirmed =
+      await waitUploadVisible(
+        kind,
+        file
+      );
+
+    if (confirmed) {
+      log(
+        `✓ ${label}已进入上传列表：${file.name}`
+      );
+
+      return {
+        skipped: false,
+        confirmed: true
+      };
+    }
+
+    warn(
+      `${label}已触发 change，但 8 秒内未从上传列表确认；请人工检查。`
+    );
+
+    return {
+      skipped: false,
+      confirmed: false
+    };
+  }
+
+  function findTabByText(
+    text
+  ) {
+    return (
+      Array.from(
+        document.querySelectorAll(
+          ".tabs-wrap .tabs .tab"
+        )
+      ).find(tab => {
+        return (
+          isVisible(tab) &&
+          compactText(
+            tab.textContent
+          ) === compactText(text)
+        );
+      }) ||
+      null
+    );
+  }
+
+  async function ensureContractTabVisible(
+    token = null
+  ) {
+    if (
+      contractPageVisible()
+    ) {
+      return true;
+    }
+
+    const contractTab =
       await waitForReactiveCondition(
         () =>
-          contractPageVisible() ||
+          findTabByText(
+            "合同"
+          ) ||
           null,
         {
           label:
-            "合同模块加载",
+            "合同页签",
           token,
           blockerCheck:
             () =>
               getVisibleErrorFeedback()
         }
       );
-  
-      log(
-        "✓ 已进入合同页签"
+
+    log(
+      "合同补充：自动切换到“合同”页签..."
+    );
+
+    contractTab.click();
+
+    await waitForReactiveCondition(
+      () =>
+        contractPageVisible() ||
+        null,
+      {
+        label:
+          "合同模块加载",
+        token,
+        blockerCheck:
+          () =>
+            getVisibleErrorFeedback()
+      }
+    );
+
+    log(
+      "✓ 已进入合同页签"
+    );
+
+    return true;
+  }
+
+  function findBottomActionByText(
+    text
+  ) {
+    const bottom =
+      document.querySelector(
+        ".bottom .actions"
       );
-  
-      return true;
+
+    if (!bottom) {
+      return null;
     }
-  
-    function findBottomActionByText(
-      text
-    ) {
-      const bottom =
-        document.querySelector(
-          ".bottom .actions"
+
+    return (
+      Array.from(
+        bottom.querySelectorAll(
+          "button"
+        )
+      ).find(button => {
+        return (
+          isVisible(button) &&
+          !button.disabled &&
+          compactText(
+            button.textContent
+          ) === compactText(text)
         );
-  
-      if (!bottom) {
-        return null;
-      }
-  
-      return (
-        Array.from(
-          bottom.querySelectorAll(
-            "button"
-          )
-        ).find(button => {
-          return (
-            isVisible(button) &&
-            !button.disabled &&
-            compactText(
-              button.textContent
-            ) === compactText(text)
-          );
-        }) ||
-        null
-      );
+      }) ||
+      null
+    );
+  }
+
+  function getVisibleLandingPopconfirm() {
+    const popovers =
+      Array.from(
+        document.querySelectorAll(
+          ".ant-popover.ant-popconfirm, .ant-popconfirm"
+        )
+      ).filter(isVisible);
+
+    return (
+      popovers.find(popover => {
+        return compactText(
+          popover.textContent
+        ).includes(
+          "确认已补充完整订单相关的资料，发起落单吗？"
+        );
+      }) ||
+      null
+    );
+  }
+
+  function findLandingPopoverConfirmButton(
+    popover
+  ) {
+    if (!popover) {
+      return null;
     }
-  
-    function getVisibleLandingPopconfirm() {
-      const popovers =
-        Array.from(
-          document.querySelectorAll(
-            ".ant-popover.ant-popconfirm, .ant-popconfirm"
-          )
-        ).filter(isVisible);
-  
-      return (
-        popovers.find(popover => {
-          return compactText(
-            popover.textContent
-          ).includes(
-            "确认已补充完整订单相关的资料，发起落单吗？"
-          );
-        }) ||
-        null
-      );
-    }
-  
-    function findLandingPopoverConfirmButton(
-      popover
-    ) {
-      if (!popover) {
-        return null;
-      }
-  
-      return (
-        Array.from(
-          popover.querySelectorAll(
-            ".ant-popover-buttons button"
-          )
-        ).find(button => {
-          return (
-            isVisible(button) &&
-            !button.disabled &&
-            compactText(
-              button.textContent
-            ) === "确定"
-          );
-        }) ||
-        null
-      );
-    }
-  
-    function cleanCellText(
-      value
-    ) {
-      return String(
-        value ?? ""
+
+    return (
+      Array.from(
+        popover.querySelectorAll(
+          ".ant-popover-buttons button"
+        )
+      ).find(button => {
+        return (
+          isVisible(button) &&
+          !button.disabled &&
+          compactText(
+            button.textContent
+          ) === "确定"
+        );
+      }) ||
+      null
+    );
+  }
+
+  function cleanCellText(
+    value
+  ) {
+    return String(
+      value ?? ""
+    )
+      .replace(
+        /[\t\r\n]+/g,
+        " "
       )
-        .replace(
-          /[\t\r\n]+/g,
-          " "
-        )
-        .replace(
-          /\s+/g,
-          " "
-        )
-        .trim();
-    }
-  
-    function queryText(
-      selector
-    ) {
-      const element =
-        document.querySelector(
-          selector
-        );
-  
-      if (!element) {
-        return "";
-      }
-  
-      return cleanCellText(
-        element.innerText ||
-        element.textContent
+      .replace(
+        /\s+/g,
+        " "
+      )
+      .trim();
+  }
+
+  function queryText(
+    selector
+  ) {
+    const element =
+      document.querySelector(
+        selector
       );
-    }
-  
-    function getFormItemTextByFor(
-      forId
-    ) {
-      const label =
-        document.querySelector(
-          `#register label[for="${forId}"]`
-        );
-  
-      const item =
-        label?.closest(
-          ".ant-form-item"
-        );
-  
-      const content =
-        item?.querySelector(
-          ".ant-form-item-control-input-content"
-        );
-  
-      return cleanCellText(
-        content?.innerText ||
-        content?.textContent
-      );
-    }
-  
-    function getExtractOrderName() {
-      const direct =
-        document.querySelector(
-          CONFIG.EXTRACT_ORDER_NAME_SELECTOR
-        );
-  
-      if (!direct) {
-        return "";
-      }
-  
-      const titledLabel =
-        direct.querySelector(
-          "label[title]"
-        );
-  
-      const title =
-        cleanCellText(
-          titledLabel?.getAttribute(
-            "title"
-          )
-        );
-  
-      if (title) {
-        return title;
-      }
-  
-      return cleanCellText(
-        direct.innerText ||
-        direct.textContent
-      );
-    }
-  
-    function getExtractOrderCode() {
-      return (
-        queryText(
-          CONFIG.EXTRACT_ORDER_CODE_SELECTOR
-        ) ||
-        getFormItemTextByFor(
-          "register_main_order_code"
-        )
-      );
-    }
-  
-    function getExtractOpportunityCode() {
-      const raw =
-        (
-          queryText(
-            CONFIG.EXTRACT_OPPORTUNITY_CODE_SELECTOR
-          ) ||
-          getFormItemTextByFor(
-            "register_opportunity_id"
-          )
-        )
-          .replace(
-            /^'+/,
-            ""
-          )
-          .trim();
-  
-      return raw
-        ? `'${raw}`
-        : "";
-    }
-  
-    function getExtractSalesmanName() {
-      const raw =
-        (
-          queryText(
-            CONFIG.EXTRACT_SALESMAN_SELECTOR
-          ) ||
-          getFormItemTextByFor(
-            "register_salesman"
-          )
-        );
-  
-      return cleanCellText(
-        raw
-          .split(
-            /[（(]/
-          )[0]
-      );
-    }
-  
-    function extractDateTimeFromText(
-      value
-    ) {
-      const text =
-        cleanCellText(
-          value
-        );
-  
-      if (!text) {
-        return "";
-      }
-  
-      const patterns = [
-        /\d{4}-\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?/,
-        /\d{4}\/\d{1,2}\/\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?/,
-        /\d{4}年\d{1,2}月\d{1,2}日\s*\d{1,2}:\d{2}(?::\d{2})?/,
-        /\d{4}-\d{1,2}-\d{1,2}/,
-        /\d{4}\/\d{1,2}\/\d{1,2}/,
-        /\d{4}年\d{1,2}月\d{1,2}日/
-      ];
-  
-      for (
-        const pattern of patterns
-      ) {
-        const match =
-          text.match(pattern);
-  
-        if (match) {
-          return cleanCellText(
-            match[0]
-          );
-        }
-      }
-  
+
+    if (!element) {
       return "";
     }
-  
-    function getCurrentOrderCode() {
-      const registerText =
+
+    return cleanCellText(
+      element.innerText ||
+      element.textContent
+    );
+  }
+
+  function getFormItemTextByFor(
+    forId
+  ) {
+    const label =
+      document.querySelector(
+        `#register label[for="${forId}"]`
+      );
+
+    const item =
+      label?.closest(
+        ".ant-form-item"
+      );
+
+    const content =
+      item?.querySelector(
+        ".ant-form-item-control-input-content"
+      );
+
+    return cleanCellText(
+      content?.innerText ||
+      content?.textContent
+    );
+  }
+
+  function getExtractOrderName() {
+    const direct =
+      document.querySelector(
+        CONFIG.EXTRACT_ORDER_NAME_SELECTOR
+      );
+
+    if (!direct) {
+      return "";
+    }
+
+    const titledLabel =
+      direct.querySelector(
+        "label[title]"
+      );
+
+    const title =
+      cleanCellText(
+        titledLabel?.getAttribute(
+          "title"
+        )
+      );
+
+    if (title) {
+      return title;
+    }
+
+    return cleanCellText(
+      direct.innerText ||
+      direct.textContent
+    );
+  }
+
+  function getExtractOrderCode() {
+    return (
+      queryText(
+        CONFIG.EXTRACT_ORDER_CODE_SELECTOR
+      ) ||
+      getFormItemTextByFor(
+        "register_main_order_code"
+      )
+    );
+  }
+
+  function getExtractOpportunityCode() {
+    const raw =
+      (
+        queryText(
+          CONFIG.EXTRACT_OPPORTUNITY_CODE_SELECTOR
+        ) ||
         getFormItemTextByFor(
-          "register_main_order_code"
+          "register_opportunity_id"
+        )
+      )
+        .replace(
+          /^'+/,
+          ""
+        )
+        .trim();
+
+    return raw
+      ? `'${raw}`
+      : "";
+  }
+
+  function getExtractSalesmanName() {
+    const raw =
+      (
+        queryText(
+          CONFIG.EXTRACT_SALESMAN_SELECTOR
+        ) ||
+        getFormItemTextByFor(
+          "register_salesman"
+        )
+      );
+
+    return cleanCellText(
+      raw
+        .split(
+          /[（(]/
+        )[0]
+    );
+  }
+
+  function extractDateTimeFromText(
+    value
+  ) {
+    const text =
+      cleanCellText(
+        value
+      );
+
+    if (!text) {
+      return "";
+    }
+
+    const patterns = [
+      /\d{4}-\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?/,
+      /\d{4}\/\d{1,2}\/\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?/,
+      /\d{4}年\d{1,2}月\d{1,2}日\s*\d{1,2}:\d{2}(?::\d{2})?/,
+      /\d{4}-\d{1,2}-\d{1,2}/,
+      /\d{4}\/\d{1,2}\/\d{1,2}/,
+      /\d{4}年\d{1,2}月\d{1,2}日/
+    ];
+
+    for (
+      const pattern of patterns
+    ) {
+      const match =
+        text.match(pattern);
+
+      if (match) {
+        return cleanCellText(
+          match[0]
         );
-  
-      const registerMatch =
-        registerText.match(
-          /SOA[A-Za-z0-9-]+/
-        );
-  
-      if (registerMatch) {
-        return registerMatch[0];
       }
-  
-      const orderDescText =
-        cleanCellText(
-          document.querySelector(
-            ".order-desc"
-          )?.textContent
-        );
-  
-      const orderDescMatch =
-        orderDescText.match(
-          /SOA[A-Za-z0-9-]+/
-        );
-  
-      if (orderDescMatch) {
-        return orderDescMatch[0];
-      }
-  
-      const urlMatch =
-        String(
-          location.href
-        ).match(
-          /[?&#]orderCode=(SOA[A-Za-z0-9-]+)/
-        );
-  
-      return (
-        urlMatch?.[1] ||
-        ""
+    }
+
+    return "";
+  }
+
+  function addYearsClamped(
+    date,
+    years
+  ) {
+    const source =
+      new Date(date);
+
+    const targetYear =
+      source.getFullYear() +
+      Number(years || 0);
+
+    const month =
+      source.getMonth();
+
+    const day =
+      source.getDate();
+
+    const lastDay =
+      new Date(
+        targetYear,
+        month + 1,
+        0
+      ).getDate();
+
+    return new Date(
+      targetYear,
+      month,
+      Math.min(
+        day,
+        lastDay
+      )
+    );
+  }
+
+  function getCurrentOrderCode() {
+    const registerText =
+      getFormItemTextByFor(
+        "register_main_order_code"
+      );
+
+    const registerMatch =
+      registerText.match(
+        /SOA[A-Za-z0-9-]+/
+      );
+
+    if (registerMatch) {
+      return registerMatch[0];
+    }
+
+    const orderDescText =
+      cleanCellText(
+        document.querySelector(
+          ".order-desc"
+        )?.textContent
+      );
+
+    const orderDescMatch =
+      orderDescText.match(
+        /SOA[A-Za-z0-9-]+/
+      );
+
+    if (orderDescMatch) {
+      return orderDescMatch[0];
+    }
+
+    const urlMatch =
+      String(
+        location.href
+      ).match(
+        /[?&#]orderCode=(SOA[A-Za-z0-9-]+)/
+      );
+
+    return (
+      urlMatch?.[1] ||
+      ""
+    );
+  }
+
+  async function fetchProcessLogs() {
+    const orderCode =
+      getCurrentOrderCode();
+
+    if (!orderCode) {
+      throw new Error(
+        "未识别到当前订单编号，无法读取流程日志"
       );
     }
-  
-    async function fetchProcessLogs() {
-      const orderCode =
-        getCurrentOrderCode();
-  
-      if (!orderCode) {
-        throw new Error(
-          "未识别到当前订单编号，无法读取流程日志"
-        );
-      }
-  
-      const response =
-        await fetch(
-          CONFIG.PROCESS_LOG_API,
-          {
-            method:
-              "POST",
-            headers: {
-              "accept":
-                "application/json, text/plain, */*",
-              "content-type":
-                "application/json;charset=UTF-8",
-              "mnclientid":
-                "MN_SOA3"
-            },
-            body:
-              JSON.stringify({
-                order_code:
-                  orderCode,
-                type:
-                  "ALL"
-              }),
-            credentials:
-              "include"
-          }
-        );
-  
-      if (!response.ok) {
-        throw new Error(
-          `流程日志接口请求失败：HTTP ${response.status}`
-        );
-      }
-  
-      const payload =
-        await response.json();
-  
-      return {
-        orderCode,
-        payload
-      };
+
+    const response =
+      await fetch(
+        CONFIG.PROCESS_LOG_API,
+        {
+          method:
+            "POST",
+          headers: {
+            "accept":
+              "application/json, text/plain, */*",
+            "content-type":
+              "application/json;charset=UTF-8",
+            "mnclientid":
+              "MN_SOA3"
+          },
+          body:
+            JSON.stringify({
+              order_code:
+                orderCode,
+              type:
+                "ALL"
+            }),
+          credentials:
+            "include"
+        }
+      );
+
+    if (!response.ok) {
+      throw new Error(
+        `流程日志接口请求失败：HTTP ${response.status}`
+      );
     }
-  
-    function collectObjects(
-      value,
-      output = []
+
+    const payload =
+      await response.json();
+
+    return {
+      orderCode,
+      payload
+    };
+  }
+
+  function collectObjects(
+    value,
+    output = []
+  ) {
+    if (
+      value === null ||
+      value === undefined
     ) {
-      if (
-        value === null ||
-        value === undefined
-      ) {
-        return output;
-      }
-  
-      if (
-        Array.isArray(value)
-      ) {
-        value.forEach(item => {
-          collectObjects(
-            item,
-            output
-          );
-        });
-  
-        return output;
-      }
-  
-      if (
-        typeof value ===
-        "object"
-      ) {
-        output.push(value);
-  
-        Object.values(
-          value
-        ).forEach(child => {
-          if (
-            child &&
-            typeof child ===
-              "object"
-          ) {
-            collectObjects(
-              child,
-              output
-            );
-          }
-        });
-      }
-  
       return output;
     }
-  
-    function getPrimitiveEntries(
-      object
+
+    if (
+      Array.isArray(value)
     ) {
-      return Object.entries(
-        object || {}
-      )
-        .filter(([, value]) => {
-          return (
-            typeof value ===
-              "string" ||
-            typeof value ===
-              "number"
-          );
-        })
-        .map(([key, value]) => ({
-          key,
-          value:
-            String(value)
-        }));
-    }
-  
-    function normalizeTransitionText(
-      value
-    ) {
-      return cleanCellText(
-        value
-      )
-        .replace(
-          /\s*-\s*>\s*/g,
-          " -> "
-        )
-        .replace(
-          /\s*→\s*/g,
-          " -> "
-        );
-    }
-  
-    function objectIsLandingRecord(
-      object
-    ) {
-      const entries =
-        getPrimitiveEntries(
-          object
-        );
-  
-      for (const entry of entries) {
-        const value =
-          normalizeTransitionText(
-            entry.value
-          );
-  
-        if (
-          value ===
-            "已落单" ||
-          /->\s*已落单$/.test(
-            value
-          )
-        ) {
-          return true;
-        }
-      }
-  
-      /*
-       * 兼容接口将“目标状态”和“来源状态”拆字段返回。
-       */
-      for (const entry of entries) {
-        const key =
-          entry.key
-            .toLowerCase();
-  
-        const value =
-          cleanCellText(
-            entry.value
-          );
-  
-        if (
-          /(to|target|next|after|status|state)/.test(
-            key
-          ) &&
-          value ===
-            "已落单"
-        ) {
-          return true;
-        }
-      }
-  
-      return false;
-    }
-  
-    function getObjectDateTime(
-      object
-    ) {
-      const entries =
-        getPrimitiveEntries(
-          object
-        );
-  
-      const candidates = [];
-  
-      entries.forEach(
-        ({ key, value }, index) => {
-          const time =
-            extractDateTimeFromText(
-              value
-            );
-  
-          if (!time) {
-            return;
-          }
-  
-          const normalizedKey =
-            key.toLowerCase();
-  
-          let priority = 50;
-  
-          if (
-            /create.*time|created.*time/.test(
-              normalizedKey
-            )
-          ) {
-            priority = 1;
-          } else if (
-            /operate.*time|operation.*time/.test(
-              normalizedKey
-            )
-          ) {
-            priority = 2;
-          } else if (
-            /process.*time|handle.*time/.test(
-              normalizedKey
-            )
-          ) {
-            priority = 3;
-          } else if (
-            /time|date/.test(
-              normalizedKey
-            )
-          ) {
-            priority = 10;
-          }
-  
-          candidates.push({
-            time,
-            priority,
-            index
-          });
-        }
-      );
-  
-      candidates.sort(
-        (a, b) =>
-          a.priority -
-            b.priority ||
-          a.index -
-            b.index
-      );
-  
-      return (
-        candidates[0]?.time ||
-        ""
-      );
-    }
-  
-    function dateTimeToNumber(
-      value
-    ) {
-      const text =
-        String(
-          value || ""
-        )
-          .replace(
-            /年|月/g,
-            "-"
-          )
-          .replace(
-            /日/g,
-            ""
-          )
-          .replace(
-            /\//g,
-            "-"
-          )
-          .trim();
-  
-      const match =
-        text.match(
-          /(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/
-        );
-  
-      if (!match) {
-        return Number.NaN;
-      }
-  
-      return new Date(
-        Number(match[1]),
-        Number(match[2]) - 1,
-        Number(match[3]),
-        Number(match[4] || 0),
-        Number(match[5] || 0),
-        Number(match[6] || 0)
-      ).getTime();
-    }
-  
-    function parseLandingRecordsFromProcessLogs(
-      payload
-    ) {
-      const objects =
+      value.forEach(item => {
         collectObjects(
-          payload
+          item,
+          output
         );
-  
-      const matched = [];
-  
-      objects.forEach(
-        (object, index) => {
-          if (
-            !objectIsLandingRecord(
-              object
-            )
-          ) {
-            return;
-          }
-  
-          const time =
-            getObjectDateTime(
-              object
-            );
-  
-          if (!time) {
-            return;
-          }
-  
-          matched.push({
-            index,
-            time,
-            object
-          });
-        }
-      );
-  
-      /*
-       * 嵌套 JSON 可能让同一条记录被重复扫到，
-       * 这里按时间去重。
-       */
-      const unique =
-        new Map();
-  
-      matched.forEach(record => {
+      });
+
+      return output;
+    }
+
+    if (
+      typeof value ===
+      "object"
+    ) {
+      output.push(value);
+
+      Object.values(
+        value
+      ).forEach(child => {
         if (
-          !unique.has(
-            record.time
-          )
+          child &&
+          typeof child ===
+            "object"
         ) {
-          unique.set(
-            record.time,
-            record
+          collectObjects(
+            child,
+            output
           );
         }
       });
-  
-      const records =
-        Array.from(
-          unique.values()
-        );
-  
-      records.sort(
-        (a, b) => {
-          const at =
-            dateTimeToNumber(
-              a.time
-            );
-  
-          const bt =
-            dateTimeToNumber(
-              b.time
-            );
-  
-          if (
-            Number.isFinite(at) &&
-            Number.isFinite(bt)
-          ) {
-            return at - bt;
-          }
-  
-          return (
-            a.index -
-            b.index
-          );
-        }
-      );
-  
-      return records;
     }
-  
-    function buildLandingTimeOptions(
-      records
-    ) {
+
+    return output;
+  }
+
+  function getPrimitiveEntries(
+    object
+  ) {
+    return Object.entries(
+      object || {}
+    )
+      .filter(([, value]) => {
+        return (
+          typeof value ===
+            "string" ||
+          typeof value ===
+            "number"
+        );
+      })
+      .map(([key, value]) => ({
+        key,
+        value:
+          String(value)
+      }));
+  }
+
+  function normalizeTransitionText(
+    value
+  ) {
+    return cleanCellText(
+      value
+    )
+      .replace(
+        /\s*-\s*>\s*/g,
+        " -> "
+      )
+      .replace(
+        /\s*→\s*/g,
+        " -> "
+      );
+  }
+
+  function objectIsLandingRecord(
+    object
+  ) {
+    const entries =
+      getPrimitiveEntries(
+        object
+      );
+
+    for (const entry of entries) {
+      const value =
+        normalizeTransitionText(
+          entry.value
+        );
+
       if (
-        !Array.isArray(records) ||
-        !records.length
+        value ===
+          "已落单" ||
+        /->\s*已落单$/.test(
+          value
+        )
       ) {
-        return [];
+        return true;
       }
-  
-      const first =
-        records[0];
-  
-      const last =
-        records[
-          records.length - 1
-        ];
-  
-      const options = [
-        {
-          type: "first",
-          label: "首次落单",
-          time: first.time
-        }
-      ];
-  
+    }
+
+    /*
+     * 兼容接口将“目标状态”和“来源状态”拆字段返回。
+     */
+    for (const entry of entries) {
+      const key =
+        entry.key
+          .toLowerCase();
+
+      const value =
+        cleanCellText(
+          entry.value
+        );
+
       if (
-        records.length > 1
+        /(to|target|next|after|status|state)/.test(
+          key
+        ) &&
+        value ===
+          "已落单"
       ) {
-        options.push({
-          type: "modified",
-          label: "修改后落单",
-          time: last.time,
-          count: records.length
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function getObjectDateTime(
+    object
+  ) {
+    const entries =
+      getPrimitiveEntries(
+        object
+      );
+
+    const candidates = [];
+
+    entries.forEach(
+      ({ key, value }, index) => {
+        const time =
+          extractDateTimeFromText(
+            value
+          );
+
+        if (!time) {
+          return;
+        }
+
+        const normalizedKey =
+          key.toLowerCase();
+
+        let priority = 50;
+
+        if (
+          /create.*time|created.*time/.test(
+            normalizedKey
+          )
+        ) {
+          priority = 1;
+        } else if (
+          /operate.*time|operation.*time/.test(
+            normalizedKey
+          )
+        ) {
+          priority = 2;
+        } else if (
+          /process.*time|handle.*time/.test(
+            normalizedKey
+          )
+        ) {
+          priority = 3;
+        } else if (
+          /time|date/.test(
+            normalizedKey
+          )
+        ) {
+          priority = 10;
+        }
+
+        candidates.push({
+          time,
+          priority,
+          index
         });
       }
-  
-      return options;
-    }
-  
-    let cachedLandingTimeOptions = [];
-  
-    async function refreshLandingTimeOptions() {
-      cachedLandingTimeOptions = [];
-  
-      const stage =
-        getCurrentFlowStage();
-  
-      if (
-        stage !==
-        "已落单"
-      ) {
-        renderLandingExtractOptions(
-          []
-        );
-  
-        return [];
-      }
-  
-      const result =
-        await fetchProcessLogs();
-  
-      const records =
-        parseLandingRecordsFromProcessLogs(
-          result.payload
-        );
-  
-      if (!records.length) {
-        console.warn(
-          "[SOA流程自动化] processlogs 未识别到已落单记录，原始响应：",
-          result.payload
-        );
-  
-        renderLandingExtractOptions(
-          []
-        );
-  
-        return [];
-      }
-  
-      console.log(
-        "[SOA流程自动化] processlogs 已识别落单记录：",
-        records.map(record => ({
-          time:
-            record.time,
-          object:
-            record.object
-        }))
+    );
+
+    candidates.sort(
+      (a, b) =>
+        a.priority -
+          b.priority ||
+        a.index -
+          b.index
+    );
+
+    return (
+      candidates[0]?.time ||
+      ""
+    );
+  }
+
+  function dateTimeToNumber(
+    value
+  ) {
+    const text =
+      String(
+        value || ""
+      )
+        .replace(
+          /年|月/g,
+          "-"
+        )
+        .replace(
+          /日/g,
+          ""
+        )
+        .replace(
+          /\//g,
+          "-"
+        )
+        .trim();
+
+    const match =
+      text.match(
+        /(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/
       );
-  
-      const options =
-        buildLandingTimeOptions(
-          records
-        );
-  
-      cachedLandingTimeOptions =
-        options;
-  
-      renderLandingExtractOptions(
-        options
-      );
-  
-      return options;
+
+    if (!match) {
+      return Number.NaN;
     }
-  
-    function getLandingTimeOptions() {
-      return [
-        ...cachedLandingTimeOptions
-      ];
-    }
-  
-    function buildSpreadsheetLine(
-      landingTime
-    ) {
-      const values = [
-        getExtractOrderName(),
-        getExtractOrderCode(),
-        getExtractOpportunityCode(),
-        getExtractSalesmanName(),
-        landingTime
-      ].map(
-        cleanCellText
+
+    return new Date(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4] || 0),
+      Number(match[5] || 0),
+      Number(match[6] || 0)
+    ).getTime();
+  }
+
+  function parseLandingRecordsFromProcessLogs(
+    payload
+  ) {
+    const objects =
+      collectObjects(
+        payload
       );
-  
-      const missing = [];
-  
-      if (!values[0]) {
-        missing.push(
-          "订单名称"
-        );
-      }
-  
-      if (!values[1]) {
-        missing.push(
-          "订单编号"
-        );
-      }
-  
-      if (!values[2]) {
-        missing.push(
-          "商机代码"
-        );
-      }
-  
-      if (!values[3]) {
-        missing.push(
-          "健管顾问姓名"
-        );
-      }
-  
-      if (!values[4]) {
-        missing.push(
-          "落单时间"
-        );
-      }
-  
-      if (missing.length) {
-        throw new Error(
-          "提取数据不完整：" +
-          missing.join("、")
-        );
-      }
-  
-      return values.join(
-        "\t"
-      );
-    }
-  
-    async function copyTextToClipboard(
-      text
-    ) {
-      if (
-        navigator.clipboard &&
-        window.isSecureContext
-      ) {
-        try {
-          await navigator.clipboard
-            .writeText(text);
-  
-          return true;
-        } catch (_) {
-          // 继续走兼容方案。
+
+    const matched = [];
+
+    objects.forEach(
+      (object, index) => {
+        if (
+          !objectIsLandingRecord(
+            object
+          )
+        ) {
+          return;
         }
+
+        const time =
+          getObjectDateTime(
+            object
+          );
+
+        if (!time) {
+          return;
+        }
+
+        matched.push({
+          index,
+          time,
+          object
+        });
       }
-  
-      const textarea =
+    );
+
+    /*
+     * 嵌套 JSON 可能让同一条记录被重复扫到，
+     * 这里按时间去重。
+     */
+    const unique =
+      new Map();
+
+    matched.forEach(record => {
+      if (
+        !unique.has(
+          record.time
+        )
+      ) {
+        unique.set(
+          record.time,
+          record
+        );
+      }
+    });
+
+    const records =
+      Array.from(
+        unique.values()
+      );
+
+    records.sort(
+      (a, b) => {
+        const at =
+          dateTimeToNumber(
+            a.time
+          );
+
+        const bt =
+          dateTimeToNumber(
+            b.time
+          );
+
+        if (
+          Number.isFinite(at) &&
+          Number.isFinite(bt)
+        ) {
+          return at - bt;
+        }
+
+        return (
+          a.index -
+          b.index
+        );
+      }
+    );
+
+    return records;
+  }
+
+  function buildLandingTimeOptions(
+    records
+  ) {
+    if (
+      !Array.isArray(records) ||
+      !records.length
+    ) {
+      return [];
+    }
+
+    const first =
+      records[0];
+
+    const last =
+      records[
+        records.length - 1
+      ];
+
+    const options = [
+      {
+        type: "first",
+        label: "首次落单",
+        time: first.time
+      }
+    ];
+
+    if (
+      records.length > 1
+    ) {
+      const modifiedCount =
+        records.length - 1;
+
+      options.push({
+        type: "modified",
+        label:
+          `修改${modifiedCount}次`,
+        time: last.time,
+        count:
+          modifiedCount
+      });
+    }
+
+    return options;
+  }
+
+  let cachedLandingTimeOptions = [];
+
+  async function refreshLandingTimeOptions() {
+    cachedLandingTimeOptions = [];
+
+    const stage =
+      getCurrentFlowStage();
+
+    if (
+      stage !==
+      "已落单"
+    ) {
+      renderLandingExtractOptions(
+        []
+      );
+
+      return [];
+    }
+
+    const result =
+      await fetchProcessLogs();
+
+    const records =
+      parseLandingRecordsFromProcessLogs(
+        result.payload
+      );
+
+    if (!records.length) {
+      console.warn(
+        "[SOA流程自动化] processlogs 未识别到已落单记录，原始响应：",
+        result.payload
+      );
+
+      renderLandingExtractOptions(
+        []
+      );
+
+      return [];
+    }
+
+    console.log(
+      "[SOA流程自动化] processlogs 已识别落单记录：",
+      records.map(record => ({
+        time:
+          record.time,
+        object:
+          record.object
+      }))
+    );
+
+    const options =
+      buildLandingTimeOptions(
+        records
+      );
+
+    cachedLandingTimeOptions =
+      options;
+
+    renderLandingExtractOptions(
+      options
+    );
+
+    return options;
+  }
+
+  function getLandingTimeOptions() {
+    return [
+      ...cachedLandingTimeOptions
+    ];
+  }
+
+  function buildSpreadsheetLine(
+    landingTime
+  ) {
+    const values = [
+      getExtractOrderName(),
+      getExtractOrderCode(),
+      getExtractOpportunityCode(),
+      getExtractSalesmanName(),
+      landingTime
+    ].map(
+      cleanCellText
+    );
+
+    const missing = [];
+
+    if (!values[0]) {
+      missing.push(
+        "订单名称"
+      );
+    }
+
+    if (!values[1]) {
+      missing.push(
+        "订单编号"
+      );
+    }
+
+    if (!values[2]) {
+      missing.push(
+        "商机代码"
+      );
+    }
+
+    if (!values[3]) {
+      missing.push(
+        "健管顾问姓名"
+      );
+    }
+
+    if (!values[4]) {
+      missing.push(
+        "落单时间"
+      );
+    }
+
+    if (missing.length) {
+      throw new Error(
+        "提取数据不完整：" +
+        missing.join("、")
+      );
+    }
+
+    return values.join(
+      "\t"
+    );
+  }
+
+  async function copyTextToClipboard(
+    text
+  ) {
+    if (
+      navigator.clipboard &&
+      window.isSecureContext
+    ) {
+      try {
+        await navigator.clipboard
+          .writeText(text);
+
+        return true;
+      } catch (_) {
+        // 继续走兼容方案。
+      }
+    }
+
+    const textarea =
+      document.createElement(
+        "textarea"
+      );
+
+    textarea.value =
+      text;
+
+    textarea.style.position =
+      "fixed";
+
+    textarea.style.left =
+      "-9999px";
+
+    textarea.style.top =
+      "-9999px";
+
+    document.body.appendChild(
+      textarea
+    );
+
+    textarea.focus();
+    textarea.select();
+
+    const ok =
+      document.execCommand(
+        "copy"
+      );
+
+    textarea.remove();
+
+    if (!ok) {
+      throw new Error(
+        "浏览器未允许自动复制，请从下方预览框手动复制"
+      );
+    }
+
+    return true;
+  }
+
+  function showExtractPreview(
+    text
+  ) {
+    const preview =
+      document.getElementById(
+        UI.EXTRACT_PREVIEW_ID
+      );
+
+    if (!preview) {
+      return;
+    }
+
+    preview.style.display =
+      "block";
+
+    preview.textContent =
+      text;
+  }
+
+  async function copyLandingOption(
+    option
+  ) {
+    const line =
+      buildSpreadsheetLine(
+        option.time
+      );
+
+    showExtractPreview(
+      line
+    );
+
+    await copyTextToClipboard(
+      line
+    );
+
+    updatePanelStatus(
+      `✓ 已复制“${option.label}”数据，可直接粘贴到表格。`,
+      "success"
+    );
+
+    log(
+      `已复制${option.label}数据：${line}`
+    );
+  }
+
+  function renderLandingExtractOptions(
+    suppliedOptions = null
+  ) {
+    const container =
+      document.getElementById(
+        UI.EXTRACT_OPTIONS_ID
+      );
+
+    if (!container) {
+      return [];
+    }
+
+    container.innerHTML =
+      "";
+
+    container.style.display =
+      "none";
+
+    const options =
+      Array.isArray(
+        suppliedOptions
+      )
+        ? suppliedOptions
+        : getLandingTimeOptions();
+
+    if (!options.length) {
+      updateFlowStageDisplay();
+      return options;
+    }
+
+    container.style.display =
+      "grid";
+
+    container.style.gridTemplateColumns =
+      options.length > 1
+        ? "1fr 1fr"
+        : "1fr";
+
+    container.style.gap =
+      "8px";
+
+    container.style.marginTop =
+      "0";
+
+    options.forEach(option => {
+      const button =
         document.createElement(
-          "textarea"
+          "button"
         );
-  
-      textarea.value =
-        text;
-  
-      textarea.style.position =
-        "fixed";
-  
-      textarea.style.left =
-        "-9999px";
-  
-      textarea.style.top =
-        "-9999px";
-  
-      document.body.appendChild(
-        textarea
+
+      button.type =
+        "button";
+
+      button.textContent =
+        `${option.label}｜${option.time}`;
+
+      button.style.cssText = [
+        "min-height:34px",
+        "padding:5px 7px",
+        "border:1px solid #1677ff",
+        "border-radius:6px",
+        "background:#fff",
+        "color:#1677ff",
+        "cursor:pointer",
+        "font-size:12px",
+        "line-height:1.35"
+      ].join(";");
+
+      button.addEventListener(
+        "click",
+        () => {
+          copyLandingOption(
+            option
+          ).catch(error => {
+            warn(
+              error?.message ||
+              String(error)
+            );
+          });
+        }
       );
-  
-      textarea.focus();
-      textarea.select();
-  
-      const ok =
-        document.execCommand(
-          "copy"
-        );
-  
-      textarea.remove();
-  
-      if (!ok) {
-        throw new Error(
-          "浏览器未允许自动复制，请从下方预览框手动复制"
-        );
+
+      container.appendChild(
+        button
+      );
+    });
+
+    updateFlowStageDisplay();
+
+    return options;
+  }
+
+  function getCurrentFlowStage() {
+    const active =
+      document.querySelector(
+        ".ant-steps-item-process .ant-steps-item-title, " +
+        ".ant-steps-item-active .ant-steps-item-title"
+      );
+
+    return cleanText(
+      active?.textContent
+    );
+  }
+
+  function getFlowStagePresentation(
+    stage
+  ) {
+    const presentations = {
+      "报价单设计": {
+        color: "#595959",
+        size: "13px",
+        weight: "600",
+        hint:
+          "当前处于报价单设计阶段，暂不执行自动审批。"
+      },
+
+      "授权审批": {
+        color: "#1677ff",
+        size: "14px",
+        weight: "600",
+        hint:
+          "当前处于授权审批阶段，等待流程进入报价确认。"
+      },
+
+      "报价确认": {
+        color: "#08979c",
+        size: "14px",
+        weight: "700",
+        hint:
+          "当前处于报价确认阶段，等待流程进入内勤复核。"
+      },
+
+      "内勤复核": {
+        color: "#d46b08",
+        size: "15px",
+        weight: "700",
+        hint:
+          "点击“立即处理订单”可自动填写内勤复核备注并继续流程。"
+      },
+
+      "合同补充": {
+        color: "#722ed1",
+        size: "15px",
+        weight: "700",
+        hint:
+          "点击“立即处理订单”可自动完成合同补充、上传文件并发起落单。"
+      },
+
+      "落单审核": {
+        color: "#cf1322",
+        size: "15px",
+        weight: "700",
+        hint:
+          "点击“立即处理订单”可自动填写落单审核备注并确认落单。"
+      },
+
+      "落单中": {
+        color: "#d48806",
+        size: "15px",
+        weight: "700",
+        hint:
+          "订单正在落单，等待页面进入“已落单”状态。"
+      },
+
+      "已落单": {
+        color: "#389e0d",
+        size: "16px",
+        weight: "700",
+        hint:
+          "点击下方按钮提取并复制落单数据。"
       }
-  
-      return true;
-    }
-  
-    function showExtractPreview(
-      text
-    ) {
-      const preview =
-        document.getElementById(
-          UI.EXTRACT_PREVIEW_ID
-        );
-  
-      if (!preview) {
-        return;
+    };
+
+    return (
+      presentations[stage] ||
+      {
+        color: "#595959",
+        size: "14px",
+        weight: "600",
+        hint:
+          stage
+            ? "当前阶段尚未配置专用提示，请以页面流程进度为准。"
+            : "正在读取页面流程状态..."
       }
-  
-      preview.style.display =
-        "block";
-  
-      preview.textContent =
-        text;
-    }
-  
-    async function copyLandingOption(
-      option
+    );
+  }
+
+  function updateFlowStageDisplay(
+    {
+      refreshOnLanding =
+        false
+    } = {}
+  ) {
+    const labelElement =
+      document.getElementById(
+        UI.FLOW_STAGE_LABEL_ID
+      );
+
+    const valueElement =
+      document.getElementById(
+        UI.FLOW_STAGE_VALUE_ID
+      );
+
+    const hintElement =
+      document.getElementById(
+        UI.FLOW_STAGE_HINT_ID
+      );
+
+    if (
+      !labelElement ||
+      !valueElement ||
+      !hintElement
     ) {
-      const line =
-        buildSpreadsheetLine(
-          option.time
-        );
-  
-      showExtractPreview(
-        line
-      );
-  
-      await copyTextToClipboard(
-        line
-      );
-  
-      updatePanelStatus(
-        `✓ 已复制“${option.label}”数据，可直接粘贴到表格。`,
-        "success"
-      );
-  
-      log(
-        `已复制${option.label}数据：${line}`
-      );
+      return "";
     }
-  
-    function renderLandingExtractOptions(
-      suppliedOptions = null
+
+    const stage =
+      getCurrentFlowStage();
+
+    const presentation =
+      getFlowStagePresentation(
+        stage
+      );
+
+    labelElement.textContent =
+      "当前阶段：";
+
+    valueElement.textContent =
+      stage || "识别中";
+
+    valueElement.style.color =
+      presentation.color;
+
+    valueElement.style.fontSize =
+      presentation.size;
+
+    valueElement.style.fontWeight =
+      presentation.weight;
+
+    hintElement.textContent =
+      presentation.hint;
+
+    if (
+      stage !== "已落单"
     ) {
-      const container =
+      cachedLandingTimeOptions = [];
+
+      const extractContainer =
         document.getElementById(
           UI.EXTRACT_OPTIONS_ID
         );
 
-      if (!container) {
-        return [];
+      if (extractContainer) {
+        extractContainer.innerHTML =
+          "";
+
+        extractContainer.style.display =
+          "none";
       }
+    }
 
-      container.innerHTML =
-        "";
+    const changed =
+      stage !==
+      lastDisplayedFlowStage;
 
-      container.style.display =
-        "none";
+    lastDisplayedFlowStage =
+      stage;
 
-      const options =
-        Array.isArray(
-          suppliedOptions
+    if (
+      refreshOnLanding &&
+      changed &&
+      stage === "已落单"
+    ) {
+      refreshLandingTimeOptions()
+        .catch(error => {
+          console.warn(
+            "[SOA流程自动化] 进入已落单后刷新落单数据失败：",
+            error
+          );
+        });
+    }
+
+    /*
+     * 日期检测只在“实际阶段发生变化”时触发；
+     * 另外还会在页面初始化、打开面板和执行订单时主动刷新。
+     */
+    if (changed) {
+      refreshExamDateInfo(
+        stage
+      );
+    }
+
+    return stage;
+  }
+
+  function getStoredText(
+    key,
+    fallback = ""
+  ) {
+    try {
+      return (
+        localStorage.getItem(
+          key
+        ) ?? fallback
+      );
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  function saveStoredText(
+    key,
+    value
+  ) {
+    try {
+      localStorage.setItem(
+        key,
+        String(value || "")
+      );
+    } catch (_) {
+      // 保存失败不影响当前执行。
+    }
+  }
+
+  function getReviewRemark() {
+    return cleanText(
+      document.getElementById(
+        UI.REVIEW_REMARK_ID
+      )?.value ||
+      getStoredText(
+        UI.REVIEW_REMARK_KEY
+      )
+    );
+  }
+
+  function getOrderRemark() {
+    return cleanText(
+      document.getElementById(
+        UI.ORDER_REMARK_ID
+      )?.value ||
+      getStoredText(
+        UI.ORDER_REMARK_KEY
+      )
+    );
+  }
+
+  function getRemarkStatusInfo() {
+    const review =
+      getReviewRemark();
+
+    const order =
+      getOrderRemark();
+
+    const missing = [];
+
+    if (!review) {
+      missing.push(
+        "内勤复核"
+      );
+    }
+
+    if (!order) {
+      missing.push(
+        "落单审核"
+      );
+    }
+
+    return {
+      ready:
+        missing.length === 0,
+      missing
+    };
+  }
+
+  function updateRemarkStatus() {
+    const button =
+      document.getElementById(
+        UI.REMARK_BUTTON_ID
+      );
+
+    if (!button) {
+      return;
+    }
+
+    const info =
+      getRemarkStatusInfo();
+
+    if (info.ready) {
+      button.textContent =
+        "备注已配置";
+
+      button.style.color =
+        "#389e0d";
+
+      button.style.borderColor =
+        "#b7eb8f";
+
+      button.style.background =
+        "#f6ffed";
+
+      button.title =
+        "审批备注已配置，点击可查看或修改";
+
+      return;
+    }
+
+    button.textContent =
+      "点击设置备注";
+
+    button.style.color =
+      "#cf1322";
+
+    button.style.borderColor =
+      "#ffccc7";
+
+    button.style.background =
+      "#fff2f0";
+
+    button.title =
+      info.missing.length
+        ? `尚缺：${info.missing.join("、")}，点击设置`
+        : "点击设置审批备注";
+  }
+
+  function toggleHelpPanel() {
+    const panel =
+      document.getElementById(
+        UI.HELP_PANEL_ID
+      );
+
+    const button =
+      document.getElementById(
+        UI.HELP_BUTTON_ID
+      );
+
+    if (
+      !panel ||
+      !button
+    ) {
+      return;
+    }
+
+    const opening =
+      panel.style.display ===
+      "none";
+
+    panel.style.display =
+      opening
+        ? "block"
+        : "none";
+
+    button.textContent =
+      opening
+        ? "收起说明"
+        : "查看说明";
+  }
+
+  function toggleRemarkPanel() {
+    const panel =
+      document.getElementById(
+        UI.REMARK_PANEL_ID
+      );
+
+    const button =
+      document.getElementById(
+        UI.REMARK_BUTTON_ID
+      );
+
+    if (
+      !panel ||
+      !button
+    ) {
+      return;
+    }
+
+    const opening =
+      panel.style.display ===
+      "none";
+
+    panel.style.display =
+      opening
+        ? "block"
+        : "none";
+
+    button.setAttribute(
+      "aria-expanded",
+      opening
+        ? "true"
+        : "false"
+    );
+
+    updateRemarkStatus();
+  }
+
+  function getVisibleApprovalModal() {
+    const modals =
+      Array.from(
+        document.querySelectorAll(
+          ".ant-modal"
         )
-          ? suppliedOptions
-          : getLandingTimeOptions();
+      ).filter(isVisible);
 
-      if (!options.length) {
-        updateFlowStageDisplay();
-        return options;
-      }
-
-      container.style.display =
-        "grid";
-
-      container.style.gridTemplateColumns =
-        options.length > 1
-          ? "1fr 1fr"
-          : "1fr";
-
-      container.style.gap =
-        "8px";
-
-      container.style.marginTop =
-        "0";
-
-      options.forEach(option => {
-        const button =
-          document.createElement(
-            "button"
+    return (
+      modals.find(modal => {
+        const title =
+          compactText(
+            modal.querySelector(
+              ".ant-modal-title"
+            )?.textContent
           );
 
-        button.type =
-          "button";
+        const remark =
+          modal.querySelector(
+            "#remark"
+          );
 
-        button.textContent =
-          `${option.label}｜${option.time}`;
-
-        button.style.cssText = [
-          "min-height:34px",
-          "padding:5px 7px",
-          "border:1px solid #1677ff",
-          "border-radius:6px",
-          "background:#fff",
-          "color:#1677ff",
-          "cursor:pointer",
-          "font-size:12px",
-          "line-height:1.35"
-        ].join(";");
-
-        button.addEventListener(
-          "click",
-          () => {
-            copyLandingOption(
-              option
-            ).catch(error => {
-              warn(
-                error?.message ||
-                String(error)
-              );
-            });
-          }
+        return (
+          remark &&
+          (
+            title.includes(
+              "审批"
+            ) ||
+            title.includes(
+              "审核"
+            )
+          )
         );
+      }) ||
+      null
+    );
+  }
 
-        container.appendChild(
-          button
+  function findModalConfirmButton(
+    modal
+  ) {
+    if (!modal) {
+      return null;
+    }
+
+    return (
+      Array.from(
+        modal.querySelectorAll(
+          ".ant-modal-footer button"
+        )
+      ).find(button => {
+        return (
+          isVisible(button) &&
+          compactText(
+            button.textContent
+          ) === "确认"
+        );
+      }) ||
+      null
+    );
+  }
+
+  function findBottomPrimaryAction() {
+    const bottom =
+      document.querySelector(
+        ".bottom .actions"
+      );
+
+    if (!bottom) {
+      return null;
+    }
+
+    const buttons =
+      Array.from(
+        bottom.querySelectorAll(
+          "button"
+        )
+      ).filter(button => {
+        return (
+          isVisible(button) &&
+          !button.disabled &&
+          button.classList.contains(
+            "ant-btn-primary"
+          )
         );
       });
 
-      updateFlowStageDisplay();
+    return buttons[0] || null;
+  }
 
-      return options;
-    }
+  async function waitForStageChange(
+    oldStage,
+    token = null
+  ) {
+    return await waitForReactiveCondition(
+      () => {
+        const stage =
+          getCurrentFlowStage();
 
-    function getCurrentFlowStage() {
-      const active =
-        document.querySelector(
-          ".ant-steps-item-process .ant-steps-item-title, " +
-          ".ant-steps-item-active .ant-steps-item-title"
-        );
-  
-      return cleanText(
-        active?.textContent
-      );
-    }
-  
-    function getFlowStagePresentation(
-      stage
-    ) {
-      const presentations = {
-        "报价单设计": {
-          color: "#595959",
-          size: "13px",
-          weight: "600",
-          hint:
-            "当前处于报价单设计阶段，暂不执行自动审批。"
-        },
-
-        "授权审批": {
-          color: "#1677ff",
-          size: "14px",
-          weight: "600",
-          hint:
-            "当前处于授权审批阶段，等待流程进入报价确认。"
-        },
-
-        "报价确认": {
-          color: "#08979c",
-          size: "14px",
-          weight: "700",
-          hint:
-            "当前处于报价确认阶段，等待流程进入内勤复核。"
-        },
-
-        "内勤复核": {
-          color: "#d46b08",
-          size: "15px",
-          weight: "700",
-          hint:
-            "点击“立即处理订单”可自动填写内勤复核备注并继续流程。"
-        },
-
-        "合同补充": {
-          color: "#722ed1",
-          size: "15px",
-          weight: "700",
-          hint:
-            "点击“立即处理订单”可自动完成合同补充、上传文件并发起落单。"
-        },
-
-        "落单审核": {
-          color: "#cf1322",
-          size: "15px",
-          weight: "700",
-          hint:
-            "点击“立即处理订单”可自动填写落单审核备注并确认落单。"
-        },
-
-        "落单中": {
-          color: "#d48806",
-          size: "15px",
-          weight: "700",
-          hint:
-            "订单正在落单，等待页面进入“已落单”状态。"
-        },
-
-        "已落单": {
-          color: "#389e0d",
-          size: "16px",
-          weight: "700",
-          hint:
-            "点击下方按钮提取并复制落单数据。"
+        if (
+          stage &&
+          stage !== oldStage
+        ) {
+          return stage;
         }
-      };
 
-      return (
-        presentations[stage] ||
-        {
-          color: "#595959",
-          size: "14px",
-          weight: "600",
-          hint:
-            stage
-              ? "当前阶段尚未配置专用提示，请以页面流程进度为准。"
-              : "正在读取页面流程状态..."
-        }
-      );
-    }
-
-    function updateFlowStageDisplay(
+        return null;
+      },
       {
-        refreshOnLanding =
-          false
-      } = {}
-    ) {
-      const labelElement =
-        document.getElementById(
-          UI.FLOW_STAGE_LABEL_ID
-        );
-
-      const valueElement =
-        document.getElementById(
-          UI.FLOW_STAGE_VALUE_ID
-        );
-
-      const hintElement =
-        document.getElementById(
-          UI.FLOW_STAGE_HINT_ID
-        );
-
-      if (
-        !labelElement ||
-        !valueElement ||
-        !hintElement
-      ) {
-        return "";
+        label:
+          `流程从“${oldStage}”进入下一阶段`,
+        token,
+        blockerCheck:
+          () =>
+            getVisibleErrorFeedback()
       }
+    );
+  }
 
-      const stage =
-        getCurrentFlowStage();
-
-      const presentation =
-        getFlowStagePresentation(
-          stage
-        );
-
-      labelElement.textContent =
-        "当前阶段：";
-
-      valueElement.textContent =
-        stage || "识别中";
-
-      valueElement.style.color =
-        presentation.color;
-
-      valueElement.style.fontSize =
-        presentation.size;
-
-      valueElement.style.fontWeight =
-        presentation.weight;
-
-      hintElement.textContent =
-        presentation.hint;
-
-      if (
-        stage !== "已落单"
-      ) {
-        cachedLandingTimeOptions = [];
-
-        const extractContainer =
-          document.getElementById(
-            UI.EXTRACT_OPTIONS_ID
-          );
-
-        if (extractContainer) {
-          extractContainer.innerHTML =
-            "";
-
-          extractContainer.style.display =
-            "none";
-        }
-      }
-
-      const changed =
-        stage !==
-        lastDisplayedFlowStage;
-
-      lastDisplayedFlowStage =
-        stage;
-
-      if (
-        refreshOnLanding &&
-        changed &&
-        stage === "已落单"
-      ) {
-        refreshLandingTimeOptions()
-          .catch(error => {
-            console.warn(
-              "[SOA流程自动化] 进入已落单后刷新落单数据失败：",
-              error
-            );
-          });
-      }
-
-      return stage;
-    }
-
-    function getStoredText(
-      key,
-      fallback = ""
-    ) {
-      try {
-        return (
-          localStorage.getItem(
-            key
-          ) ?? fallback
-        );
-      } catch (_) {
-        return fallback;
-      }
-    }
-  
-    function saveStoredText(
-      key,
-      value
-    ) {
-      try {
-        localStorage.setItem(
-          key,
-          String(value || "")
-        );
-      } catch (_) {
-        // 保存失败不影响当前执行。
-      }
-    }
-  
-    function getReviewRemark() {
-      return cleanText(
-        document.getElementById(
-          UI.REVIEW_REMARK_ID
-        )?.value ||
-        getStoredText(
-          UI.REVIEW_REMARK_KEY
-        )
+  async function fillAndConfirmApproval(
+    stage,
+    remarkText,
+    preferredActionText = "",
+    token = null
+  ) {
+    if (!remarkText) {
+      throw new Error(
+        `“${stage}”备注尚未维护，请先在工具面板填写`
       );
     }
-  
-    function getOrderRemark() {
-      return cleanText(
-        document.getElementById(
-          UI.ORDER_REMARK_ID
-        )?.value ||
-        getStoredText(
-          UI.ORDER_REMARK_KEY
-        )
-      );
-    }
-  
-    function getRemarkStatusInfo() {
-      const review =
-        getReviewRemark();
-  
-      const order =
-        getOrderRemark();
-  
-      const missing = [];
-  
-      if (!review) {
-        missing.push(
-          "内勤复核"
-        );
-      }
-  
-      if (!order) {
-        missing.push(
-          "落单审核"
-        );
-      }
-  
-      return {
-        ready:
-          missing.length === 0,
-        missing
-      };
-    }
-  
-    function updateRemarkStatus() {
-      const element =
-        document.getElementById(
-          UI.REMARK_STATUS_ID
-        );
-  
-      if (!element) {
-        return;
-      }
-  
-      const info =
-        getRemarkStatusInfo();
-  
-      if (info.ready) {
-        element.textContent =
-          "已配置";
-  
-        element.style.color =
-          "#389e0d";
-  
-        element.style.background =
-          "#f6ffed";
-  
-        element.style.borderColor =
-          "#b7eb8f";
-  
-        return;
-      }
-  
-      element.textContent =
-        `需要补充：${info.missing.join("、")}`;
-  
-      element.style.color =
-        "#d46b08";
-  
-      element.style.background =
-        "#fff7e6";
-  
-      element.style.borderColor =
-        "#ffd591";
-    }
-  
-    function toggleHelpPanel() {
-      const panel =
-        document.getElementById(
-          UI.HELP_PANEL_ID
-        );
-  
-      const button =
-        document.getElementById(
-          UI.HELP_BUTTON_ID
-        );
-  
-      if (
-        !panel ||
-        !button
-      ) {
-        return;
-      }
-  
-      const opening =
-        panel.style.display ===
-        "none";
-  
-      panel.style.display =
-        opening
-          ? "block"
-          : "none";
-  
-      button.textContent =
-        opening
-          ? "收起说明"
-          : "查看说明";
-    }
-  
-    function toggleRemarkPanel() {
-      const panel =
-        document.getElementById(
-          UI.REMARK_PANEL_ID
-        );
-  
-      const button =
-        document.getElementById(
-          UI.REMARK_BUTTON_ID
-        );
-  
-      if (
-        !panel ||
-        !button
-      ) {
-        return;
-      }
-  
-      const opening =
-        panel.style.display ===
-        "none";
-  
-      panel.style.display =
-        opening
-          ? "block"
-          : "none";
-  
-      button.textContent =
-        opening
-          ? "收起备注"
-          : "设置备注";
-    }
-  
-    function getVisibleApprovalModal() {
-      const modals =
-        Array.from(
-          document.querySelectorAll(
-            ".ant-modal"
-          )
-        ).filter(isVisible);
-  
-      return (
-        modals.find(modal => {
-          const title =
-            compactText(
-              modal.querySelector(
-                ".ant-modal-title"
-              )?.textContent
+
+    let modal =
+      getVisibleApprovalModal();
+
+    if (!modal) {
+      const action =
+        await waitForReactiveCondition(
+          () => {
+            const found =
+              (
+                preferredActionText
+                  ? findBottomActionByText(
+                      preferredActionText
+                    )
+                  : null
+              ) ||
+              findBottomPrimaryAction();
+
+            return (
+              found ||
+              null
             );
-  
+          },
+          {
+            label:
+              `“${stage}”主操作按钮`,
+            token,
+            blockerCheck:
+              () =>
+                getVisibleErrorFeedback()
+          }
+        );
+
+      log(
+        `“${stage}”：点击“${cleanText(action.textContent)}”，等待审批弹窗准备完成...`
+      );
+
+      action.click();
+
+      const outcome =
+        await waitForReactiveCondition(
+          () => {
+            const currentModal =
+              getVisibleApprovalModal();
+
+            if (currentModal) {
+              return {
+                type:
+                  "modal",
+                modal:
+                  currentModal
+              };
+            }
+
+            const currentStage =
+              getCurrentFlowStage();
+
+            if (
+              currentStage &&
+              currentStage !== stage
+            ) {
+              return {
+                type:
+                  "stage",
+                stage:
+                  currentStage
+              };
+            }
+
+            return null;
+          },
+          {
+            label:
+              `“${stage}”审批弹窗`,
+            token,
+            blockerCheck:
+              () =>
+                getVisibleErrorFeedback()
+          }
+        );
+
+      if (
+        outcome.type ===
+        "stage"
+      ) {
+        log(
+          `“${stage}”已直接推进到“${outcome.stage}”。`
+        );
+        return outcome.stage;
+      }
+
+      modal =
+        outcome.modal;
+    }
+
+    const controls =
+      await waitForReactiveCondition(
+        () => {
+          if (
+            !modal ||
+            !modal.isConnected ||
+            !isVisible(modal)
+          ) {
+            return null;
+          }
+
           const remark =
             modal.querySelector(
               "#remark"
             );
-  
-          return (
-            remark &&
-            (
-              title.includes(
-                "审批"
-              ) ||
-              title.includes(
-                "审核"
-              )
-            )
-          );
-        }) ||
-        null
-      );
-    }
-  
-    function findModalConfirmButton(
-      modal
-    ) {
-      if (!modal) {
-        return null;
-      }
-  
-      return (
-        Array.from(
-          modal.querySelectorAll(
-            ".ant-modal-footer button"
-          )
-        ).find(button => {
-          return (
-            isVisible(button) &&
-            compactText(
-              button.textContent
-            ) === "确认"
-          );
-        }) ||
-        null
-      );
-    }
-  
-    function findBottomPrimaryAction() {
-      const bottom =
-        document.querySelector(
-          ".bottom .actions"
-        );
-  
-      if (!bottom) {
-        return null;
-      }
-  
-      const buttons =
-        Array.from(
-          bottom.querySelectorAll(
-            "button"
-          )
-        ).filter(button => {
-          return (
-            isVisible(button) &&
-            !button.disabled &&
-            button.classList.contains(
-              "ant-btn-primary"
-            )
-          );
-        });
-  
-      return buttons[0] || null;
-    }
-  
-    async function waitForStageChange(
-      oldStage,
-      token = null
-    ) {
-      return await waitForReactiveCondition(
-        () => {
-          const stage =
-            getCurrentFlowStage();
-  
+
+          const confirm =
+            findModalConfirmButton(
+              modal
+            );
+
           if (
-            stage &&
-            stage !== oldStage
+            remark &&
+            !remark.disabled &&
+            !remark.readOnly &&
+            confirm &&
+            !confirm.disabled &&
+            !confirm.classList.contains(
+              "ant-btn-loading"
+            )
           ) {
-            return stage;
+            return {
+              remark,
+              confirm
+            };
           }
-  
+
           return null;
         },
         {
           label:
-            `流程从“${oldStage}”进入下一阶段`,
+            `“${stage}”审批表单可填写`,
           token,
           blockerCheck:
             () =>
               getVisibleErrorFeedback()
         }
       );
-    }
-  
-    async function fillAndConfirmApproval(
-      stage,
-      remarkText,
-      preferredActionText = "",
-      token = null
-    ) {
-      if (!remarkText) {
-        throw new Error(
-          `“${stage}”备注尚未维护，请先在工具面板填写`
-        );
-      }
-  
-      let modal =
-        getVisibleApprovalModal();
-  
-      if (!modal) {
-        const action =
-          await waitForReactiveCondition(
-            () => {
-              const found =
-                (
-                  preferredActionText
-                    ? findBottomActionByText(
-                        preferredActionText
-                      )
-                    : null
-                ) ||
-                findBottomPrimaryAction();
-  
-              return (
-                found ||
-                null
-              );
-            },
-            {
-              label:
-                `“${stage}”主操作按钮`,
-              token,
-              blockerCheck:
-                () =>
-                  getVisibleErrorFeedback()
-            }
-          );
-  
-        log(
-          `“${stage}”：点击“${cleanText(action.textContent)}”，等待审批弹窗准备完成...`
-        );
-  
-        action.click();
-  
-        const outcome =
-          await waitForReactiveCondition(
-            () => {
-              const currentModal =
-                getVisibleApprovalModal();
-  
-              if (currentModal) {
-                return {
-                  type:
-                    "modal",
-                  modal:
-                    currentModal
-                };
-              }
-  
-              const currentStage =
-                getCurrentFlowStage();
-  
-              if (
-                currentStage &&
-                currentStage !== stage
-              ) {
-                return {
-                  type:
-                    "stage",
-                  stage:
-                    currentStage
-                };
-              }
-  
-              return null;
-            },
-            {
-              label:
-                `“${stage}”审批弹窗`,
-              token,
-              blockerCheck:
-                () =>
-                  getVisibleErrorFeedback()
-            }
-          );
-  
-        if (
-          outcome.type ===
-          "stage"
-        ) {
-          log(
-            `“${stage}”已直接推进到“${outcome.stage}”。`
-          );
-          return outcome.stage;
-        }
-  
-        modal =
-          outcome.modal;
-      }
-  
-      const controls =
-        await waitForReactiveCondition(
-          () => {
-            if (
-              !modal ||
-              !modal.isConnected ||
-              !isVisible(modal)
-            ) {
-              return null;
-            }
-  
-            const remark =
-              modal.querySelector(
-                "#remark"
-              );
-  
-            const confirm =
-              findModalConfirmButton(
-                modal
-              );
-  
-            if (
-              remark &&
-              !remark.disabled &&
-              !remark.readOnly &&
-              confirm &&
-              !confirm.disabled &&
-              !confirm.classList.contains(
-                "ant-btn-loading"
-              )
-            ) {
-              return {
-                remark,
-                confirm
-              };
-            }
-  
-            return null;
-          },
-          {
-            label:
-              `“${stage}”审批表单可填写`,
-            token,
-            blockerCheck:
-              () =>
-                getVisibleErrorFeedback()
-          }
-        );
-  
-      const stable =
-        await waitForStableControlledValue(
-          controls.remark,
-          remarkText
-        );
-  
-      if (!stable) {
-        throw new Error(
-          `“${stage}”备注写入后被页面回退，已停止自动确认`
-        );
-      }
-  
-      /*
-       * 再次确认按钮仍然有效，避免输入过程中弹窗状态变化。
-       */
-      const confirm =
-        await waitForReactiveCondition(
-          () => {
-            const button =
-              findModalConfirmButton(
-                modal
-              );
-  
-            if (
-              button &&
-              !button.disabled &&
-              !button.classList.contains(
-                "ant-btn-loading"
-              ) &&
-              String(
-                controls.remark.value
-              ) === String(
-                remarkText
-              )
-            ) {
-              return button;
-            }
-  
-            return null;
-          },
-          {
-            label:
-              `“${stage}”确认按钮可提交`,
-            token,
-            blockerCheck:
-              () =>
-                getVisibleErrorFeedback()
-          }
-        );
-  
-      log(
-        `“${stage}”：备注已稳定写入，点击确认并等待流程实际推进...`
+
+    const stable =
+      await waitForStableControlledValue(
+        controls.remark,
+        remarkText
       );
-  
-      confirm.click();
-  
-      /*
-       * 不以“弹窗关闭”作为完成标准。
-       * 真正完成标准是顶部流程阶段发生变化。
-       */
-      const nextStage =
+
+    if (!stable) {
+      throw new Error(
+        `“${stage}”备注写入后被页面回退，已停止自动确认`
+      );
+    }
+
+    /*
+     * 再次确认按钮仍然有效，避免输入过程中弹窗状态变化。
+     */
+    const confirm =
+      await waitForReactiveCondition(
+        () => {
+          const button =
+            findModalConfirmButton(
+              modal
+            );
+
+          if (
+            button &&
+            !button.disabled &&
+            !button.classList.contains(
+              "ant-btn-loading"
+            ) &&
+            String(
+              controls.remark.value
+            ) === String(
+              remarkText
+            )
+          ) {
+            return button;
+          }
+
+          return null;
+        },
+        {
+          label:
+            `“${stage}”确认按钮可提交`,
+          token,
+          blockerCheck:
+            () =>
+              getVisibleErrorFeedback()
+        }
+      );
+
+    log(
+      `“${stage}”：备注已稳定写入，点击确认并等待流程实际推进...`
+    );
+
+    confirm.click();
+
+    /*
+     * 不以“弹窗关闭”作为完成标准。
+     * 真正完成标准是顶部流程阶段发生变化。
+     */
+    const nextStage =
+      await waitForStageChange(
+        stage,
+        token
+      );
+
+    log(
+      `✓ “${stage}”已进入“${nextStage}”`
+    );
+
+    return nextStage;
+  }
+
+  async function submitContractStage(
+    token = null
+  ) {
+    const stage =
+      getCurrentFlowStage();
+
+    if (
+      stage !==
+      "合同补充"
+    ) {
+      throw new Error(
+        `当前阶段为“${stage || "未知"}”，不是合同补充`
+      );
+    }
+
+    let popconfirm =
+      getVisibleLandingPopconfirm();
+
+    if (!popconfirm) {
+      const action =
+        await waitForReactiveCondition(
+          () =>
+            findBottomActionByText(
+              "发起落单"
+            ) ||
+            findBottomPrimaryAction() ||
+            null,
+          {
+            label:
+              "合同补充阶段“发起落单”按钮",
+            token,
+            blockerCheck:
+              () =>
+                getVisibleErrorFeedback()
+          }
+        );
+
+      log(
+        `合同补充：点击“${cleanText(action.textContent)}”，等待确认框...`
+      );
+
+      action.click();
+
+      popconfirm =
+        await waitForReactiveCondition(
+          () =>
+            getVisibleLandingPopconfirm() ||
+            null,
+          {
+            label:
+              "发起落单确认框",
+            token,
+            blockerCheck:
+              () =>
+                getVisibleErrorFeedback()
+          }
+        );
+    }
+
+    const confirmButton =
+      await waitForReactiveCondition(
+        () => {
+          const button =
+            findLandingPopoverConfirmButton(
+              popconfirm
+            );
+
+          if (
+            button &&
+            !button.disabled &&
+            !button.classList.contains(
+              "ant-btn-loading"
+            )
+          ) {
+            return button;
+          }
+
+          return null;
+        },
+        {
+          label:
+            "发起落单“确定”按钮",
+          token,
+          blockerCheck:
+            () =>
+              getVisibleErrorFeedback()
+        }
+      );
+
+    log(
+      "合同补充：点击“确定”，等待流程真实进入下一阶段..."
+    );
+
+    confirmButton.click();
+
+    const nextStage =
+      await waitForStageChange(
+        "合同补充",
+        token
+      );
+
+    log(
+      `✓ 已进入：${nextStage}`
+    );
+
+    return nextStage;
+  }
+
+  async function waitUntilFinalStage(
+    token = null
+  ) {
+    while (true) {
+      const stage =
+        getCurrentFlowStage();
+
+      if (
+        stage ===
+        "已落单"
+      ) {
+        return stage;
+      }
+
+      if (
+        stage ===
+        "落单审核"
+      ) {
+        await fillAndConfirmApproval(
+          "落单审核",
+          getOrderRemark(),
+          "确认落单",
+          token
+        );
+
+        continue;
+      }
+
+      if (
+        stage ===
+        "落单中"
+      ) {
+        updatePanelStatus(
+          "流程已进入“落单中”，正在等待页面实际变为“已落单”..."
+        );
+
+        await waitForStageChange(
+          "落单中",
+          token
+        );
+
+        continue;
+      }
+
+      if (stage) {
         await waitForStageChange(
           stage,
           token
         );
-  
-      log(
-        `✓ “${stage}”已进入“${nextStage}”`
-      );
-  
-      return nextStage;
-    }
-  
-    async function submitContractStage(
-      token = null
-    ) {
-      const stage =
-        getCurrentFlowStage();
-  
-      if (
-        stage !==
-        "合同补充"
-      ) {
-        throw new Error(
-          `当前阶段为“${stage || "未知"}”，不是合同补充`
-        );
+        continue;
       }
-  
-      let popconfirm =
-        getVisibleLandingPopconfirm();
-  
-      if (!popconfirm) {
-        const action =
-          await waitForReactiveCondition(
-            () =>
-              findBottomActionByText(
-                "发起落单"
-              ) ||
-              findBottomPrimaryAction() ||
-              null,
-            {
-              label:
-                "合同补充阶段“发起落单”按钮",
-              token,
-              blockerCheck:
-                () =>
-                  getVisibleErrorFeedback()
-            }
-          );
-  
-        log(
-          `合同补充：点击“${cleanText(action.textContent)}”，等待确认框...`
-        );
-  
-        action.click();
-  
-        popconfirm =
-          await waitForReactiveCondition(
-            () =>
-              getVisibleLandingPopconfirm() ||
-              null,
-            {
-              label:
-                "发起落单确认框",
-              token,
-              blockerCheck:
-                () =>
-                  getVisibleErrorFeedback()
-            }
-          );
-      }
-  
-      const confirmButton =
-        await waitForReactiveCondition(
-          () => {
-            const button =
-              findLandingPopoverConfirmButton(
-                popconfirm
-              );
-  
-            if (
-              button &&
-              !button.disabled &&
-              !button.classList.contains(
-                "ant-btn-loading"
-              )
-            ) {
-              return button;
-            }
-  
-            return null;
-          },
-          {
-            label:
-              "发起落单“确定”按钮",
-            token,
-            blockerCheck:
-              () =>
-                getVisibleErrorFeedback()
-          }
-        );
-  
-      log(
-        "合同补充：点击“确定”，等待流程真实进入下一阶段..."
-      );
-  
-      confirmButton.click();
-  
-      const nextStage =
-        await waitForStageChange(
-          "合同补充",
+
+      await waitForReactiveCondition(
+        () =>
+          getCurrentFlowStage() ||
+          null,
+        {
+          label:
+            "页面流程阶段",
           token
-        );
-  
-      log(
-        `✓ 已进入：${nextStage}`
+        }
       );
-  
-      return nextStage;
     }
-  
-    async function waitUntilFinalStage(
-      token = null
-    ) {
-      while (true) {
-        const stage =
+  }
+
+  async function runFullFlow(
+    {
+      token = null,
+      allowPermissionPrompt =
+        false
+    } = {}
+  ) {
+    if (processRunning) {
+      log(
+        "当前已有流程正在执行，忽略重复启动。"
+      );
+      return;
+    }
+
+    processRunning = true;
+
+    const flowButton =
+      document.getElementById(
+        UI.FLOW_RUN_BUTTON_ID
+      );
+
+    if (flowButton) {
+      flowButton.disabled =
+        true;
+      flowButton.textContent =
+        "流程处理中...";
+    }
+
+    try {
+      while (
+        isTargetRoute()
+      ) {
+        const blocker =
+          getPageBlocker({
+            allowApprovalModal:
+              true,
+            allowLandingPopconfirm:
+              true
+          });
+
+        if (blocker) {
+          throw new FlowBlockedError(
+            blocker
+          );
+        }
+
+        let stage =
           getCurrentFlowStage();
-  
+
+        if (!stage) {
+          stage =
+            await waitForReactiveCondition(
+              () =>
+                getCurrentFlowStage() ||
+                null,
+              {
+                label:
+                  "当前流程阶段",
+                token,
+                blockerCheck:
+                  () =>
+                    getVisibleErrorFeedback()
+              }
+            );
+        }
+
+        log(
+          `当前流程阶段：${stage}`
+        );
+
+        refreshExamDateInfo(
+          stage
+        );
+
         if (
           stage ===
-          "已落单"
+          "内勤复核"
         ) {
-          return stage;
+          await fillAndConfirmApproval(
+            "内勤复核",
+            getReviewRemark(),
+            "",
+            token
+          );
+          continue;
         }
-  
+
+        if (
+          stage ===
+          "合同补充"
+        ) {
+          await ensureContractTabVisible(
+            token
+          );
+
+          await runContractProcess({
+            nested:
+              true,
+            token,
+            allowPermissionPrompt
+          });
+
+          /*
+           * runContractProcess 只处理合同内容/保存/上传，
+           * 流程仍在合同补充时再发起落单。
+           */
+          if (
+            getCurrentFlowStage() ===
+            "合同补充"
+          ) {
+            await submitContractStage(
+              token
+            );
+          }
+
+          continue;
+        }
+
         if (
           stage ===
           "落单审核"
@@ -4493,1149 +5790,1027 @@
             "确认落单",
             token
           );
-  
           continue;
         }
-  
+
         if (
           stage ===
           "落单中"
         ) {
           updatePanelStatus(
-            "流程已进入“落单中”，正在等待页面实际变为“已落单”..."
+            "流程处于“落单中”，等待网页实际完成落单..."
           );
-  
+
           await waitForStageChange(
             "落单中",
             token
           );
-  
+
           continue;
         }
-  
-        if (stage) {
-          await waitForStageChange(
-            stage,
-            token
+
+        if (
+          stage ===
+          "已落单"
+        ) {
+          await refreshLandingTimeOptions();
+
+          updatePanelStatus(
+            "✓ 当前订单已落单，落单数据按钮已刷新。",
+            "success"
           );
-          continue;
+
+          return;
         }
-  
-        await waitForReactiveCondition(
-          () =>
-            getCurrentFlowStage() ||
-            null,
-          {
-            label:
-              "页面流程阶段",
-            token
-          }
+
+        /*
+         * 未配置自动动作的早期阶段不乱点，
+         * 只观察流程发生真实变化。
+         */
+        updatePanelStatus(
+          `当前为“${stage}”，该阶段不执行自动点击，等待页面进入已支持阶段。`
+        );
+
+        await waitForStageChange(
+          stage,
+          token
         );
       }
-    }
-  
-    async function runFullFlow(
-      {
-        token = null,
-        allowPermissionPrompt =
-          false
-      } = {}
-    ) {
-      if (processRunning) {
-        log(
-          "当前已有流程正在执行，忽略重复启动。"
-        );
-        return;
-      }
-  
-      processRunning = true;
-  
-      const flowButton =
-        document.getElementById(
-          UI.FLOW_RUN_BUTTON_ID
-        );
-  
+    } finally {
+      processRunning = false;
+
       if (flowButton) {
         flowButton.disabled =
-          true;
+          false;
         flowButton.textContent =
-          "流程处理中...";
-      }
-  
-      try {
-        while (
-          isTargetRoute()
-        ) {
-          const blocker =
-            getPageBlocker({
-              allowApprovalModal:
-                true,
-              allowLandingPopconfirm:
-                true
-            });
-  
-          if (blocker) {
-            throw new FlowBlockedError(
-              blocker
-            );
-          }
-  
-          let stage =
-            getCurrentFlowStage();
-  
-          if (!stage) {
-            stage =
-              await waitForReactiveCondition(
-                () =>
-                  getCurrentFlowStage() ||
-                  null,
-                {
-                  label:
-                    "当前流程阶段",
-                  token,
-                  blockerCheck:
-                    () =>
-                      getVisibleErrorFeedback()
-                }
-              );
-          }
-  
-          log(
-            `当前流程阶段：${stage}`
-          );
-  
-          if (
-            stage ===
-            "内勤复核"
-          ) {
-            await fillAndConfirmApproval(
-              "内勤复核",
-              getReviewRemark(),
-              "",
-              token
-            );
-            continue;
-          }
-  
-          if (
-            stage ===
-            "合同补充"
-          ) {
-            await ensureContractTabVisible(
-              token
-            );
-  
-            await runContractProcess({
-              nested:
-                true,
-              token,
-              allowPermissionPrompt
-            });
-  
-            /*
-             * runContractProcess 只处理合同内容/保存/上传，
-             * 流程仍在合同补充时再发起落单。
-             */
-            if (
-              getCurrentFlowStage() ===
-              "合同补充"
-            ) {
-              await submitContractStage(
-                token
-              );
-            }
-  
-            continue;
-          }
-  
-          if (
-            stage ===
-            "落单审核"
-          ) {
-            await fillAndConfirmApproval(
-              "落单审核",
-              getOrderRemark(),
-              "确认落单",
-              token
-            );
-            continue;
-          }
-  
-          if (
-            stage ===
-            "落单中"
-          ) {
-            updatePanelStatus(
-              "流程处于“落单中”，等待网页实际完成落单..."
-            );
-  
-            await waitForStageChange(
-              "落单中",
-              token
-            );
-  
-            continue;
-          }
-  
-          if (
-            stage ===
-            "已落单"
-          ) {
-            await refreshLandingTimeOptions();
-  
-            updatePanelStatus(
-              "✓ 当前订单已落单，落单数据按钮已刷新。",
-              "success"
-            );
-  
-            return;
-          }
-  
-          /*
-           * 未配置自动动作的早期阶段不乱点，
-           * 只观察流程发生真实变化。
-           */
-          updatePanelStatus(
-            `当前为“${stage}”，该阶段不执行自动点击，等待页面进入已支持阶段。`
-          );
-  
-          await waitForStageChange(
-            stage,
-            token
-          );
-        }
-      } finally {
-        processRunning = false;
-  
-        if (flowButton) {
-          flowButton.disabled =
-            false;
-          flowButton.textContent =
-            "立即处理订单";
-        }
+          "立即处理订单";
       }
     }
-  
-    async function runContractProcess(
-      {
-        nested = false,
-        token = null,
-        allowPermissionPrompt =
-          false
-      } = {}
+  }
+
+  async function runContractProcess(
+    {
+      nested = false,
+      token = null,
+      allowPermissionPrompt =
+        false
+    } = {}
+  ) {
+    if (
+      !nested &&
+      processRunning
     ) {
-      if (
-        !nested &&
-        processRunning
-      ) {
-        log(
-          "当前流程正在执行，请等待完成。"
-        );
-        return;
-      }
-  
-      if (!contractPageVisible()) {
-        throw new Error(
-          "当前没有显示合同页"
-        );
-      }
-  
-      if (!nested) {
-        processRunning = true;
-      }
-  
-      try {
-        const sharedFile =
-          await getBoundFileForRun({
-            allowPermissionPrompt
-          });
-  
-        log(
-          `合同补充：使用已绑定文件 ${sharedFile.name}`
-        );
-  
-        await enterEditMode(
-          token
-        );
-  
-        await selectFirstContractCompany(
-          token
-        );
-  
-        await setContractDates();
-  
-        await fillInspectionPeopleDay();
-  
-        await saveContractForm(
-          token
-        );
-  
-        const contractUploadResult =
-          await uploadOne(
-            "contract",
-            sharedFile,
-            "已盖章合同"
-          );
-  
-        const authUploadResult =
-          await uploadOne(
-            "auth",
-            sharedFile,
-            "授权书"
-          );
-  
-        const handledUploads =
-          [
-            contractUploadResult,
-            authUploadResult
-          ].filter(
-            result =>
-              result &&
-              !result.skipped
-          ).length;
-  
-        const skippedUploads =
-          [
-            contractUploadResult,
-            authUploadResult
-          ].filter(
-            result =>
-              result &&
-              result.skipped
-          ).length;
-  
-        updatePanelStatus(
-          `✓ 合同补充完成：已处理上传模块 ${handledUploads} 个，跳过不存在模块 ${skippedUploads} 个。`,
-          "success"
-        );
-      } finally {
-        if (!nested) {
-          processRunning =
-            false;
-        }
-  
-      }
+      log(
+        "当前流程正在执行，请等待完成。"
+      );
+      return;
     }
-  
-    function clamp(
-      value,
-      min,
-      max
-    ) {
-      return Math.min(
-        Math.max(
-          value,
-          min
-        ),
-        max
+
+    if (!contractPageVisible()) {
+      throw new Error(
+        "当前没有显示合同页"
       );
     }
-  
-    function savePanelPosition(
-      left,
-      top
-    ) {
-      try {
-        localStorage.setItem(
-          UI.POSITION_KEY,
-          JSON.stringify({
-            left,
-            top
-          })
-        );
-      } catch (_) {
-        // 位置保存失败不影响工具使用。
-      }
+
+    if (!nested) {
+      processRunning = true;
     }
-  
-    function loadPanelPosition() {
-      try {
-        const raw =
-          localStorage.getItem(
-            UI.POSITION_KEY
-          );
-  
-        if (!raw) {
-          return null;
-        }
-  
-        const parsed =
-          JSON.parse(raw);
-  
-        if (
-          !Number.isFinite(
-            parsed?.left
-          ) ||
-          !Number.isFinite(
-            parsed?.top
-          )
-        ) {
-          return null;
-        }
-  
-        return {
-          left:
-            parsed.left,
-          top:
-            parsed.top
-        };
-      } catch (_) {
+
+    try {
+      const sharedFile =
+        await getBoundFileForRun({
+          allowPermissionPrompt
+        });
+
+      log(
+        `合同补充：使用已绑定文件 ${sharedFile.name}`
+      );
+
+      await enterEditMode(
+        token
+      );
+
+      await selectFirstContractCompany(
+        token
+      );
+
+      await setContractDates();
+
+      await fillInspectionPeopleDay();
+
+      await saveContractForm(
+        token
+      );
+
+      const contractUploadResult =
+        await uploadOne(
+          "contract",
+          sharedFile,
+          "已盖章合同"
+        );
+
+      const authUploadResult =
+        await uploadOne(
+          "auth",
+          sharedFile,
+          "授权书"
+        );
+
+      const handledUploads =
+        [
+          contractUploadResult,
+          authUploadResult
+        ].filter(
+          result =>
+            result &&
+            !result.skipped
+        ).length;
+
+      const skippedUploads =
+        [
+          contractUploadResult,
+          authUploadResult
+        ].filter(
+          result =>
+            result &&
+            result.skipped
+        ).length;
+
+      updatePanelStatus(
+        `✓ 合同补充完成：已处理上传模块 ${handledUploads} 个，跳过不存在模块 ${skippedUploads} 个。`,
+        "success"
+      );
+    } finally {
+      if (!nested) {
+        processRunning =
+          false;
+      }
+
+    }
+  }
+
+  function clamp(
+    value,
+    min,
+    max
+  ) {
+    return Math.min(
+      Math.max(
+        value,
+        min
+      ),
+      max
+    );
+  }
+
+  function savePanelPosition(
+    left,
+    top
+  ) {
+    try {
+      localStorage.setItem(
+        UI.POSITION_KEY,
+        JSON.stringify({
+          left,
+          top
+        })
+      );
+    } catch (_) {
+      // 位置保存失败不影响工具使用。
+    }
+  }
+
+  function loadPanelPosition() {
+    try {
+      const raw =
+        localStorage.getItem(
+          UI.POSITION_KEY
+        );
+
+      if (!raw) {
         return null;
       }
-    }
-  
-    function applySavedPanelPosition(
-      panel
-    ) {
-      const saved =
-        loadPanelPosition();
-  
-      if (!saved) {
-        return;
+
+      const parsed =
+        JSON.parse(raw);
+
+      if (
+        !Number.isFinite(
+          parsed?.left
+        ) ||
+        !Number.isFinite(
+          parsed?.top
+        )
+      ) {
+        return null;
       }
-  
-      const rect =
-        panel.getBoundingClientRect();
-  
-      const maxLeft =
-        Math.max(
-          0,
-          window.innerWidth -
-            rect.width
-        );
-  
-      const maxTop =
-        Math.max(
-          0,
-          window.innerHeight -
-            rect.height
-        );
-  
-      panel.style.right =
-        "auto";
-  
-      panel.style.bottom =
-        "auto";
-  
-      panel.style.left =
-        `${clamp(
-          saved.left,
-          0,
-          maxLeft
-        )}px`;
-  
-      panel.style.top =
-        `${clamp(
-          saved.top,
-          0,
-          maxTop
-        )}px`;
+
+      return {
+        left:
+          parsed.left,
+        top:
+          parsed.top
+      };
+    } catch (_) {
+      return null;
     }
-  
-    function enablePanelDragging(
-      panel
-    ) {
-      const handle =
-        document.getElementById(
-          UI.DRAG_HANDLE_ID
-        );
-  
-      if (!handle) {
-        return;
+  }
+
+  function applySavedPanelPosition(
+    panel
+  ) {
+    const saved =
+      loadPanelPosition();
+
+    if (!saved) {
+      return;
+    }
+
+    const rect =
+      panel.getBoundingClientRect();
+
+    const maxLeft =
+      Math.max(
+        0,
+        window.innerWidth -
+          rect.width
+      );
+
+    const maxTop =
+      Math.max(
+        0,
+        window.innerHeight -
+          rect.height
+      );
+
+    panel.style.right =
+      "auto";
+
+    panel.style.bottom =
+      "auto";
+
+    panel.style.left =
+      `${clamp(
+        saved.left,
+        0,
+        maxLeft
+      )}px`;
+
+    panel.style.top =
+      `${clamp(
+        saved.top,
+        0,
+        maxTop
+      )}px`;
+  }
+
+  function enablePanelDragging(
+    panel
+  ) {
+    const handle =
+      document.getElementById(
+        UI.DRAG_HANDLE_ID
+      );
+
+    if (!handle) {
+      return;
+    }
+
+    let dragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    handle.style.cursor =
+      "move";
+
+    handle.style.userSelect =
+      "none";
+
+    handle.addEventListener(
+      "mousedown",
+      event => {
+        if (
+          event.button !== 0
+        ) {
+          return;
+        }
+
+        if (
+          event.target.closest(
+            `#${UI.COLLAPSE_BUTTON_ID}`
+          )
+        ) {
+          return;
+        }
+
+        const rect =
+          panel
+            .getBoundingClientRect();
+
+        dragging = true;
+
+        offsetX =
+          event.clientX -
+          rect.left;
+
+        offsetY =
+          event.clientY -
+          rect.top;
+
+        panel.style.right =
+          "auto";
+
+        panel.style.bottom =
+          "auto";
+
+        panel.style.left =
+          `${rect.left}px`;
+
+        panel.style.top =
+          `${rect.top}px`;
+
+        event.preventDefault();
       }
-  
-      let dragging = false;
-      let offsetX = 0;
-      let offsetY = 0;
-  
-      handle.style.cursor =
-        "move";
-  
-      handle.style.userSelect =
-        "none";
-  
-      handle.addEventListener(
-        "mousedown",
-        event => {
-          if (
-            event.button !== 0
-          ) {
-            return;
-          }
-  
-          if (
-            event.target.closest(
-              `#${UI.COLLAPSE_BUTTON_ID}`
-            )
-          ) {
-            return;
-          }
-  
-          const rect =
-            panel
-              .getBoundingClientRect();
-  
-          dragging = true;
-  
-          offsetX =
+    );
+
+    document.addEventListener(
+      "mousemove",
+      event => {
+        if (!dragging) {
+          return;
+        }
+
+        const rect =
+          panel
+            .getBoundingClientRect();
+
+        const maxLeft =
+          Math.max(
+            0,
+            window.innerWidth -
+              rect.width
+          );
+
+        const maxTop =
+          Math.max(
+            0,
+            window.innerHeight -
+              rect.height
+          );
+
+        const left =
+          clamp(
             event.clientX -
-            rect.left;
-  
-          offsetY =
+              offsetX,
+            0,
+            maxLeft
+          );
+
+        const top =
+          clamp(
             event.clientY -
-            rect.top;
-  
-          panel.style.right =
-            "auto";
-  
-          panel.style.bottom =
-            "auto";
-  
-          panel.style.left =
-            `${rect.left}px`;
-  
-          panel.style.top =
-            `${rect.top}px`;
-  
-          event.preventDefault();
+              offsetY,
+            0,
+            maxTop
+          );
+
+        panel.style.left =
+          `${left}px`;
+
+        panel.style.top =
+          `${top}px`;
+
+        event.preventDefault();
+      }
+    );
+
+    document.addEventListener(
+      "mouseup",
+      () => {
+        if (!dragging) {
+          return;
         }
-      );
-  
-      document.addEventListener(
-        "mousemove",
-        event => {
-          if (!dragging) {
-            return;
-          }
-  
-          const rect =
-            panel
-              .getBoundingClientRect();
-  
-          const maxLeft =
-            Math.max(
-              0,
-              window.innerWidth -
-                rect.width
-            );
-  
-          const maxTop =
-            Math.max(
-              0,
-              window.innerHeight -
-                rect.height
-            );
-  
-          const left =
-            clamp(
-              event.clientX -
-                offsetX,
-              0,
-              maxLeft
-            );
-  
-          const top =
-            clamp(
-              event.clientY -
-                offsetY,
-              0,
-              maxTop
-            );
-  
-          panel.style.left =
-            `${left}px`;
-  
-          panel.style.top =
-            `${top}px`;
-  
-          event.preventDefault();
+
+        dragging = false;
+
+        const rect =
+          panel
+            .getBoundingClientRect();
+
+        savePanelPosition(
+          rect.left,
+          rect.top
+        );
+      }
+    );
+
+    window.addEventListener(
+      "resize",
+      () => {
+        if (
+          !document.body
+            .contains(panel)
+        ) {
+          return;
         }
-      );
-  
-      document.addEventListener(
-        "mouseup",
-        () => {
-          if (!dragging) {
-            return;
-          }
-  
-          dragging = false;
-  
-          const rect =
-            panel
-              .getBoundingClientRect();
-  
-          savePanelPosition(
+
+        const rect =
+          panel
+            .getBoundingClientRect();
+
+        const maxLeft =
+          Math.max(
+            0,
+            window.innerWidth -
+              rect.width
+          );
+
+        const maxTop =
+          Math.max(
+            0,
+            window.innerHeight -
+              rect.height
+          );
+
+        const left =
+          clamp(
             rect.left,
-            rect.top
+            0,
+            maxLeft
           );
-        }
-      );
-  
-      window.addEventListener(
-        "resize",
-        () => {
-          if (
-            !document.body
-              .contains(panel)
-          ) {
-            return;
-          }
-  
-          const rect =
-            panel
-              .getBoundingClientRect();
-  
-          const maxLeft =
-            Math.max(
-              0,
-              window.innerWidth -
-                rect.width
-            );
-  
-          const maxTop =
-            Math.max(
-              0,
-              window.innerHeight -
-                rect.height
-            );
-  
-          const left =
-            clamp(
-              rect.left,
-              0,
-              maxLeft
-            );
-  
-          const top =
-            clamp(
-              rect.top,
-              0,
-              maxTop
-            );
-  
-          panel.style.right =
-            "auto";
-  
-          panel.style.bottom =
-            "auto";
-  
-          panel.style.left =
-            `${left}px`;
-  
-          panel.style.top =
-            `${top}px`;
-  
-          savePanelPosition(
-            left,
-            top
+
+        const top =
+          clamp(
+            rect.top,
+            0,
+            maxTop
           );
-        }
+
+        panel.style.right =
+          "auto";
+
+        panel.style.bottom =
+          "auto";
+
+        panel.style.left =
+          `${left}px`;
+
+        panel.style.top =
+          `${top}px`;
+
+        savePanelPosition(
+          left,
+          top
+        );
+      }
+    );
+  }
+
+  function getPanelCollapsed() {
+    try {
+      return (
+        localStorage.getItem(
+          UI.PANEL_COLLAPSED_KEY
+        ) === "1"
       );
+    } catch (_) {
+      return false;
     }
-  
-    function getPanelCollapsed() {
-      try {
-        return (
-          localStorage.getItem(
-            UI.PANEL_COLLAPSED_KEY
-          ) === "1"
-        );
-      } catch (_) {
-        return false;
-      }
-    }
-  
-    function setPanelCollapsed(
-      collapsed
-    ) {
-      const body =
-        document.getElementById(
-          UI.PANEL_BODY_ID
-        );
-  
-      const button =
-        document.getElementById(
-          UI.COLLAPSE_BUTTON_ID
-        );
-  
-      if (body) {
-        body.style.display =
-          collapsed
-            ? "none"
-            : "block";
-      }
-  
-      if (button) {
-        button.textContent =
-          collapsed
-            ? "+"
-            : "−";
-  
-        button.title =
-          collapsed
-            ? "展开"
-            : "折叠";
-      }
-  
-      try {
-        localStorage.setItem(
-          UI.PANEL_COLLAPSED_KEY,
-          collapsed
-            ? "1"
-            : "0"
-        );
-      } catch (_) {}
-    }
-  
-    function togglePanelCollapsed() {
-      setPanelCollapsed(
-        !getPanelCollapsed()
+  }
+
+  function setPanelCollapsed(
+    collapsed
+  ) {
+    const body =
+      document.getElementById(
+        UI.PANEL_BODY_ID
       );
+
+    const button =
+      document.getElementById(
+        UI.COLLAPSE_BUTTON_ID
+      );
+
+    if (body) {
+      body.style.display =
+        collapsed
+          ? "none"
+          : "block";
     }
-  
-    function createTestPanel() {
-      const existing =
-        document.getElementById(
-          UI.PANEL_ID
-        );
-  
-      if (existing) {
-        updateBoundFileDisplay();
-        updateRemarkStatus();
-        renderWebNoticeHistory();
-        return existing;
-      }
-  
-      const panel =
-        document.createElement(
-          "div"
-        );
-  
-      panel.id =
-        UI.PANEL_ID;
-  
-      panel.style.cssText = [
-        "position:fixed",
-        "display:none",
-        "right:22px",
-        "bottom:28px",
-        "z-index:99999",
-        "width:340px",
-        "box-sizing:border-box",
-        "padding:10px 14px 14px",
-        "border:1px solid #e5e7eb",
-        "border-radius:10px",
-        "background:#fff",
-        "box-shadow:0 8px 28px rgba(0,0,0,.20)",
-        "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif",
-        "font-size:13px",
-        "color:#333"
-      ].join(";");
-  
-      panel.innerHTML = `
-        <div
-          id="${UI.DRAG_HANDLE_ID}"
+
+    if (button) {
+      button.textContent =
+        collapsed
+          ? "+"
+          : "−";
+
+      button.title =
+        collapsed
+          ? "展开"
+          : "折叠";
+    }
+
+    try {
+      localStorage.setItem(
+        UI.PANEL_COLLAPSED_KEY,
+        collapsed
+          ? "1"
+          : "0"
+      );
+    } catch (_) {}
+  }
+
+  function togglePanelCollapsed() {
+    setPanelCollapsed(
+      !getPanelCollapsed()
+    );
+  }
+
+  function createTestPanel() {
+    const existing =
+      document.getElementById(
+        UI.PANEL_ID
+      );
+
+    if (existing) {
+      updateBoundFileDisplay();
+      updateRemarkStatus();
+      renderWebNoticeHistory();
+      updateFlowStageDisplay({
+        refreshOnLanding:
+          true
+      });
+      refreshExamDateInfo(
+        getCurrentFlowStage()
+      );
+      return existing;
+    }
+
+    const panel =
+      document.createElement(
+        "div"
+      );
+
+    panel.id =
+      UI.PANEL_ID;
+
+    panel.style.cssText = [
+      "position:fixed",
+      "display:none",
+      "right:22px",
+      "bottom:28px",
+      "z-index:99999",
+      "width:340px",
+      "box-sizing:border-box",
+      "padding:10px 14px 14px",
+      "border:1px solid #e5e7eb",
+      "border-radius:10px",
+      "background:#fff",
+      "box-shadow:0 8px 28px rgba(0,0,0,.20)",
+      "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif",
+      "font-size:13px",
+      "color:#333"
+    ].join(";");
+
+    panel.innerHTML = `
+      <div
+        id="${UI.DRAG_HANDLE_ID}"
+        style="
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:8px;
+          min-height:28px;
+          margin:-2px -4px 6px -4px;
+          padding:2px 4px;
+          border-radius:6px;
+        "
+        title="按住标题栏可拖动窗口"
+      >
+        <strong style="
+          flex:1 1 auto;
+          min-width:0;
+          font-size:15px;
+        ">
+          SOA订单流程自动化 v1.14
+        </strong>
+
+        <button
+          id="${UI.HELP_BUTTON_ID}"
+          type="button"
           style="
+            flex:0 0 auto;
+            height:26px;
+            padding:0 8px;
+            border:1px solid #d9d9d9;
+            border-radius:5px;
+            background:#fff;
+            color:#666;
+            font-size:12px;
+            cursor:pointer;
+            white-space:nowrap;
+          "
+          title="查看工具使用说明"
+        >查看说明</button>
+
+        <button
+          id="${UI.COLLAPSE_BUTTON_ID}"
+          type="button"
+          style="
+            flex:0 0 auto;
+            width:26px;
+            height:26px;
+            padding:0;
+            border:0;
+            border-radius:5px;
+            background:#f5f5f5;
+            color:#666;
+            font-size:20px;
+            line-height:24px;
+            cursor:pointer;
+            font-weight:600;
+          "
+          title="折叠"
+        >−</button>
+      </div>
+
+      <div id="${UI.PANEL_BODY_ID}">
+        <div
+          id="${UI.STATUS_ID}"
+          style="
+            display:none;
+            min-height:30px;
+            margin-bottom:8px;
+            padding:7px 9px;
+            border:1px solid #eee;
+            border-radius:6px;
+            background:#fcfcfc;
+            color:#555;
+            line-height:1.45;
+            font-size:12px;
+            word-break:break-all;
+          "
+        ></div>
+
+        <div
+          id="${UI.WEB_NOTICE_ID}"
+          style="
+            display:none;
+            margin-bottom:8px;
+            padding:7px 9px;
+            border:1px solid #bae7ff;
+            border-radius:6px;
+            background:#f0faff;
+          "
+        >
+          <div style="
             display:flex;
             align-items:center;
             justify-content:space-between;
             gap:8px;
-            min-height:28px;
-            margin:-2px -4px 6px -4px;
-            padding:2px 4px;
-            border-radius:6px;
-          "
-          title="按住标题栏可拖动窗口"
-        >
-          <strong style="
-            flex:1 1 auto;
-            min-width:0;
-            font-size:15px;
+            margin-bottom:3px;
           ">
-            SOA订单流程自动化 v1.6
-          </strong>
-  
-          <button
-            id="${UI.HELP_BUTTON_ID}"
-            type="button"
-            style="
-              flex:0 0 auto;
-              height:26px;
-              padding:0 8px;
-              border:1px solid #d9d9d9;
-              border-radius:5px;
-              background:#fff;
-              color:#666;
-              font-size:12px;
-              cursor:pointer;
-              white-space:nowrap;
-            "
-            title="查看工具使用说明"
-          >查看说明</button>
-  
-          <button
-            id="${UI.COLLAPSE_BUTTON_ID}"
-            type="button"
-            style="
-              flex:0 0 auto;
-              width:26px;
-              height:26px;
-              padding:0;
-              border:0;
-              border-radius:5px;
-              background:#f5f5f5;
-              color:#666;
-              font-size:20px;
-              line-height:24px;
-              cursor:pointer;
-              font-weight:600;
-            "
-            title="折叠"
-          >−</button>
-        </div>
-  
-        <div id="${UI.PANEL_BODY_ID}">
-          <div
-            id="${UI.STATUS_ID}"
-            style="
-              min-height:30px;
-              margin-bottom:8px;
-              padding:7px 9px;
-              border:1px solid #eee;
-              border-radius:6px;
-              background:#fcfcfc;
-              color:#555;
-              line-height:1.45;
-              font-size:12px;
-              word-break:break-all;
-            "
-          >
-            等待页面状态...
-          </div>
-  
-          <div
-            id="${UI.WEB_NOTICE_ID}"
-            style="
-              display:none;
-              margin-bottom:8px;
-              padding:7px 9px;
-              border:1px solid #bae7ff;
-              border-radius:6px;
-              background:#f0faff;
-            "
-          >
-            <div style="
-              margin-bottom:3px;
+            <span style="
               color:#096dd9;
               font-size:12px;
               font-weight:600;
             ">
               网页提示
-            </div>
-  
-            <div
-              id="${UI.WEB_NOTICE_LIST_ID}"
+            </span>
+
+            <button
+              id="${UI.WEB_NOTICE_CLEAR_ID}"
+              type="button"
               style="
-                max-height:62px;
-                overflow:auto;
-                color:#555;
-                font-size:11px;
-                line-height:1.45;
-                white-space:pre-wrap;
-                word-break:break-all;
+                flex:0 0 auto;
+                height:20px;
+                padding:0 6px;
+                border:1px solid #ffccc7;
+                border-radius:4px;
+                background:#fff;
+                color:#cf1322;
+                font-size:10px;
+                line-height:18px;
+                cursor:pointer;
               "
-            ></div>
+              title="清空当前订单的网页提示记录"
+            >
+              清空
+            </button>
           </div>
-  
+
           <div
-            id="${UI.HELP_PANEL_ID}"
+            id="${UI.WEB_NOTICE_LIST_ID}"
             style="
-              display:none;
-              margin-bottom:8px;
-              padding:8px 10px;
+              max-height:62px;
+              overflow:auto;
+              color:#555;
+              font-size:11px;
+              line-height:1.45;
+              white-space:pre-wrap;
+              word-break:break-all;
+            "
+          ></div>
+        </div>
+
+        <div
+          id="${UI.HELP_PANEL_ID}"
+          style="
+            display:none;
+            margin-bottom:8px;
+            padding:8px 10px;
+            border:1px solid #d9d9d9;
+            border-radius:6px;
+            background:#fafafa;
+            color:#555;
+            font-size:12px;
+            line-height:1.6;
+          "
+        >
+          <div style="
+            margin-bottom:4px;
+            font-weight:600;
+            color:#333;
+          ">
+            使用说明
+          </div>
+          <ol style="
+            margin:0;
+            padding-left:18px;
+          ">
+            <li>
+              页面“智能审批”按钮只负责显示/隐藏本工具，不会自动执行订单。
+            </li>
+            <li>
+              文件按钮会直接显示绑定状态；未绑定时红色提示，绑定完成后绿色显示文件名，点击可重新选择。
+            </li>
+            <li>
+              备注按钮会直接显示配置状态：未配置时红色提示“点击设置备注”，配置完成后绿色显示“备注已配置”。
+            </li>
+            <li>
+              点击“立即处理订单”，脚本根据当前流程阶段自动审批、合同补充、发起落单并等待状态变化。
+            </li>
+            <li>
+              从“报价确认”开始检查体检时间，开始/结束日期统一显示在当前阶段右侧；仅异常的日期加粗标红。日期均正常时同时显示区间时长：不足1个月显示天数、不足1年显示月数、1年以上仅显示整数年；异常时不计算时长。报价确认阶段异常时可点击“修改时间”，脚本只进入编辑并改为今天至3年后，不自动回退、保存或提交。
+            </li>
+            <li>
+              面板底部会实时显示当前流程阶段；不同阶段使用不同颜色突出显示，订单已落单后会自动出现首次/修改后落单数据按钮。
+            </li>
+            <li>
+              网页出现消息、通知或确认提示时，会同步显示在“网页提示”区域；记录仅属于当前订单和当前脚本会话，可点击“清空”手动清除。
+            </li>
+          </ol>
+        </div>
+
+        <div style="
+          display:flex;
+          align-items:center;
+          gap:6px;
+          margin-bottom:6px;
+        ">
+          <button
+            id="${UI.REMARK_BUTTON_ID}"
+            type="button"
+            aria-expanded="false"
+            style="
+              flex:1 1 0;
+              min-width:0;
+              height:28px;
+              padding:0 8px;
+              overflow:hidden;
+              text-overflow:ellipsis;
+              white-space:nowrap;
               border:1px solid #d9d9d9;
               border-radius:6px;
-              background:#fafafa;
-              color:#555;
-              font-size:12px;
-              line-height:1.6;
+              background:#fff;
+              color:#999;
+              font-size:11px;
+              font-weight:600;
+              line-height:26px;
+              cursor:pointer;
             "
+            title="审批备注状态"
           >
+            检查备注...
+          </button>
+
+          <button
+            id="${UI.BIND_BUTTON_ID}"
+            type="button"
+            style="
+              flex:1 1 0;
+              min-width:0;
+              height:28px;
+              padding:0 8px;
+              overflow:hidden;
+              border:1px solid #d9d9d9;
+              border-radius:6px;
+              background:#fff;
+              color:#999;
+              font-size:11px;
+              font-weight:600;
+              line-height:26px;
+              cursor:pointer;
+            "
+            title="文件绑定状态"
+          >
+            <span
+              id="${UI.FILE_NAME_ID}"
+              style="
+                display:block;
+                min-width:0;
+                overflow:hidden;
+                text-overflow:ellipsis;
+                white-space:nowrap;
+              "
+            >读取文件...</span>
+          </button>
+        </div>
+
+        <div
+          id="${UI.REMARK_PANEL_ID}"
+          style="
+            display:none;
+            margin-bottom:6px;
+            padding:7px;
+            border:1px solid #d9d9d9;
+            border-radius:6px;
+            background:#fafafa;
+          "
+        >
+          <div style="margin-bottom:8px;">
             <div style="
               margin-bottom:4px;
               font-weight:600;
-              color:#333;
-            ">
-              使用说明
-            </div>
-            <ol style="
-              margin:0;
-              padding-left:18px;
-            ">
-              <li>
-                页面“智能审批”按钮只负责显示/隐藏本工具，不会自动执行订单。
-              </li>
-              <li>
-                首次使用请绑定共用文件；后续会复用已绑定文件。
-              </li>
-              <li>
-                点击“设置备注”分别维护内勤复核、落单审核备注；缺少时会提示需要补充。
-              </li>
-              <li>
-                点击“立即处理订单”，脚本根据当前流程阶段自动审批、合同补充、发起落单并等待状态变化。
-              </li>
-              <li>
-                面板底部会实时显示当前流程阶段；不同阶段使用不同颜色突出显示，订单已落单后会自动出现首次/修改后落单数据按钮。
-              </li>
-              <li>
-                网页出现消息、通知或确认提示时，会同步显示在“网页提示”区域，便于观察处理过程。
-              </li>
-            </ol>
-          </div>
-  
-          <div style="
-            display:flex;
-            align-items:center;
-            gap:8px;
-            margin-bottom:8px;
-          ">
-            <div style="
-              flex:1 1 auto;
-              min-width:0;
-              display:flex;
-              align-items:center;
-              gap:6px;
-            ">
-              <strong style="
-                flex:0 0 auto;
-                font-size:13px;
-              ">
-                审批备注
-              </strong>
-  
-              <span
-                id="${UI.REMARK_STATUS_ID}"
-                style="
-                  min-width:0;
-                  overflow:hidden;
-                  text-overflow:ellipsis;
-                  white-space:nowrap;
-                  padding:2px 7px;
-                  border:1px solid #d9d9d9;
-                  border-radius:10px;
-                  color:#999;
-                  background:#fafafa;
-                  font-size:11px;
-                "
-              >
-                检查中
-              </span>
-            </div>
-  
-            <button
-              id="${UI.REMARK_BUTTON_ID}"
-              type="button"
-              style="
-                flex:0 0 auto;
-                height:28px;
-                padding:0 9px;
-                border:1px solid #1677ff;
-                border-radius:5px;
-                background:#fff;
-                color:#1677ff;
-                font-size:12px;
-                cursor:pointer;
-              "
-            >
-              设置备注
-            </button>
-          </div>
-  
-          <div
-            id="${UI.REMARK_PANEL_ID}"
-            style="
-              display:none;
-              margin-bottom:8px;
-              padding:9px;
-              border:1px solid #d9d9d9;
-              border-radius:6px;
-              background:#fafafa;
-            "
-          >
-            <div style="margin-bottom:8px;">
-              <div style="
-                margin-bottom:4px;
-                font-weight:600;
-                font-size:12px;
-              ">
-                内勤复核备注
-              </div>
-              <textarea
-                id="${UI.REVIEW_REMARK_ID}"
-                placeholder="请输入内勤复核审批备注"
-                style="
-                  width:100%;
-                  height:48px;
-                  max-height:90px;
-                  box-sizing:border-box;
-                  padding:6px 8px;
-                  border:1px solid #d9d9d9;
-                  border-radius:5px;
-                  resize:vertical;
-                  overflow:auto;
-                  font-family:inherit;
-                  font-size:12px;
-                "
-              ></textarea>
-            </div>
-  
-            <div>
-              <div style="
-                margin-bottom:4px;
-                font-weight:600;
-                font-size:12px;
-              ">
-                落单审核备注
-              </div>
-              <textarea
-                id="${UI.ORDER_REMARK_ID}"
-                placeholder="请输入落单审核审批备注"
-                style="
-                  width:100%;
-                  height:48px;
-                  max-height:90px;
-                  box-sizing:border-box;
-                  padding:6px 8px;
-                  border:1px solid #d9d9d9;
-                  border-radius:5px;
-                  resize:vertical;
-                  overflow:auto;
-                  font-family:inherit;
-                  font-size:12px;
-                "
-              ></textarea>
-            </div>
-          </div>
-  
-          <button
-            id="${UI.FLOW_RUN_BUTTON_ID}"
-            type="button"
-            style="
-              width:100%;
-              height:38px;
-              margin-bottom:8px;
-              border:0;
-              border-radius:6px;
-              background:#1677ff;
-              color:#fff;
-              cursor:pointer;
-              font-weight:600;
-              font-size:14px;
-            "
-          >
-            立即处理订单
-          </button>
-  
-          <div style="
-            display:flex;
-            align-items:center;
-            gap:8px;
-            margin-bottom:8px;
-          ">
-            <button
-              id="${UI.BIND_BUTTON_ID}"
-              type="button"
-              style="
-                flex:0 0 auto;
-                height:32px;
-                padding:0 10px;
-                border:1px solid #1677ff;
-                border-radius:6px;
-                background:#fff;
-                color:#1677ff;
-                cursor:pointer;
-                white-space:nowrap;
-                font-size:12px;
-              "
-            >
-              绑定/更换文件
-            </button>
-  
-            <div style="
-              flex:1 1 auto;
-              min-width:0;
-              height:32px;
-              box-sizing:border-box;
-              display:flex;
-              align-items:center;
-              padding:0 9px;
-              border-radius:6px;
-              background:#f6f8fa;
-              color:#777;
               font-size:12px;
-              overflow:hidden;
-              white-space:nowrap;
             ">
-              <span style="flex:0 0 auto;">
-                当前：
-              </span>
-              <strong
-                id="${UI.FILE_NAME_ID}"
-                style="
-                  min-width:0;
-                  overflow:hidden;
-                  text-overflow:ellipsis;
-                  white-space:nowrap;
-                  color:#1677ff;
-                "
-              >读取中...</strong>
+              内勤复核备注
             </div>
+            <textarea
+              id="${UI.REVIEW_REMARK_ID}"
+              placeholder="请输入内勤复核审批备注"
+              style="
+                width:100%;
+                height:48px;
+                max-height:90px;
+                box-sizing:border-box;
+                padding:6px 8px;
+                border:1px solid #d9d9d9;
+                border-radius:5px;
+                resize:vertical;
+                overflow:auto;
+                font-family:inherit;
+                font-size:12px;
+              "
+            ></textarea>
           </div>
-  
-          <div style="
-            padding-top:9px;
-            border-top:1px solid #eee;
-          ">
+
+          <div>
             <div style="
-              display:flex;
-              align-items:baseline;
-              justify-content:flex-start;
-              gap:4px;
-              margin-bottom:3px;
-              padding-left:1px;
-              text-align:left;
+              margin-bottom:4px;
+              font-weight:600;
+              font-size:12px;
             ">
+              落单审核备注
+            </div>
+            <textarea
+              id="${UI.ORDER_REMARK_ID}"
+              placeholder="请输入落单审核审批备注"
+              style="
+                width:100%;
+                height:48px;
+                max-height:90px;
+                box-sizing:border-box;
+                padding:6px 8px;
+                border:1px solid #d9d9d9;
+                border-radius:5px;
+                resize:vertical;
+                overflow:auto;
+                font-family:inherit;
+                font-size:12px;
+              "
+            ></textarea>
+          </div>
+        </div>
+
+        <button
+          id="${UI.FLOW_RUN_BUTTON_ID}"
+          type="button"
+          style="
+            width:100%;
+            height:38px;
+            margin-bottom:8px;
+            border:0;
+            border-radius:6px;
+            background:#1677ff;
+            color:#fff;
+            cursor:pointer;
+            font-weight:600;
+            font-size:14px;
+          "
+        >
+          立即处理订单
+        </button>
+
+        <div style="
+          padding-top:9px;
+          border-top:1px solid #eee;
+        ">
+          <div style="
+            display:flex;
+            align-items:baseline;
+            justify-content:flex-start;
+            gap:4px;
+            margin-bottom:3px;
+            padding-left:1px;
+            text-align:left;
+          ">
+            <span
+              id="${UI.FLOW_STAGE_LABEL_ID}"
+              style="
+                flex:0 0 auto;
+                color:#999;
+                font-size:11px;
+                font-weight:400;
+              "
+            >
+              当前阶段：
+            </span>
+
+            <strong
+              id="${UI.FLOW_STAGE_VALUE_ID}"
+              style="
+                min-width:0;
+                color:#595959;
+                font-size:14px;
+                font-weight:600;
+              "
+            >
+              识别中
+            </strong>
+
+            <span
+              id="${UI.EXAM_DATE_SUMMARY_ID}"
+              style="
+                display:none;
+                margin-left:auto;
+                padding-left:8px;
+                align-items:center;
+                gap:3px;
+                color:#262626;
+                font-size:11px;
+                white-space:nowrap;
+              "
+              title="体检时间"
+            >
               <span
-                id="${UI.FLOW_STAGE_LABEL_ID}"
+                id="${UI.EXAM_BEGIN_DATE_ID}"
                 style="
-                  flex:0 0 auto;
-                  color:#999;
+                  color:#262626;
                   font-size:11px;
                   font-weight:400;
                 "
-              >
-                当前阶段：
-              </span>
-
-              <strong
-                id="${UI.FLOW_STAGE_VALUE_ID}"
+              ></span>
+              <span style="
+                color:#737373;
+                font-weight:500;
+              ">～</span>
+              <span
+                id="${UI.EXAM_END_DATE_ID}"
                 style="
-                  min-width:0;
-                  color:#595959;
-                  font-size:14px;
-                  font-weight:600;
+                  color:#262626;
+                  font-size:11px;
+                  font-weight:400;
                 "
-              >
-                识别中
-              </strong>
-            </div>
+              ></span>
 
+              <span
+                id="${UI.EXAM_DURATION_ID}"
+                style="
+                  display:none;
+                  margin-left:4px;
+                  color:#595959;
+                  font-size:11px;
+                  font-weight:600;
+                  white-space:nowrap;
+                "
+                title="体检区间时长"
+              ></span>
+            </span>
+          </div>
+
+          <div style="
+            display:flex;
+            align-items:center;
+            gap:6px;
+            margin-bottom:6px;
+            padding-left:1px;
+          ">
             <div
               id="${UI.FLOW_STAGE_HINT_ID}"
               style="
-                margin-bottom:6px;
-                padding-left:1px;
+                flex:1 1 auto;
+                min-width:0;
                 color:#999;
                 font-size:11px;
                 line-height:1.5;
@@ -5645,629 +6820,696 @@
               正在读取页面流程状态...
             </div>
 
-            <div
-              id="${UI.EXTRACT_OPTIONS_ID}"
-              style="display:none;"
-            ></div>
-
-            <div
-              id="${UI.EXTRACT_PREVIEW_ID}"
+            <button
+              id="${UI.EXAM_DATE_FIX_BUTTON_ID}"
+              type="button"
               style="
                 display:none;
-                margin-top:8px;
-                padding:7px 8px;
-                border:1px solid #d9f7be;
-                border-radius:6px;
-                background:#fcfff8;
-                color:#555;
+                flex:0 0 auto;
+                align-items:center;
+                justify-content:center;
+                height:24px;
+                padding:0 8px;
+                border:1px solid #cf1322;
+                border-radius:5px;
+                background:#fff;
+                color:#cf1322;
                 font-size:11px;
-                line-height:1.45;
-                white-space:pre-wrap;
-                word-break:break-all;
-                user-select:text;
+                font-weight:600;
+                cursor:pointer;
+                white-space:nowrap;
               "
-              title="复制失败时可在这里手动复制"
-            ></div>
+            >
+              修改时间
+            </button>
           </div>
+
+          <div
+            id="${UI.EXTRACT_OPTIONS_ID}"
+            style="display:none;"
+          ></div>
+
+          <div
+            id="${UI.EXTRACT_PREVIEW_ID}"
+            style="
+              display:none;
+              margin-top:8px;
+              padding:7px 8px;
+              border:1px solid #d9f7be;
+              border-radius:6px;
+              background:#fcfff8;
+              color:#555;
+              font-size:11px;
+              line-height:1.45;
+              white-space:pre-wrap;
+              word-break:break-all;
+              user-select:text;
+            "
+            title="复制失败时可在这里手动复制"
+          ></div>
         </div>
-      `;
-  
-      document.body.appendChild(
-        panel
+      </div>
+    `;
+
+    document.body.appendChild(
+      panel
+    );
+
+    applySavedPanelPosition(
+      panel
+    );
+
+    enablePanelDragging(
+      panel
+    );
+
+    document
+      .getElementById(
+        UI.WEB_NOTICE_CLEAR_ID
+      )
+      ?.addEventListener(
+        "click",
+        event => {
+          event.stopPropagation();
+          resetWebNoticeHistory();
+        }
       );
-  
-      applySavedPanelPosition(
-        panel
+
+    document
+      .getElementById(
+        UI.HELP_BUTTON_ID
+      )
+      ?.addEventListener(
+        "click",
+        event => {
+          event.stopPropagation();
+          toggleHelpPanel();
+        }
       );
-  
-      enablePanelDragging(
-        panel
+
+    document
+      .getElementById(
+        UI.COLLAPSE_BUTTON_ID
+      )
+      ?.addEventListener(
+        "click",
+        event => {
+          event.stopPropagation();
+          togglePanelCollapsed();
+        }
       );
-  
-      document
-        .getElementById(
-          UI.HELP_BUTTON_ID
-        )
-        ?.addEventListener(
-          "click",
-          event => {
-            event.stopPropagation();
-            toggleHelpPanel();
-          }
-        );
-  
-      document
-        .getElementById(
-          UI.COLLAPSE_BUTTON_ID
-        )
-        ?.addEventListener(
-          "click",
-          event => {
-            event.stopPropagation();
-            togglePanelCollapsed();
-          }
-        );
-  
-      document
-        .getElementById(
-          UI.REMARK_BUTTON_ID
-        )
-        ?.addEventListener(
-          "click",
-          () => {
-            toggleRemarkPanel();
-          }
-        );
-  
-      setPanelCollapsed(
-        getPanelCollapsed()
+
+    document
+      .getElementById(
+        UI.REMARK_BUTTON_ID
+      )
+      ?.addEventListener(
+        "click",
+        () => {
+          toggleRemarkPanel();
+        }
       );
-  
-      const reviewRemarkInput =
-        document.getElementById(
-          UI.REVIEW_REMARK_ID
+
+    setPanelCollapsed(
+      getPanelCollapsed()
+    );
+
+    const reviewRemarkInput =
+      document.getElementById(
+        UI.REVIEW_REMARK_ID
+      );
+
+    const orderRemarkInput =
+      document.getElementById(
+        UI.ORDER_REMARK_ID
+      );
+
+    if (reviewRemarkInput) {
+      reviewRemarkInput.value =
+        getStoredText(
+          UI.REVIEW_REMARK_KEY
         );
-  
-      const orderRemarkInput =
-        document.getElementById(
-          UI.ORDER_REMARK_ID
-        );
-  
-      if (reviewRemarkInput) {
-        reviewRemarkInput.value =
-          getStoredText(
-            UI.REVIEW_REMARK_KEY
+
+      reviewRemarkInput.addEventListener(
+        "input",
+        () => {
+          saveStoredText(
+            UI.REVIEW_REMARK_KEY,
+            reviewRemarkInput.value
           );
-  
-        reviewRemarkInput.addEventListener(
-          "input",
-          () => {
-            saveStoredText(
-              UI.REVIEW_REMARK_KEY,
-              reviewRemarkInput.value
-            );
-  
-            updateRemarkStatus();
-          }
+
+          updateRemarkStatus();
+        }
+      );
+    }
+
+    if (orderRemarkInput) {
+      orderRemarkInput.value =
+        getStoredText(
+          UI.ORDER_REMARK_KEY
         );
-      }
-  
-      if (orderRemarkInput) {
-        orderRemarkInput.value =
-          getStoredText(
-            UI.ORDER_REMARK_KEY
+
+      orderRemarkInput.addEventListener(
+        "input",
+        () => {
+          saveStoredText(
+            UI.ORDER_REMARK_KEY,
+            orderRemarkInput.value
           );
-  
-        orderRemarkInput.addEventListener(
-          "input",
-          () => {
-            saveStoredText(
-              UI.ORDER_REMARK_KEY,
-              orderRemarkInput.value
-            );
-  
-            updateRemarkStatus();
-          }
-        );
-      }
-  
-      document
-        .getElementById(
-          UI.BIND_BUTTON_ID
-        )
-        ?.addEventListener(
-          "click",
-          () => {
-            bindSharedFile()
-              .catch(error => {
-                if (
-                  error?.name ===
-                  "AbortError"
-                ) {
-                  updatePanelStatus(
-                    "已取消文件选择。"
-                  );
-                  return;
-                }
-  
-                warn(
-                  error?.message ||
-                  String(error)
+
+          updateRemarkStatus();
+        }
+      );
+    }
+
+    document
+      .getElementById(
+        UI.BIND_BUTTON_ID
+      )
+      ?.addEventListener(
+        "click",
+        () => {
+          bindSharedFile()
+            .catch(error => {
+              if (
+                error?.name ===
+                "AbortError"
+              ) {
+                updatePanelStatus(
+                  "已取消文件选择。"
                 );
-              });
-          }
-        );
-  
-      document
-        .getElementById(
-          UI.FLOW_RUN_BUTTON_ID
-        )
-        ?.addEventListener(
-          "click",
-          () => {
-            runFullFlow({
-              allowPermissionPrompt:
-                true
-            }).catch(error => {
+                return;
+              }
+
               warn(
                 error?.message ||
                 String(error)
               );
-  
+            });
+        }
+      );
+
+    document
+      .getElementById(
+        UI.EXAM_DATE_FIX_BUTTON_ID
+      )
+      ?.addEventListener(
+        "click",
+        () => {
+          setRegisterExamDates()
+            .catch(error => {
+              warn(
+                error?.message ||
+                String(error)
+              );
+
               console.error(
-                "[SOA流程自动化]",
+                "[SOA流程自动化] 修改体检时间失败：",
                 error
               );
             });
-          }
+        }
+      );
+
+    document
+      .getElementById(
+        UI.FLOW_RUN_BUTTON_ID
+      )
+      ?.addEventListener(
+        "click",
+        () => {
+          runFullFlow({
+            allowPermissionPrompt:
+              true
+          }).catch(error => {
+            warn(
+              error?.message ||
+              String(error)
+            );
+
+            console.error(
+              "[SOA流程自动化]",
+              error
+            );
+          });
+        }
+      );
+
+    /*
+     * 页面刷新或重新进入订单详情时，面板首次创建即后台刷新一次。
+     */
+    refreshLandingTimeOptions()
+      .catch(error => {
+        console.warn(
+          "[SOA流程自动化] 页面初始化刷新落单数据失败：",
+          error
         );
-  
-      /*
-       * 页面刷新或重新进入订单详情时，面板首次创建即后台刷新一次。
-       */
-      refreshLandingTimeOptions()
-        .catch(error => {
-          console.warn(
-            "[SOA流程自动化] 页面初始化刷新落单数据失败：",
-            error
-          );
-        });
-  
+      });
+
+    updateBoundFileDisplay();
+    updateRemarkStatus();
+    renderWebNoticeHistory();
+    updateFlowStageDisplay();
+    refreshExamDateInfo(
+      getCurrentFlowStage()
+    );
+
+    panel.style.display =
+      panelVisible
+        ? "block"
+        : "none";
+
+    return panel;
+  }
+
+  async function initBoundFile() {
+    try {
+      boundFileHandle =
+        await loadBoundFileHandle();
+
       updateBoundFileDisplay();
-      updateRemarkStatus();
-      renderWebNoticeHistory();
-  
+
+      if (boundFileHandle) {
+        console.log(
+          `[SOA流程自动化] 已恢复绑定文件：${boundFileHandle.name}`
+        );
+      }
+    } catch (error) {
+      boundFileHandle = null;
+
+      updateBoundFileDisplay();
+
+      warn(
+        `读取已绑定文件失败：${error?.message || error}`
+      );
+    }
+  }
+
+  function updateAutomationSwitch() {
+    const button =
+      document.getElementById(
+        UI.AUTO_SWITCH_ID
+      );
+
+    if (!button) {
+      return;
+    }
+
+    button.textContent =
+      panelVisible
+        ? "智能审批：点击关闭"
+        : "智能审批：点击打开";
+
+    button.title =
+      panelVisible
+        ? "点击隐藏工具面板"
+        : "点击显示工具面板";
+
+    button.style.background =
+      "#1677ff";
+
+    button.style.opacity =
+      panelVisible
+        ? "1"
+        : "0.9";
+  }
+
+  function setPanelVisible(
+    visible
+  ) {
+    panelVisible =
+      Boolean(visible);
+
+    const panel =
+      document.getElementById(
+        UI.PANEL_ID
+      ) ||
+      createTestPanel();
+
+    if (panel) {
       panel.style.display =
         panelVisible
           ? "block"
           : "none";
-  
-      return panel;
     }
-  
-    async function initBoundFile() {
-      try {
-        boundFileHandle =
-          await loadBoundFileHandle();
-  
-        updateBoundFileDisplay();
-  
-        if (boundFileHandle) {
-          updatePanelStatus(
-            `已恢复绑定：${boundFileHandle.name}`
-          );
-  
-          log(
-            `已恢复绑定文件：${boundFileHandle.name}`
-          );
-        } else {
-          updatePanelStatus(
-            "尚未绑定文件，请先点击“绑定/更换共用文件”。"
-          );
-        }
-      } catch (error) {
-        boundFileHandle = null;
-  
-        updateBoundFileDisplay();
-  
-        warn(
-          `读取已绑定文件失败：${error?.message || error}`
-        );
-      }
-    }
-  
-    function updateAutomationSwitch() {
-      const button =
-        document.getElementById(
-          UI.AUTO_SWITCH_ID
-        );
-  
-      if (!button) {
-        return;
-      }
-  
-      button.textContent =
-        panelVisible
-          ? "智能审批：点击关闭"
-          : "智能审批：点击打开";
-  
-      button.title =
-        panelVisible
-          ? "点击隐藏工具面板"
-          : "点击显示工具面板";
-  
-      button.style.background =
-        "#1677ff";
-  
-      button.style.opacity =
-        panelVisible
-          ? "1"
-          : "0.9";
-    }
-  
-    function setPanelVisible(
-      visible
-    ) {
-      panelVisible =
-        Boolean(visible);
-  
-      const panel =
-        document.getElementById(
-          UI.PANEL_ID
-        ) ||
-        createTestPanel();
-  
-      if (panel) {
-        panel.style.display =
-          panelVisible
-            ? "block"
-            : "none";
-      }
-  
-      updateAutomationSwitch();
-  
-      /*
-       * 每次打开工具面板，都重新获取一次当前订单落单数据。
-       */
-      if (panelVisible) {
-        updateFlowStageDisplay();
 
-        refreshLandingTimeOptions()
-          .catch(error => {
-            console.warn(
-              "[SOA流程自动化] 打开面板刷新落单数据失败：",
-              error
-            );
-          });
-      }
+    updateAutomationSwitch();
+
+    /*
+     * 每次打开工具面板，都重新获取一次当前订单落单数据。
+     */
+    if (panelVisible) {
+      updateFlowStageDisplay();
+      refreshExamDateInfo(
+        getCurrentFlowStage()
+      );
+
+      refreshLandingTimeOptions()
+        .catch(error => {
+          console.warn(
+            "[SOA流程自动化] 打开面板刷新落单数据失败：",
+            error
+          );
+        });
     }
-  
-    function togglePanelVisible() {
-      setPanelVisible(
-        !panelVisible
+  }
+
+  function togglePanelVisible() {
+    setPanelVisible(
+      !panelVisible
+    );
+  }
+
+  function ensureAutomationSwitch() {
+    if (
+      !isTargetRoute()
+    ) {
+      return null;
+    }
+
+    const orderDesc =
+      document.querySelector(
+        CONFIG.SWITCH_ORDER_DESC_SELECTOR
+      );
+
+    if (!orderDesc) {
+      return null;
+    }
+
+    const tabs =
+      orderDesc.parentElement;
+
+    if (!tabs) {
+      return null;
+    }
+
+    let button =
+      document.getElementById(
+        UI.AUTO_SWITCH_ID
+      );
+
+    if (!button) {
+      button =
+        document.createElement(
+          "button"
+        );
+
+      button.id =
+        UI.AUTO_SWITCH_ID;
+
+      button.type =
+        "button";
+
+      button.style.cssText = [
+        "display:inline-flex",
+        "flex:0 0 auto",
+        "align-items:center",
+        "justify-content:center",
+        "height:32px",
+        "margin-left:10px",
+        "padding:0 12px",
+        "border:1px solid #1677ff",
+        "border-radius:6px",
+        "background:#1677ff",
+        "color:#fff",
+        "font-size:13px",
+        "font-weight:600",
+        "line-height:30px",
+        "cursor:pointer",
+        "white-space:nowrap",
+        "vertical-align:middle",
+        "box-sizing:border-box"
+      ].join(";");
+
+      button.addEventListener(
+        "click",
+        event => {
+          event.preventDefault();
+          event.stopPropagation();
+
+          /*
+           * 页面蓝色按钮只控制工具 UI 的显示/隐藏。
+           * 不启动、不停止任何业务流程。
+           */
+          togglePanelVisible();
+        }
       );
     }
-  
-    function ensureAutomationSwitch() {
-      if (
-        !isTargetRoute()
-      ) {
-        return null;
-      }
-  
-      const anchor =
-        document.querySelector(
-          CONFIG.SWITCH_ANCHOR_SELECTOR
-        );
-  
-      if (!anchor) {
-        return null;
-      }
-  
-      let button =
-        document.getElementById(
-          UI.AUTO_SWITCH_ID
-        );
-  
-      if (!button) {
-        button =
-          document.createElement(
-            "button"
-          );
-  
-        button.id =
-          UI.AUTO_SWITCH_ID;
-  
-        button.type =
-          "button";
-  
-        button.style.cssText = [
-          "display:inline-flex",
-          "align-items:center",
-          "justify-content:center",
-          "height:32px",
-          "margin-left:10px",
-          "padding:0 12px",
-          "border:1px solid #1677ff",
-          "border-radius:6px",
-          "background:#1677ff",
-          "color:#fff",
-          "font-size:13px",
-          "font-weight:600",
-          "line-height:30px",
-          "cursor:pointer",
-          "white-space:nowrap",
-          "vertical-align:middle",
-          "box-sizing:border-box"
-        ].join(";");
-  
-        button.addEventListener(
-          "click",
-          event => {
-            event.preventDefault();
-            event.stopPropagation();
-  
-            /*
-             * 页面蓝色按钮只控制工具 UI 的显示/隐藏。
-             * 不启动、不停止任何业务流程。
-             */
-            togglePanelVisible();
-          }
-        );
-      }
-  
-      /*
-       * 直接作为目标元素的相邻兄弟插入，不使用 fixed/absolute，
-       * 因此不会浮在其他业务数据上方。
-       */
-      if (
-        button.previousElementSibling !==
-        anchor
-      ) {
-        anchor.insertAdjacentElement(
-          "afterend",
-          button
-        );
-      }
-  
-      updateAutomationSwitch();
-  
-      return button;
+
+    /*
+     * 永远放到订单信息 .order-desc 前面，也就是全部原有页签之后。
+     * 页面增加“修改记录”等额外页签时，不会再插入原有 tab 中间。
+     */
+    if (
+      button.nextElementSibling !==
+      orderDesc
+    ) {
+      tabs.insertBefore(
+        button,
+        orderDesc
+      );
     }
-  
-    function removeAutomationSwitch() {
-      document
-        .getElementById(
-          UI.AUTO_SWITCH_ID
-        )
-        ?.remove();
+
+    updateAutomationSwitch();
+
+    return button;
+  }
+
+  function removeAutomationSwitch() {
+    document
+      .getElementById(
+        UI.AUTO_SWITCH_ID
+      )
+      ?.remove();
+  }
+
+  function scheduleEnsureRouteUi() {
+    if (
+      uiEnsureScheduled
+    ) {
+      return;
     }
-  
-    function scheduleEnsureRouteUi() {
-      if (
-        uiEnsureScheduled
-      ) {
-        return;
+
+    uiEnsureScheduled =
+      true;
+
+    requestAnimationFrame(
+      () => {
+        uiEnsureScheduled =
+          false;
+
+        if (
+          !isTargetRoute()
+        ) {
+          return;
+        }
+
+        createTestPanel();
+        ensureAutomationSwitch();
+
+        if (
+          !boundFileInitialized
+        ) {
+          boundFileInitialized =
+            true;
+
+          initBoundFile()
+            .catch(error => {
+              console.warn(
+                "[SOA流程自动化] 初始化绑定文件失败：",
+                error
+              );
+            });
+        }
       }
-  
-      uiEnsureScheduled =
-        true;
-  
-      requestAnimationFrame(
+    );
+  }
+
+  function connectRouteObserver() {
+    connectWebNoticeObserver();
+
+    if (
+      routeObserver
+    ) {
+      return;
+    }
+
+    routeObserver =
+      new MutationObserver(
         () => {
-          uiEnsureScheduled =
-            false;
-  
           if (
             !isTargetRoute()
           ) {
             return;
           }
-  
-          createTestPanel();
-          ensureAutomationSwitch();
-  
-          if (
-            !boundFileInitialized
-          ) {
-            boundFileInitialized =
-              true;
-  
-            initBoundFile()
-              .catch(error => {
-                console.warn(
-                  "[SOA流程自动化] 初始化绑定文件失败：",
-                  error
-                );
-              });
-          }
+
+          updateFlowStageDisplay({
+            refreshOnLanding:
+              true
+          });
+
+          scheduleEnsureRouteUi();
         }
       );
-    }
-  
-    function connectRouteObserver() {
-      connectWebNoticeObserver();
-  
-      if (
-        routeObserver
-      ) {
-        return;
+
+    routeObserver.observe(
+      document.querySelector(
+        "#root"
+      ) ||
+      document.body,
+      {
+        childList: true,
+        subtree: true
       }
-  
+    );
+  }
+
+  function disconnectRouteObserver() {
+    if (
+      routeObserver
+    ) {
+      routeObserver.disconnect();
       routeObserver =
-        new MutationObserver(
-          () => {
-            if (
-              !isTargetRoute()
-            ) {
-              return;
-            }
-  
-            updateFlowStageDisplay({
-              refreshOnLanding:
-                true
-            });
-
-            scheduleEnsureRouteUi();
-          }
-        );
-  
-      routeObserver.observe(
-        document.querySelector(
-          "#root"
-        ) ||
-        document.body,
-        {
-          childList: true,
-          subtree: true
-        }
-      );
+        null;
     }
-  
-    function disconnectRouteObserver() {
+
+    disconnectWebNoticeObserver();
+  }
+
+  function teardownRouteUi() {
+    panelVisible =
+      false;
+
+    lastDisplayedFlowStage =
+      "";
+
+    lastWebNoticeOrderCode =
+      "";
+
+    resetWebNoticeHistory();
+
+    removeAutomationSwitch();
+
+    document
+      .getElementById(
+        UI.PANEL_ID
+      )
+      ?.remove();
+
+    disconnectRouteObserver();
+
+    boundFileInitialized =
+      false;
+  }
+
+  function routeCheck() {
+    if (
+      isTargetRoute()
+    ) {
+      /*
+       * 每次进入订单详情路由，工具 UI 默认保持关闭。
+       * 只有用户点击页面蓝色按钮后才显示。
+       */
       if (
-        routeObserver
-      ) {
-        routeObserver.disconnect();
-        routeObserver =
-          null;
-      }
-  
-      disconnectWebNoticeObserver();
-    }
-  
-    function teardownRouteUi() {
-      panelVisible =
-        false;
-  
-      lastDisplayedFlowStage =
-        "";
-
-      resetWebNoticeHistory();
-  
-      removeAutomationSwitch();
-  
-      document
-        .getElementById(
+        !document.getElementById(
           UI.PANEL_ID
         )
-        ?.remove();
-  
-      disconnectRouteObserver();
-  
-      boundFileInitialized =
-        false;
-    }
-  
-    function routeCheck() {
-      if (
-        isTargetRoute()
       ) {
-        /*
-         * 每次进入订单详情路由，工具 UI 默认保持关闭。
-         * 只有用户点击页面蓝色按钮后才显示。
-         */
-        if (
-          !document.getElementById(
-            UI.PANEL_ID
-          )
-        ) {
-          panelVisible =
-            false;
-        }
-  
-        connectRouteObserver();
-        scheduleEnsureRouteUi();
-        return;
+        panelVisible =
+          false;
       }
-  
-      teardownRouteUi();
+
+      connectRouteObserver();
+      scheduleEnsureRouteUi();
+      return;
     }
-  
-    window.addEventListener(
-      "hashchange",
-      routeCheck,
-      true
-    );
-  
-    window.addEventListener(
-      "popstate",
-      routeCheck,
-      true
-    );
-  
-    window.addEventListener(
-      "tm-soa-order-flow-history-change",
-      routeCheck,
-      true
-    );
-  
-    /*
-     * 与同站点现有 SOA 脚本一致：
-     * pushState/replaceState 不一定触发 hashchange，
-     * 因此补一个脚本内部事件。
-     */
-    (function patchHistoryOnce() {
-      const patchKey =
-        "__tmSoaOrderFlowHistoryPatched__";
-  
-      if (
-        history[patchKey]
-      ) {
-        return;
-      }
-  
-      const wrap =
-        original =>
-          function () {
-            const result =
-              original.apply(
-                this,
-                arguments
-              );
-  
-            queueMicrotask(
-              () =>
-                window.dispatchEvent(
-                  new Event(
-                    "tm-soa-order-flow-history-change"
-                  )
-                )
+
+    teardownRouteUi();
+  }
+
+  window.addEventListener(
+    "hashchange",
+    routeCheck,
+    true
+  );
+
+  window.addEventListener(
+    "popstate",
+    routeCheck,
+    true
+  );
+
+  window.addEventListener(
+    "tm-soa-order-flow-history-change",
+    routeCheck,
+    true
+  );
+
+  /*
+   * 与同站点现有 SOA 脚本一致：
+   * pushState/replaceState 不一定触发 hashchange，
+   * 因此补一个脚本内部事件。
+   */
+  (function patchHistoryOnce() {
+    const patchKey =
+      "__tmSoaOrderFlowHistoryPatched__";
+
+    if (
+      history[patchKey]
+    ) {
+      return;
+    }
+
+    const wrap =
+      original =>
+        function () {
+          const result =
+            original.apply(
+              this,
+              arguments
             );
-  
-            return result;
-          };
-  
-      history.pushState =
-        wrap(
-          history.pushState
-        );
-  
-      history.replaceState =
-        wrap(
-          history.replaceState
-        );
-  
-      try {
-        Object.defineProperty(
-          history,
-          patchKey,
-          {
-            value: true,
-            configurable: false,
-            enumerable: false
-          }
-        );
-      } catch (_) {
-        history[patchKey] =
-          true;
-      }
-    })();
-  
-    routeCheck();
-  
-    console.log(
-      "[SOA流程自动化] v1.6 已加载"
-    );
+
+          queueMicrotask(
+            () =>
+              window.dispatchEvent(
+                new Event(
+                  "tm-soa-order-flow-history-change"
+                )
+              )
+          );
+
+          return result;
+        };
+
+    history.pushState =
+      wrap(
+        history.pushState
+      );
+
+    history.replaceState =
+      wrap(
+        history.replaceState
+      );
+
+    try {
+      Object.defineProperty(
+        history,
+        patchKey,
+        {
+          value: true,
+          configurable: false,
+          enumerable: false
+        }
+      );
+    } catch (_) {
+      history[patchKey] =
+        true;
+    }
   })();
-  
+
+  routeCheck();
+
+  console.log(
+    "[SOA流程自动化] v1.14 已加载"
+  );
+})();
