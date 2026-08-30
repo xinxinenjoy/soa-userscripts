@@ -58,7 +58,7 @@
 | 脚本 | 版本 | 修改时间 | 功能说明 | 安装 |
 |---|---:|---|---|---|
 | **CurseForge增强** | `4.2` | 2026-08-29 11:13 | 增强CurseForge网站的中文显示，翻译部分英文为中文，支持动态加载内容的翻译。 | [🇨🇳 国内安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-curseforge.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/hljdyxjb/game-curseforge.user.js) |
-| **GOW底下尖塔** | `4.2.25` | 2026-08-29 11:13 | GOW底下尖塔火把管理与节点同步工具 | [🇨🇳 国内安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-gowdxjt.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/hljdyxjb/game-gowdxjt.user.js) |
+| **GOW底下尖塔** | `4.2.27` | 2026-08-30 20:44 | GOW底下尖塔火把管理与节点同步工具 | [🇨🇳 国内安装](https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-gowdxjt.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/hljdyxjb/game-gowdxjt.user.js) |
 
 ---
 
