@@ -10,7 +10,6 @@ env:
   GITCODE_BRANCH: main
 
 on:
-  # 脚本发布成功后再更新 README，避免与发布 Flow 同时修改仓库。
   workflow_run:
     workflows:
       - "Build Userscripts"
@@ -41,58 +40,40 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ env.GITHUB_BRANCH }}
+          # README 需要通过 git log 获取每个源脚本最后修改时间。
           fetch-depth: 0
 
-      - name: Generate README Script List
+      - name: Generate Beautiful README
         shell: bash
         run: |
           python3 <<'PY'
           from pathlib import Path
           from urllib.parse import quote
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
           import os
           import re
+          import subprocess
           import sys
 
           ROOT = Path(".")
-          README_PATH = ROOT / os.environ.get(
-              "README_FILE",
-              "README.md"
-          )
-
-          PUBLISH_DIR = os.environ.get(
-              "PUBLISH_DIR",
-              "publish"
-          )
-
+          README_PATH = ROOT / os.environ.get("README_FILE", "README.md")
+          PUBLISH_DIR = os.environ.get("PUBLISH_DIR", "publish")
           PUBLISH_ROOT = ROOT / PUBLISH_DIR
 
           GITCODE_OWNER = os.environ["GITCODE_OWNER"]
           GITCODE_REPO = os.environ["GITCODE_REPO"]
           GITCODE_BRANCH = os.environ["GITCODE_BRANCH"]
-
           GITHUB_REPOSITORY = os.environ["GITHUB_REPOSITORY"]
-          GITHUB_BRANCH = os.environ.get(
-              "GITHUB_BRANCH",
-              "main"
-          )
+          GITHUB_BRANCH = os.environ.get("GITHUB_BRANCH", "main")
 
-          AUTO_START = "<!-- AUTO-USERSCRIPTS:START -->"
-          AUTO_END = "<!-- AUTO-USERSCRIPTS:END -->"
-
-          START_RE = re.compile(
-              r"(?m)^[ \t]*//[ \t]*==UserScript==[ \t]*$"
-          )
-
-          END_RE = re.compile(
-              r"(?m)^[ \t]*//[ \t]*==/UserScript==[ \t]*$"
-          )
-
+          START_RE = re.compile(r"(?m)^[ \t]*//[ \t]*==UserScript==[ \t]*$")
+          END_RE = re.compile(r"(?m)^[ \t]*//[ \t]*==/UserScript==[ \t]*$")
           META_LINE_RE = re.compile(
-              r"^[ \t]*//[ \t]*@"
-              r"([A-Za-z0-9:_-]+)"
-              r"(?:[ \t]+(.*?))?"
-              r"[ \t]*$"
+              r"^[ \t]*//[ \t]*@([A-Za-z0-9:_-]+)(?:[ \t]+(.*?))?[ \t]*$"
           )
+
+          TZ = ZoneInfo("Asia/Shanghai")
 
 
           def parse_metadata(text: str, label: str):
@@ -104,30 +85,19 @@ jobs:
                   or not end_match
                   or end_match.start() <= start_match.end()
               ):
-                  raise ValueError(
-                      f"{label}: 缺少完整 UserScript 元数据区"
-                  )
+                  raise ValueError(f"{label}: 缺少完整 UserScript 元数据区")
 
-              metadata = text[
-                  start_match.start():
-                  end_match.end()
-              ]
-
+              metadata = text[start_match.start():end_match.end()]
               result = {}
 
               for line in metadata.splitlines():
                   match = META_LINE_RE.match(line)
-
                   if not match:
                       continue
 
                   key = match.group(1)
                   value = (match.group(2) or "").strip()
-
-                  result.setdefault(
-                      key,
-                      []
-                  ).append(value)
+                  result.setdefault(key, []).append(value)
 
               return result
 
@@ -149,10 +119,7 @@ jobs:
 
 
           def encode_relative(relative: Path) -> str:
-              return "/".join(
-                  quote(part, safe="._-")
-                  for part in relative.parts
-              )
+              return "/".join(quote(part, safe="._-") for part in relative.parts)
 
 
           def is_source_userscript(path: Path) -> bool:
@@ -160,31 +127,46 @@ jobs:
                   return False
 
               relative = path.relative_to(ROOT)
-
-              if (
+              return not (
                   relative.parts
                   and relative.parts[0] == PUBLISH_DIR
-              ):
-                  return False
-
-              return True
-
-
-          if not README_PATH.exists():
-              print(
-                  f"错误：找不到 {README_PATH}，"
-                  "请先提交基础 README.md。"
               )
-              sys.exit(1)
+
+
+          def last_modified_time(relative: Path) -> str:
+              """读取源脚本最后一次 Git 提交时间，统一显示为北京时间。"""
+              try:
+                  result = subprocess.run(
+                      [
+                          "git",
+                          "log",
+                          "-1",
+                          "--format=%cI",
+                          "--",
+                          relative.as_posix(),
+                      ],
+                      cwd=ROOT,
+                      text=True,
+                      capture_output=True,
+                      check=True,
+                  )
+
+                  raw = result.stdout.strip()
+                  if not raw:
+                      return "-"
+
+                  dt = datetime.fromisoformat(raw)
+                  return dt.astimezone(TZ).strftime("%Y-%m-%d %H:%M")
+              except Exception as exc:
+                  print(
+                      "::warning::"
+                      f"无法读取 {relative} 的最后修改时间：{exc}"
+                  )
+                  return "-"
 
 
           # ====================================================
-          # 1. 扫描源脚本
-          #
-          # 用 @publishID 建立：
-          # publishID -> 原始一级目录名称
-          #
-          # README 展示使用这个目录名称，而不是 publishGroup。
+          # 1. 建立 publishID -> 源脚本信息映射
           # ====================================================
           source_by_id = {}
           source_errors = []
@@ -199,27 +181,13 @@ jobs:
               relative = path.relative_to(ROOT)
 
               try:
-                  text = path.read_text(
-                      encoding="utf-8-sig"
-                  )
-
-                  meta = parse_metadata(
-                      text,
-                      str(relative)
-                  )
-
+                  text = path.read_text(encoding="utf-8-sig")
+                  meta = parse_metadata(text, str(relative))
               except Exception as exc:
-                  source_errors.append(
-                      str(exc)
-                  )
+                  source_errors.append(str(exc))
                   continue
 
-              publish_id = first(
-                  meta,
-                  "publishID"
-              )
-
-              # 未正式进入发布体系的脚本暂不参与 README 映射。
+              publish_id = first(meta, "publishID")
               if not publish_id:
                   continue
 
@@ -230,7 +198,6 @@ jobs:
               )
 
               key = publish_id.lower()
-
               if key in source_by_id:
                   source_errors.append(
                       f"源脚本 @publishID 重复：{publish_id}\n"
@@ -242,269 +209,274 @@ jobs:
               source_by_id[key] = {
                   "relative": relative,
                   "original_group": original_group,
+                  "modified_at": last_modified_time(relative),
               }
-
 
           if source_errors:
               print("读取源脚本时发现问题：")
-
               for error in source_errors:
                   print(f"  - {error}")
-
               sys.exit(1)
 
 
           # ====================================================
           # 2. 扫描 publish/ 正式发布脚本
           # ====================================================
-          publish_scripts = []
-
-          if PUBLISH_ROOT.exists():
-              publish_scripts = sorted(
-                  PUBLISH_ROOT.rglob("*.user.js")
-              )
-
+          publish_scripts = (
+              sorted(PUBLISH_ROOT.rglob("*.user.js"))
+              if PUBLISH_ROOT.exists()
+              else []
+          )
 
           items = []
           errors = []
-
 
           for path in publish_scripts:
               relative = path.relative_to(ROOT)
 
               try:
-                  text = path.read_text(
-                      encoding="utf-8-sig"
-                  )
-
-                  meta = parse_metadata(
-                      text,
-                      str(relative)
-                  )
-
+                  text = path.read_text(encoding="utf-8-sig")
+                  meta = parse_metadata(text, str(relative))
               except Exception as exc:
-                  errors.append(
-                      str(exc)
-                  )
+                  errors.append(str(exc))
                   continue
 
-              name = first(
-                  meta,
-                  "name",
-                  path.stem
-              )
-
-              version = first(
-                  meta,
-                  "version",
-                  "-"
-              )
-
-              description = first(
-                  meta,
-                  "description",
-                  ""
-              )
-
-              publish_group = first(
-                  meta,
-                  "publishGroup",
-                  "root"
-              )
-
+              name = first(meta, "name", path.stem)
+              version = first(meta, "version", "-")
+              description = first(meta, "description", "")
+              publish_group = first(meta, "publishGroup", "root")
               publish_id = first(
                   meta,
                   "publishID",
-                  path.name[:-8]
-                  if path.name.endswith(".user.js")
-                  else path.stem
+                  path.name[:-8] if path.name.endswith(".user.js") else path.stem,
               )
 
-              source_info = source_by_id.get(
-                  publish_id.lower()
-              )
+              source_info = source_by_id.get(publish_id.lower())
 
               if source_info:
-                  display_group = source_info[
-                      "original_group"
-                  ]
+                  display_group = source_info["original_group"]
+                  modified_at = source_info["modified_at"]
               else:
-                  # 正常情况下不应发生。
-                  # 为保证 README 仍能生成，先回退到 publishGroup，
-                  # 同时在 Actions 中发出 warning。
                   display_group = publish_group
-
+                  modified_at = "-"
                   print(
                       "::warning::"
-                      f"发布脚本 {publish_id} "
-                      "未找到对应源脚本，"
+                      f"发布脚本 {publish_id} 未找到对应源脚本，"
                       f"README 分类暂回退为 {publish_group}"
                   )
 
-              encoded = encode_relative(
-                  relative
-              )
+              encoded = encode_relative(relative)
 
               gitcode_url = (
-                  f"https://raw.gitcode.com/"
-                  f"{GITCODE_OWNER}/"
-                  f"{GITCODE_REPO}/"
-                  f"raw/{GITCODE_BRANCH}/"
-                  f"{encoded}"
+                  f"https://raw.gitcode.com/{GITCODE_OWNER}/{GITCODE_REPO}/"
+                  f"raw/{GITCODE_BRANCH}/{encoded}"
               )
 
               github_url = (
-                  f"https://raw.githubusercontent.com/"
-                  f"{GITHUB_REPOSITORY}/"
-                  f"{GITHUB_BRANCH}/"
-                  f"{encoded}"
+                  f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/"
+                  f"{GITHUB_BRANCH}/{encoded}"
               )
 
-              items.append({
-                  "name": name,
-                  "version": version,
-                  "description": description,
-                  "display_group": display_group,
-                  "publish_group": publish_group,
-                  "publish_id": publish_id,
-                  "gitcode_url": gitcode_url,
-                  "github_url": github_url,
-              })
-
+              items.append(
+                  {
+                      "name": name,
+                      "version": version,
+                      "description": description,
+                      "display_group": display_group,
+                      "publish_group": publish_group,
+                      "publish_id": publish_id,
+                      "modified_at": modified_at,
+                      "gitcode_url": gitcode_url,
+                      "github_url": github_url,
+                  }
+              )
 
           if errors:
               print("生成 README 前发现以下问题：")
-
               for error in errors:
                   print(f"  - {error}")
-
               sys.exit(1)
 
 
           # ====================================================
-          # 3. 按“源文件原始一级目录名称”分组
+          # 3. 分组
           # ====================================================
           groups = {}
-
           for item in items:
-              groups.setdefault(
-                  item["display_group"],
-                  []
-              ).append(item)
+              groups.setdefault(item["display_group"], []).append(item)
 
-
+          # ====================================================
+          # 4. 生成完整 README
+          # ====================================================
           lines = [
-              AUTO_START,
-              "",
+              '<div align="center">',
+              '',
+              '# 🧰 WanXin Userscripts',
+              '',
+              '**个人维护的 Tampermonkey 用户脚本集合**',
+              '',
+              '以 GitHub 作为开发源，GitCode 提供国内安装与更新地址。',
+              '',
+              f'当前正式发布 **{len(items)}** 个脚本 · 每条记录显示源脚本最近修改时间',
+              '',
+              '</div>',
+              '',
+              '---',
+              '',
+              '## 🚀 快速开始',
+              '',
+              '### 1. 安装 Tampermonkey',
+              '',
+              '| 浏览器 | 安装入口 |',
+              '|---|---|',
+              '| Chrome | [Chrome Web Store](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo) |',
+              '| Edge | [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd) |',
+              '| Firefox | [Firefox Add-ons](https://addons.mozilla.org/zh-CN/firefox/addon/tampermonkey/) |',
+              '| 其他浏览器 / 官方说明 | [Tampermonkey 官网](https://www.tampermonkey.net/) |',
+              '',
+              '> 安装扩展后，如果浏览器或 Tampermonkey 提示需要开启“用户脚本”相关权限，请按扩展页面提示启用。',
+              '',
+              '### 2. 安装需要的脚本',
+              '',
+              '在下方脚本列表中点击 **「国内安装」**。浏览器会打开 Tampermonkey 安装页面，确认脚本名称和权限后点击 **安装** 即可。',
+              '',
+              '> 国内用户优先使用 GitCode 地址。GitHub 地址仅作为备用安装源。',
+              '',
+              '### 3. 使用与更新',
+              '',
+              '脚本安装完成后，打开对应业务页面并刷新即可生效。脚本通过 `@version` 判断新版，通过固定的 `@updateURL` / `@downloadURL` 自动更新。',
+              '',
+              '需要主动检查时，可打开：**Tampermonkey → 管理面板 → 检查用户脚本更新**。如果刚发布的新版本暂时没有检测到，通常是 GitCode Raw/CDN 缓存尚未刷新，可以稍后再试；也可以重新点击本 README 中的安装链接进行覆盖更新。',
+              '',
+              '---',
+              '',
+              '## 📦 脚本列表',
+              '',
           ]
-
 
           if not items:
               lines.extend([
-                  "> 暂无正式发布脚本。",
-                  "",
+                  '> 暂无正式发布脚本。',
+                  '',
               ])
-
           else:
-              for group in sorted(
-                  groups,
-                  key=str.lower
-              ):
-                  lines.extend([
-                      f"### {md_escape(group)}",
-                      "",
-                      "| 脚本 | 版本 | 说明 | GitCode 安装 | GitHub 备用 |",
-                      "|---|---:|---|---|---|",
-                  ])
-
-                  for item in sorted(
+              for group in sorted(groups, key=str.lower):
+                  group_items = sorted(
                       groups[group],
                       key=lambda x: (
                           x["name"].lower(),
-                          x["publish_id"].lower()
+                          x["publish_id"].lower(),
+                      ),
+                  )
+
+                  lines.extend([
+                      f'### {md_escape(group)} · {len(group_items)} 个',
+                      '',
+                      '| 脚本 | 版本 | 修改时间 | 功能说明 | 安装 |',
+                      '|---|---:|---|---|---|',
+                  ])
+
+                  for item in group_items:
+                      install_links = (
+                          f"[🇨🇳 国内安装]({item['gitcode_url']})"
+                          f" · [GitHub 备用]({item['github_url']})"
                       )
-                  ):
+
                       lines.append(
-                          "| "
+                          '| '
                           + f"**{md_escape(item['name'])}** | "
-                          + f"{md_escape(item['version'])} | "
+                          + f"`{md_escape(item['version'])}` | "
+                          + f"{md_escape(item['modified_at'])} | "
                           + f"{md_escape(item['description']) or '-'} | "
-                          + f"[安装]({item['gitcode_url']}) | "
-                          + f"[备用]({item['github_url']}) |"
+                          + f"{install_links} |"
                       )
 
-                  lines.append("")
+                  lines.append('')
 
-              lines.extend([
-                  f"共收录 **{len(items)}** 个脚本。",
-                  "",
-              ])
-
-
-          lines.append(AUTO_END)
-
-          auto_block = "\n".join(
-              lines
-          )
-
-          readme = README_PATH.read_text(
-              encoding="utf-8-sig"
-          )
-
-          if (
-              AUTO_START not in readme
-              or AUTO_END not in readme
-          ):
-              print(
-                  "错误：README 缺少自动维护标记："
-              )
-              print(AUTO_START)
-              print(AUTO_END)
-              sys.exit(1)
-
-          start = readme.index(
-              AUTO_START
-          )
-
-          end = (
-              readme.index(AUTO_END)
-              + len(AUTO_END)
-          )
-
-          updated = (
-              readme[:start].rstrip()
-              + "\n\n"
-              + auto_block
-              + "\n\n"
-              + readme[end:].lstrip()
-          )
+          lines.extend([
+              '---',
+              '',
+              '## 🧩 Tampermonkey 使用教程',
+              '',
+              '<details>',
+              '<summary><strong>如何启用、停用或删除脚本</strong></summary>',
+              '',
+              '1. 点击浏览器工具栏中的 Tampermonkey 图标。',
+              '2. 进入 **管理面板**。',
+              '3. 使用脚本右侧开关可以临时启用 / 停用。',
+              '4. 点击脚本名称可以查看或编辑脚本。',
+              '5. 不再需要时，可在脚本详情页删除。',
+              '',
+              '</details>',
+              '',
+              '<details>',
+              '<summary><strong>如何手动检查更新</strong></summary>',
+              '',
+              '1. 打开 Tampermonkey **管理面板**。',
+              '2. 选择 **检查用户脚本更新**。',
+              '3. Tampermonkey 会读取脚本的 `@updateURL`，比较本地与远程 `@version`。',
+              '4. 远程版本更高时，再通过 `@downloadURL` 获取并安装完整脚本。',
+              '',
+              '> 脚本窗口标题、更新记录和 `console.log` 中写的版本号不会参与 Tampermonkey 更新判断，真正用于比较的是元数据中的 `@version`。',
+              '',
+              '</details>',
+              '',
+              '<details>',
+              '<summary><strong>刚发布新版但检查不到怎么办</strong></summary>',
+              '',
+              '先确认 README 中显示的版本已经更新。如果 README 已经更新，但 Tampermonkey 仍提示无新版，通常可以等待几分钟后再次检查。GitCode Raw/CDN 可能存在短暂缓存。',
+              '',
+              '如果需要立即更新，重新点击该脚本的 **国内安装** 链接，Tampermonkey 会识别为同一脚本并进入覆盖更新流程。',
+              '',
+              '</details>',
+              '',
+              '---',
+              '',
+              '## 🔄 发布与更新机制',
+              '',
+              '```text',
+              '本地修改源脚本',
+              '      ↓',
+              'GitHub main',
+              '      ↓',
+              'Build Userscripts',
+              '      ↓',
+              '生成固定 publish/ 发布文件',
+              '      ↓',
+              'Update Userscripts README',
+              '      ↓',
+              'GitCode 国内发布镜像',
+              '```',
+              '',
+              '每个脚本使用固定的 `@publishGroup + @publishID` 生成永久安装地址，因此源文件改名或移动目录后，已经安装的脚本仍可继续更新。',
+              '',
+              'GitCode 仅作为国内脚本分发镜像，正式开发和版本维护以 GitHub `main` 为准。',
+              '',
+              '---',
+              '',
+              '<div align="center">',
+              '',
+              'README 与脚本列表由 GitHub Actions 自动维护。',
+              '',
+              '</div>',
+              '',
+          ])
 
           README_PATH.write_text(
-              updated,
+              "\n".join(lines),
               encoding="utf-8",
-              newline="\n"
+              newline="\n",
           )
 
-          print(
-              f"README 已根据 publish/ 中的 "
-              f"{len(items)} 个脚本更新。"
-          )
-
-          print(
-              "README 分类显示使用源脚本原始一级目录名称。"
-          )
+          print(f"README 已生成，共收录 {len(items)} 个正式发布脚本。")
+          print("脚本修改时间来自对应源脚本最后一次 Git 提交时间。")
           PY
 
       - name: Commit README Changes
         shell: bash
         run: |
-          git config \
-            user.name \
-            "GitHub Actions"
-
-          git config \
-            user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "GitHub Actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add "${README_FILE}"
 
@@ -513,11 +485,7 @@ jobs:
             exit 0
           fi
 
-          git commit \
-            -m "[auto-readme] 自动更新 Userscript 脚本清单"
-
-          git push \
-            origin \
-            "HEAD:${GITHUB_BRANCH}"
+          git commit -m "[auto-readme] 自动更新 Userscript README"
+          git push origin "HEAD:${GITHUB_BRANCH}"
 
           echo "README 自动更新完成。"

@@ -48,14 +48,20 @@ concurrency:
 
 jobs:
   publish:
-    # 自动维护 Commit 会再次触发 push。
-    # 对自动维护提交跳过，避免无限循环。
+    # Build 自己和 README Workflow 都可能产生自动提交。
+    # 对这两类自动提交直接跳过，避免重复构建和无意义的 Flow 链。
     if: >-
       ${{
         github.event_name != 'push' ||
-        !contains(
-          github.event.head_commit.message,
-          '[auto-userscript-maintenance]'
+        (
+          !contains(
+            github.event.head_commit.message,
+            '[auto-userscript-maintenance]'
+          ) &&
+          !contains(
+            github.event.head_commit.message,
+            '[auto-readme]'
+          )
         )
       }}
 

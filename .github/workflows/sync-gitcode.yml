@@ -2,16 +2,17 @@ name: Sync Latest Repository to GitCode
 
 env:
   GITHUB_BRANCH: main
+  PUBLISH_DIR: publish
+  README_FILE: README.md
 
   GITCODE_OWNER: gcw_7DpHPfUr
   GITCODE_REPO: wanxin-userscripts
   GITCODE_BRANCH: main
-
   GITCODE_SECRET_NAME: GITCODE_TOKEN
 
 on:
-  # README 完成以后才同步 GitCode。
-  # 这样 GitCode 收到的一定是已经生成完整脚本清单的最终仓库状态。
+  # README 完成后再同步。
+  # GitCode 只承担国内脚本分发，不再镜像完整开发仓库。
   workflow_run:
     workflows:
       - "Update Userscripts README"
@@ -42,29 +43,40 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ env.GITHUB_BRANCH }}
-          fetch-depth: 0
+          # 这里只需要当前最终文件，不需要 GitHub 历史记录。
+          fetch-depth: 1
           path: source
 
-      - name: Show GitHub Source Commit
+      - name: Validate Distribution Files
         shell: bash
         run: |
-          echo "即将同步到 GitCode 的 GitHub 最新提交："
+          set -euo pipefail
+
+          echo "即将同步的 GitHub 最新提交："
           git -C source log -1 --oneline
-
           echo ""
-          echo "README 自动区块状态："
 
-          if grep -q '<!-- AUTO-USERSCRIPTS:START -->' source/README.md \
-            && grep -q '<!-- AUTO-USERSCRIPTS:END -->' source/README.md; then
-            echo "README 自动区块存在。"
-          else
-            echo "::error::README 缺少自动脚本清单标记。"
+          if [ ! -d "source/${PUBLISH_DIR}" ]; then
+            echo "::error::找不到 source/${PUBLISH_DIR}，无法同步正式发布脚本。"
             exit 1
           fi
 
-          if grep -q '暂无自动生成的脚本清单' source/README.md; then
-            echo "::warning::README 仍包含初始占位文字，请检查 README Workflow。"
+          SCRIPT_COUNT="$(find "source/${PUBLISH_DIR}" -type f -name '*.user.js' | wc -l | tr -d ' ')"
+
+          if [ "${SCRIPT_COUNT}" -eq 0 ]; then
+            echo "::error::publish/ 中没有 .user.js 文件。"
+            exit 1
           fi
+
+          if [ ! -f "source/${README_FILE}" ]; then
+            echo "::error::找不到 source/${README_FILE}。"
+            exit 1
+          fi
+
+          echo "正式发布脚本：${SCRIPT_COUNT} 个"
+          echo "GitCode 将只保留："
+          echo "  - ${PUBLISH_DIR}/"
+          echo "  - ${README_FILE}"
 
       - name: Check GitCode Secret
         env:
@@ -83,75 +95,199 @@ jobs:
           GITCODE_TOKEN: ${{ secrets[env.GITCODE_SECRET_NAME] }}
         shell: bash
         run: |
-          cat > ~/.netrc <<EOF
+          cat > ~/.netrc <<EOF_NETRC
           machine gitcode.com
           login ${GITCODE_OWNER}
           password ${GITCODE_TOKEN}
-          EOF
+          EOF_NETRC
 
           chmod 600 ~/.netrc
 
-      - name: Clone GitCode
+      - name: Shallow Clone GitCode With Retry
         shell: bash
         run: |
-          git clone \
-            --branch "${GITCODE_BRANCH}" \
-            "https://gitcode.com/${GITCODE_OWNER}/${GITCODE_REPO}.git" \
-            gitcode
+          set -euo pipefail
 
-      - name: Mirror Latest GitHub to GitCode
+          REPO_URL="https://gitcode.com/${GITCODE_OWNER}/${GITCODE_REPO}.git"
+          SUCCESS=0
+
+          for ATTEMPT in 1 2 3; do
+            echo "GitCode 浅克隆，第 ${ATTEMPT}/3 次尝试..."
+            rm -rf gitcode
+
+            if git -c http.version=HTTP/1.1 clone \
+              --depth 1 \
+              --single-branch \
+              --no-tags \
+              --branch "${GITCODE_BRANCH}" \
+              "${REPO_URL}" \
+              gitcode; then
+              SUCCESS=1
+              break
+            fi
+
+            echo "::warning::GitCode 克隆失败，稍后自动重试。"
+            sleep $((ATTEMPT * 8))
+          done
+
+          if [ "${SUCCESS}" -ne 1 ]; then
+            echo "::error::GitCode 连续 3 次浅克隆失败。"
+            exit 1
+          fi
+
+          echo "GitCode 浅克隆成功。"
+
+      - name: Build Minimal GitCode Distribution
         shell: bash
         run: |
+          set -euo pipefail
+
+          # GitCode 只作为国内发布仓库。
+          # 清理旧的源代码、Workflow 等镜像内容，只保留 README + publish/。
+          find gitcode \
+            -mindepth 1 \
+            -maxdepth 1 \
+            ! -name '.git' \
+            ! -name "${PUBLISH_DIR}" \
+            ! -name "${README_FILE}" \
+            -exec rm -rf {} +
+
+          mkdir -p "gitcode/${PUBLISH_DIR}"
+
           rsync -a --delete \
-            --exclude=".git/" \
-            source/ gitcode/
+            "source/${PUBLISH_DIR}/" \
+            "gitcode/${PUBLISH_DIR}/"
 
-      - name: Commit and Push GitCode
+          cp \
+            "source/${README_FILE}" \
+            "gitcode/${README_FILE}"
+
+          echo "GitCode 分发目录已准备完成。"
+
+      - name: Commit and Push GitCode With Retry
         shell: bash
         run: |
+          set -euo pipefail
+
           cd gitcode
 
-          git config \
-            user.name \
-            "GitHub Actions"
-
-          git config \
-            user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "GitHub Actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add -A
 
           if git diff --cached --quiet; then
-            echo "GitCode 已经是最新状态，无需提交。"
+            echo "GitCode 已经是最新分发状态，无需提交。"
             exit 0
           fi
 
-          SOURCE_SHA="$(
-            git -C ../source \
-            rev-parse \
-            --short HEAD
-          )"
+          SOURCE_SHA="$(git -C ../source rev-parse --short HEAD)"
+          git commit -m "Sync userscript distribution ${SOURCE_SHA}"
 
-          git commit \
-            -m "Sync final GitHub state ${SOURCE_SHA}"
+          SUCCESS=0
 
-          git push \
-            origin \
-            "${GITCODE_BRANCH}"
+          for ATTEMPT in 1 2 3; do
+            echo "GitCode Push，第 ${ATTEMPT}/3 次尝试..."
 
-          echo "GitCode 已同步 GitHub 最终状态。"
+            if git -c http.version=HTTP/1.1 push origin "${GITCODE_BRANCH}"; then
+              SUCCESS=1
+              break
+            fi
+
+            echo "::warning::GitCode Push 失败，稍后自动重试。"
+            sleep $((ATTEMPT * 8))
+          done
+
+          if [ "${SUCCESS}" -ne 1 ]; then
+            echo "::error::GitCode 连续 3 次 Push 失败。"
+            exit 1
+          fi
+
+          echo "GitCode 国内分发仓库同步完成。"
+
+      - name: Check GitCode Raw Refresh
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "检查 GitCode Raw 是否已经刷新到本次版本。"
+          echo "该步骤仅用于提示 CDN 缓存状态，不影响同步结果。"
+
+          STALE=0
+          CHECKED=0
+
+          while IFS= read -r -d '' FILE; do
+            RELATIVE="${FILE#source/}"
+            LOCAL_VERSION="$(
+              sed -n 's#^[[:space:]]*//[[:space:]]*@version[[:space:]]\+##p' "${FILE}" \
+                | head -n 1 \
+                | tr -d '\r' \
+                | xargs
+            )"
+
+            [ -n "${LOCAL_VERSION}" ] || continue
+
+            URL="https://raw.gitcode.com/${GITCODE_OWNER}/${GITCODE_REPO}/raw/${GITCODE_BRANCH}/${RELATIVE}"
+            MATCHED=0
+            CHECKED=$((CHECKED + 1))
+
+            for ATTEMPT in 1 2 3 4 5 6; do
+              REMOTE_TEXT="$(
+                curl -fsSL \
+                  --connect-timeout 12 \
+                  --max-time 20 \
+                  -H 'Cache-Control: no-cache' \
+                  "${URL}" \
+                  2>/dev/null || true
+              )"
+
+              REMOTE_VERSION="$(
+                printf '%s\n' "${REMOTE_TEXT}" \
+                  | sed -n 's#^[[:space:]]*//[[:space:]]*@version[[:space:]]\+##p' \
+                  | head -n 1 \
+                  | tr -d '\r' \
+                  | xargs
+              )"
+
+              if [ "${REMOTE_VERSION}" = "${LOCAL_VERSION}" ]; then
+                MATCHED=1
+                echo "✅ ${RELATIVE} -> ${LOCAL_VERSION}"
+                break
+              fi
+
+              echo "等待 Raw 刷新：${RELATIVE} 本地=${LOCAL_VERSION} 远程=${REMOTE_VERSION:-无法读取}"
+              sleep 10
+            done
+
+            if [ "${MATCHED}" -ne 1 ]; then
+              STALE=$((STALE + 1))
+              echo "::warning::${RELATIVE} 的 GitCode Raw 暂未刷新到 ${LOCAL_VERSION}。"
+            fi
+          done < <(find "source/${PUBLISH_DIR}" -type f -name '*.user.js' -print0)
+
+          echo ""
+          echo "Raw 检查完成：共 ${CHECKED} 个脚本，暂未刷新 ${STALE} 个。"
+
+          if [ "${STALE}" -gt 0 ]; then
+            echo "::warning::GitCode 仓库已经同步成功，但部分 Raw 地址仍可能处于 CDN 缓存期。"
+          fi
 
       - name: Sync Summary
         shell: bash
         run: |
+          SCRIPT_COUNT="$(find "source/${PUBLISH_DIR}" -type f -name '*.user.js' | wc -l | tr -d ' ')"
+
           {
-            echo "## GitCode 最终同步"
+            echo "## GitCode 国内分发同步"
             echo
-            echo "✅ Userscript 构建完成"
+            echo "✅ README 已生成"
             echo
-            echo "✅ README 自动脚本清单完成"
+            echo "✅ 正式发布脚本：${SCRIPT_COUNT} 个"
             echo
-            echo "✅ 最新 GitHub main 已同步至 GitCode"
+            echo "✅ GitCode 仅同步 \`${PUBLISH_DIR}/\` + \`${README_FILE}\`"
+            echo
+            echo "✅ GitCode 使用浅克隆，并对 Clone / Push 自动重试 3 次"
             echo
             echo "GitHub 提交：\`$(git -C source rev-parse --short HEAD)\`"
           } >> "$GITHUB_STEP_SUMMARY"
