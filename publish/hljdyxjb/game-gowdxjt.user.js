@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GOW底下尖塔
 // @namespace    http://tampermonkey.net/
-// @version      4.2.25
+// @version      4.2.27
 // @description  GOW底下尖塔火把管理与节点同步工具
 
 // @match        https://solofandy.github.io/*
@@ -17,9 +17,14 @@
 /*
  * 更新记录
  *
- * v4.2.24 - 2026-8-29
- * - 更新：测试版本
+ * v4.2.27 - 2026-8-30
+ * - 优化：守卫清理模式与常规导航一致，为所有未完成守卫显示独立火把消耗与完整路线
+ * - 优化：清理模式会记录当前清理起点；同步完成守卫后自动从新完成守卫继续规划
+ * - 保留：各守卫路线独立计算，不因与其他路线重合而合并或抵扣火把
  *
+ * v4.2.26 - 2026-8-30
+ * - 优化：重点房间全部完成后，自动标记所有未完成的守卫房间
+ * - 修复：主线路结束后无路线对象，导致守卫清理提示无法触发的问题
  */
 
 (function () {
@@ -55,6 +60,8 @@
     const STORAGE_MAP_WIDGET_TOP = 'gow_map_widget_top';
     const STORAGE_PANEL_COLLAPSED = 'gow_panel_collapsed';
     const STORAGE_ROUTE_GUIDANCE_ENABLED = 'gow_route_guidance_enabled';
+    const STORAGE_GUARDIAN_CLEANUP_START = 'gow_guardian_cleanup_start';
+    const STORAGE_GUARDIAN_CLEANUP_COMPLETED = 'gow_guardian_cleanup_completed';
 
     let renderTimer = null;
     let syncWatchTimer = null;
@@ -1317,42 +1324,273 @@
 
 
 
-    // 主线路完成后的守卫清理模式
-    // 仅显示剩余守卫，不改变主线路和火把计算
-    function showRemainingGuardiansAfterMainComplete(route) {
-        if (!route || !route.items) return;
+    // 重点房间全部完成后的守卫清理模式。
+    // 与常规守卫导航保持同一口径：每个守卫都从当前清理起点独立计算完整路线和火把消耗。
+    // 多条守卫路线即使互相重合，也不会跨线路合并或抵扣火把。
+    function getCleanupCompletedGuardianKeys(items) {
+        return items
+            .filter(item =>
+                item.cell.classList.contains('guardian') &&
+                item.cell.classList.contains('completed')
+            )
+            .map(item => getRouteCellKey(item.row, item.col));
+    }
 
-        const hasMainTarget = route.items.some(item =>
+    function readCleanupCompletedSnapshot() {
+        try {
+            const raw = JSON.parse(localStorage.getItem(STORAGE_GUARDIAN_CLEANUP_COMPLETED) || '[]');
+            return Array.isArray(raw) ? raw.filter(value => typeof value === 'string') : [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function saveCleanupCompletedSnapshot(items) {
+        localStorage.setItem(
+            STORAGE_GUARDIAN_CLEANUP_COMPLETED,
+            JSON.stringify(getCleanupCompletedGuardianKeys(items))
+        );
+    }
+
+    function getGraphStepDistance(start, target, mapByKey) {
+        if (!start || !target) return Number.POSITIVE_INFINITY;
+        const startKey = getRouteCellKey(start.row, start.col);
+        const targetKey = getRouteCellKey(target.row, target.col);
+        if (startKey === targetKey) return 0;
+
+        const queue = [start];
+        const visited = new Set([startKey]);
+        let head = 0;
+        let steps = 0;
+
+        while (head < queue.length) {
+            const levelEnd = queue.length;
+            steps++;
+            while (head < levelEnd) {
+                const current = queue[head++];
+                for (const next of getRouteNeighbors(current, mapByKey)) {
+                    const nextKey = getRouteCellKey(next.row, next.col);
+                    if (visited.has(nextKey)) continue;
+                    if (nextKey === targetKey) return steps;
+                    visited.add(nextKey);
+                    queue.push(next);
+                }
+            }
+        }
+
+        return Number.POSITIVE_INFINITY;
+    }
+
+    function getGuardianCleanupStart(items, mapByKey) {
+        const itemByKey = new Map(items.map(item => [getRouteCellKey(item.row, item.col), item]));
+        const completedGuardianKeys = getCleanupCompletedGuardianKeys(items);
+        const previousCompleted = new Set(readCleanupCompletedSnapshot());
+        const savedStartKey = localStorage.getItem(STORAGE_GUARDIAN_CLEANUP_START) || '';
+        const savedStart = itemByKey.get(savedStartKey) || null;
+
+        // 同步后若出现新完成守卫，认为玩家已经走到该守卫。
+        // 正常情况下每次只新增一个；若一次新增多个，则选离上一个起点最远的一个，近似最后抵达位置。
+        const newlyCompleted = completedGuardianKeys
+            .filter(key => !previousCompleted.has(key))
+            .map(key => itemByKey.get(key))
+            .filter(Boolean);
+
+        let start = null;
+        if (newlyCompleted.length === 1) {
+            start = newlyCompleted[0];
+        } else if (newlyCompleted.length > 1 && savedStart) {
+            newlyCompleted.sort((a, b) =>
+                getGraphStepDistance(savedStart, b, mapByKey) -
+                getGraphStepDistance(savedStart, a, mapByKey)
+            );
+            start = newlyCompleted[0];
+        } else if (newlyCompleted.length > 1) {
+            start = newlyCompleted[newlyCompleted.length - 1];
+        }
+
+        // 没有新完成守卫时沿用上一次清理起点。
+        if (!start && savedStart && savedStart.cell.classList.contains('completed')) {
+            start = savedStart;
+        }
+
+        // 第一次进入清理模式默认从已完成的F房间开始。
+        if (!start) {
+            start = items.find(item =>
+                item.cell.classList.contains('boss') &&
+                item.cell.classList.contains('completed') &&
+                (item.cell.querySelector('.cell-core')?.textContent || '').trim().toUpperCase() === 'F'
+            ) || null;
+        }
+
+        // 极端情况下没有F，则取数字最大的已完成重点房间。
+        if (!start) {
+            const completedBosses = items
+                .filter(item => item.cell.classList.contains('boss') && item.cell.classList.contains('completed'))
+                .sort((a, b) => getBossOrder(b.cell) - getBossOrder(a.cell));
+            start = completedBosses[0] || null;
+        }
+
+        // 再退化到入口或任意已完成节点，保证仍尽量能给出线路。
+        if (!start) {
+            start = items.find(item =>
+                (item.cell.querySelector('.cell-core')?.textContent || '').trim() === '入'
+            ) || items.find(item => item.cell.classList.contains('completed')) || null;
+        }
+
+        if (start) {
+            localStorage.setItem(STORAGE_GUARDIAN_CLEANUP_START, getRouteCellKey(start.row, start.col));
+        }
+        saveCleanupCompletedSnapshot(items);
+        return start;
+    }
+
+    function getCleanupEnterTorchCost(item) {
+        if (!item) return 0;
+        if (item.cell.classList.contains('completed')) return 0;
+        const core = (item.cell.querySelector('.cell-core')?.textContent || '').trim();
+        return core === '送' ? 0 : 1;
+    }
+
+    // 使用“火把消耗优先、步数次优”的最短路。
+    // 因为已完成房间和“送”房间进入成本为0，所以不能只按普通格数BFS。
+    function findCleanupGuardianPath(start, guardian, mapByKey) {
+        if (!start || !guardian) return null;
+
+        const startKey = getRouteCellKey(start.row, start.col);
+        const targetKey = getRouteCellKey(guardian.row, guardian.col);
+        const best = new Map([[startKey, { cost: 0, steps: 0, prev: null }]]);
+        const queue = [{ item: start, cost: 0, steps: 0 }];
+
+        while (queue.length) {
+            queue.sort((a, b) => a.cost - b.cost || a.steps - b.steps);
+            const state = queue.shift();
+            const current = state.item;
+            const currentKey = getRouteCellKey(current.row, current.col);
+            const known = best.get(currentKey);
+            if (!known || known.cost !== state.cost || known.steps !== state.steps) continue;
+            if (currentKey === targetKey) break;
+
+            for (const next of getRouteNeighbors(current, mapByKey)) {
+                const nextKey = getRouteCellKey(next.row, next.col);
+                const nextCost = state.cost + getCleanupEnterTorchCost(next);
+                const nextSteps = state.steps + 1;
+                const old = best.get(nextKey);
+
+                if (old && (old.cost < nextCost || (old.cost === nextCost && old.steps <= nextSteps))) {
+                    continue;
+                }
+
+                best.set(nextKey, {
+                    cost: nextCost,
+                    steps: nextSteps,
+                    prev: currentKey
+                });
+                queue.push({ item: next, cost: nextCost, steps: nextSteps });
+            }
+        }
+
+        const targetState = best.get(targetKey);
+        if (!targetState) return null;
+
+        const path = [];
+        let key = targetKey;
+        while (key) {
+            const item = mapByKey.get(key);
+            if (item) path.push(item);
+            key = best.get(key)?.prev || null;
+        }
+        path.reverse();
+
+        return {
+            guardian,
+            path,
+            cost: getLineTorchCost(path, true),
+            steps: Math.max(0, path.length - 1)
+        };
+    }
+
+    function showRemainingGuardiansAfterMainComplete(mapData = null) {
+        const data = mapData || buildRouteMap();
+        const items = Array.isArray(data?.items) ? data.items : [];
+        const mapByKey = data?.mapByKey instanceof Map ? data.mapByKey : new Map();
+        if (!items.length) return null;
+
+        const unfinishedBosses = items.filter(item =>
             item.cell.classList.contains('boss') &&
             !item.cell.classList.contains('completed')
         );
+        if (unfinishedBosses.length) return null;
 
-        if (hasMainTarget) return;
+        const unfinishedGuardians = items.filter(item =>
+            item.cell.classList.contains('guardian') &&
+            !item.cell.classList.contains('completed')
+        );
 
-        route.items
-            .filter(item =>
-                item.cell.classList.contains('guardian') &&
-                !item.cell.classList.contains('completed')
-            )
-            .forEach(item => {
-                item.cell.classList.add('gow-nav-guardian');
+        if (!unfinishedGuardians.length) {
+            localStorage.removeItem(STORAGE_GUARDIAN_CLEANUP_START);
+            localStorage.removeItem(STORAGE_GUARDIAN_CLEANUP_COMPLETED);
+            return {
+                mode: 'all-complete',
+                items,
+                mapByKey,
+                guardians: [],
+                guardianBranches: [],
+                path: []
+            };
+        }
 
-                if (item.cell.querySelector('.gow-nav-remaining-guardian')) {
-                    return;
-                }
+        const start = getGuardianCleanupStart(items, mapByKey);
+        const routes = start
+            ? unfinishedGuardians
+                .map(guardian => findCleanupGuardianPath(start, guardian, mapByKey))
+                .filter(Boolean)
+                .sort((a, b) => a.cost - b.cost || a.steps - b.steps)
+            : [];
 
-                const marker = document.createElement('div');
-                marker.className =
-                    'gow-nav-marker gow-nav-remaining-guardian is-guardian';
+        // 所有守卫路线都按常规守卫支线的浅蓝色显示。
+        // 每条路线独立计算，重合部分仅在视觉上重合，不改变各自的火把数字。
+        routes.forEach(item => highlightRoutePath(item.path, 'branch'));
 
-                marker.innerHTML =
-                    '<div class="gow-nav-marker-label">未处理守卫</div>';
+        if (start) {
+            start.cell.classList.add('gow-nav-start');
+            addRouteBadge(start.cell, '起点', 'start');
+            setRouteNavigationTitle(start.cell, `守卫清理起点；剩余 ${unfinishedGuardians.length} 个守卫`);
+        }
 
-                item.cell.appendChild(marker);
-            });
+        unfinishedGuardians.forEach(guardian => {
+            guardian.cell.classList.add('gow-nav-guardian');
+            const routeInfo = routes.find(item => item.guardian === guardian) || null;
+            const cost = routeInfo ? routeInfo.cost : null;
+            addRouteMarker(guardian.cell, '守卫', cost, 'guardian');
+
+            if (routeInfo) {
+                setRouteNavigationTitle(
+                    guardian.cell,
+                    `守卫清理：从当前起点独立预计需要 ${routeInfo.cost} 个火把；路线 ${routeInfo.steps} 步`
+                );
+            } else {
+                setRouteNavigationTitle(guardian.cell, '重点房间已全部完成；此守卫尚未处理，但当前未找到可用线路');
+            }
+        });
+
+        return {
+            mode: 'guardian-cleanup',
+            start,
+            items,
+            mapByKey,
+            guardians: unfinishedGuardians,
+            guardianBranches: routes.map(item => ({
+                guardian: item.guardian,
+                anchor: start,
+                path: item.path,
+                addedTorch: item.cost,
+                steps: item.steps
+            })),
+            path: []
+        };
     }
 
-function findGuardianBranch(anchorCandidates, guardian, mapByKey, maxSteps = 5) {
+    function findGuardianBranch(anchorCandidates, guardian, mapByKey, maxSteps = 5) {
         const targetKey = getRouteCellKey(guardian.row, guardian.col);
         let best = null;
 
@@ -1850,7 +2088,17 @@ function findGuardianBranch(anchorCandidates, guardian, mapByKey, maxSteps = 5) 
         clearRouteNavigation();
 
         let route = findBestMainRoute();
-        if (!route) return null;
+        if (route) {
+            localStorage.removeItem(STORAGE_GUARDIAN_CLEANUP_START);
+            localStorage.removeItem(STORAGE_GUARDIAN_CLEANUP_COMPLETED);
+        }
+        if (!route) {
+            // findBestMainRoute 在没有未完成重点房间时会返回 null。
+            // 此时不能直接退出，否则“主线完成后显示全部守卫”永远不会触发。
+            const mapData = buildRouteMap();
+            const cleanupRoute = showRemainingGuardiansAfterMainComplete(mapData);
+            return cleanupRoute;
+        }
 
         route = attachNearbyGuardians(route);
         highlightRoutePath(route.path, 'main');
@@ -1887,7 +2135,6 @@ function findGuardianBranch(anchorCandidates, guardian, mapByKey, maxSteps = 5) 
         const guardianCount = (route.guardians || []).length;
         setRouteNavigationTitle(route.start.cell, `推荐路线起点${guardianCount ? `；规划 ${guardianCount} 个守卫` : ''}`);
         setRouteNavigationTitle(route.end.cell, `推荐线路终点；本主线路独立预计需要 ${route.torchCost} 个火把`);
-        showRemainingGuardiansAfterMainComplete(route);
 
         return route;
     }
@@ -2172,7 +2419,7 @@ function findGuardianBranch(anchorCandidates, guardian, mapByKey, maxSteps = 5) 
                     <div class="gow-plugin-detail-line">• 主线智能导航：重点房间按照数字顺序推进，F房间默认最后处理</div>
                     <div class="gow-plugin-detail-line">• 路线火把独立计算：主线、守卫、目标房间分别计算实际消耗，不互相抵扣</div>
                     <div class="gow-plugin-detail-line">• 顺路守卫提示：自动标记距离主路线较近的守卫房间，方便规划路线</div>
-                    <div class="gow-plugin-detail-line">• 主线完成后进入守卫清理模式，显示所有未处理守卫房间</div>
+                    <div class="gow-plugin-detail-line">• 主线完成后进入守卫清理模式，为所有未处理守卫显示独立耗费与路线</div>
                     <div class="gow-plugin-detail-line">• 地图指引可自由开启/关闭，关闭后恢复原地图显示，保留缩放与移动位置</div>
                     <div class="gow-plugin-detail-line">• 购买建议：根据当前火把、剩余需求及刷新情况自动计算推荐购买次数</div>
 
