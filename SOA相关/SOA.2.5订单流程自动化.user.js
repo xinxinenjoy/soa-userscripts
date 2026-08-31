@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOA.2.5订单流程自动化
 // @namespace    https://tampermonkey.net/
-// @version      1.29
+// @version      1.31
 // @description  SOA订单流程自动化：内勤复核、合同补充、发起落单、落单审核、落单完成及数据提取；支持文件绑定、异常等待、流程状态判定及卡池数量查询。
 
 // @match        https://checkup-soa3.health-100.cn/*
@@ -26,12 +26,16 @@
  *
  * 更新记录
  *
- * v1.29  -  2026-9-1
- * - UI：精简面板使用说明，归并为配置、流程、日期、数据、窗口五项。
- * - 维护：更新记录仅保留当前版、最近稳定版和初始版。
+ * v1.31  -  2026-9-1
+ * - 优化：点击卡数量改为新建标签页打开卡池查询，不影响当前订单页面。
+ * - 修复：卡池页自动查询增加页签激活、输入完成和按钮可用等待，避免跳转后操作过快导致查询未触发。
+ * - UI：数量大于0时可点击并显示颜色+下划线；数量为0时显示黑色普通文字且不可交互。
  *
- * v1.28  -  2026-9-1
- * - 体检数据优先读取当前 DOM，未加载时自动切换体检名单；卡池数据继续合并展示。
+ * v1.30  -  2026-9-1
+ * - 新增点击卡数量自动打开对应卡池并查询。
+ *
+ * v1.29  -  2026-9-1
+ * - 精简 UI 使用说明及脚本更新记录。
  *
  * v1.0  -  2026-8-30
  * - 首个 Tampermonkey 正式版。
@@ -51,6 +55,12 @@
    */
   const ORDER_ROUTE_PREFIX =
     "#/order/";
+
+  const CARD_GROUP_ROUTE =
+    "#/card/group";
+
+  const CARD_GROUP_PENDING_KEY =
+    "__soa_order_flow_card_group_pending_v131";
 
   const isTargetRoute =
     () => {
@@ -267,6 +277,9 @@
   let panelVisible = false;
 
   let routeObserver = null;
+
+  let cardGroupPendingRunning =
+    false;
   let uiEnsureScheduled = false;
   let boundFileInitialized = false;
 
@@ -5737,6 +5750,621 @@
     };
   }
 
+  function savePendingCardGroupQuery(
+    cardType,
+    cardCorpCode
+  ) {
+    const type =
+      cardType ===
+      "storage"
+        ? "storage"
+        : "general";
+
+    const code =
+      cleanText(
+        cardCorpCode
+      );
+
+    if (!code) {
+      throw new Error(
+        "单位代码为空，无法打开卡池"
+      );
+    }
+
+    localStorage.setItem(
+      CARD_GROUP_PENDING_KEY,
+      JSON.stringify({
+        cardType:
+          type,
+        cardCorpCode:
+          code,
+        createdAt:
+          Date.now()
+      })
+    );
+  }
+
+  function readPendingCardGroupQuery() {
+    const raw =
+      localStorage.getItem(
+        CARD_GROUP_PENDING_KEY
+      );
+
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      const data =
+        JSON.parse(
+          raw
+        );
+
+      if (
+        !data ||
+        !data.cardCorpCode ||
+        ![
+          "general",
+          "storage"
+        ].includes(
+          data.cardType
+        )
+      ) {
+        return null;
+      }
+
+      /*
+       * 超过 2 分钟的任务视为过期，
+       * 防止用户很久之后重新进入卡池页时误自动查询。
+       */
+      if (
+        Number.isFinite(
+          Number(
+            data.createdAt
+          )
+        ) &&
+        Date.now() -
+          Number(
+            data.createdAt
+          ) >
+          120000
+      ) {
+        localStorage.removeItem(
+          CARD_GROUP_PENDING_KEY
+        );
+
+        return null;
+      }
+
+      return data;
+    } catch {
+      localStorage.removeItem(
+        CARD_GROUP_PENDING_KEY
+      );
+
+      return null;
+    }
+  }
+
+  function clearPendingCardGroupQuery() {
+    localStorage.removeItem(
+      CARD_GROUP_PENDING_KEY
+    );
+  }
+
+  function openCardGroupForQuery(
+    cardType,
+    cardCorpCode
+  ) {
+    savePendingCardGroupQuery(
+      cardType,
+      cardCorpCode
+    );
+
+    const url =
+      `${location.origin}/${CARD_GROUP_ROUTE}`;
+
+    const newTab =
+      window.open(
+        url,
+        "_blank"
+      );
+
+    if (!newTab) {
+      clearPendingCardGroupQuery();
+
+      throw new Error(
+        "浏览器阻止了新标签页，请允许当前网站打开弹出窗口"
+      );
+    }
+  }
+
+  function waitForCardGroupElement(
+    finder,
+    {
+      timeout =
+        12000,
+      interval =
+        100,
+      label =
+        "页面元素"
+    } = {}
+  ) {
+    return new Promise(
+      (
+        resolve,
+        reject
+      ) => {
+        const start =
+          Date.now();
+
+        const check =
+          () => {
+            let value = null;
+
+            try {
+              value =
+                typeof finder ===
+                  "function"
+                  ? finder()
+                  : document.querySelector(
+                      finder
+                    );
+            } catch (_) {
+              value = null;
+            }
+
+            if (value) {
+              resolve(
+                value
+              );
+              return;
+            }
+
+            if (
+              Date.now() -
+                start >=
+              timeout
+            ) {
+              reject(
+                new Error(
+                  `等待${label}超时`
+                )
+              );
+
+              return;
+            }
+
+            setTimeout(
+              check,
+              interval
+            );
+          };
+
+        check();
+      }
+    );
+  }
+
+  function isElementVisible(
+    element
+  ) {
+    if (!element) {
+      return false;
+    }
+
+    const style =
+      getComputedStyle(
+        element
+      );
+
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden"
+    ) {
+      return false;
+    }
+
+    const rect =
+      element.getBoundingClientRect();
+
+    return (
+      rect.width > 0 &&
+      rect.height > 0
+    );
+  }
+
+  function isCardGroupTabActive(
+    tab
+  ) {
+    if (!tab) {
+      return false;
+    }
+
+    return (
+      tab.getAttribute(
+        "aria-selected"
+      ) === "true" ||
+      tab.classList.contains(
+        "ant-tabs-tab-active"
+      ) ||
+      tab.parentElement
+        ?.classList
+        ?.contains(
+          "ant-tabs-tab-active"
+        )
+    );
+  }
+
+  function getCardGroupTab(
+    cardType
+  ) {
+    const suffix =
+      cardType ===
+      "storage"
+        ? "storageCard"
+        : "generalCard";
+
+    return (
+      document.getElementById(
+        `rc-tabs-0-tab-${suffix}`
+      ) ||
+      document.querySelector(
+        `[id$="-tab-${suffix}"]`
+      )
+    );
+  }
+
+  function getCardGroupPanel(
+    cardType
+  ) {
+    const suffix =
+      cardType ===
+      "storage"
+        ? "storageCard"
+        : "generalCard";
+
+    return (
+      document.getElementById(
+        `rc-tabs-0-panel-${suffix}`
+      ) ||
+      document.querySelector(
+        `[id$="-panel-${suffix}"]`
+      )
+    );
+  }
+
+  function findCardGroupQueryButton(
+    cardType
+  ) {
+    const suffix =
+      cardType ===
+      "storage"
+        ? "storageCard"
+        : "generalCard";
+
+    /*
+     * 第一优先级：用户提供的精确 DOM 路径。
+     * storageCard 按同样结构自动替换 panel id。
+     */
+    const exact =
+      document.querySelector(
+        `#rc-tabs-0-panel-${suffix} > div > div > div > form > div > div:nth-of-type(9) > div > div:nth-of-type(2) > div > div > div > div > div > div > button`
+      );
+
+    if (exact) {
+      return exact;
+    }
+
+    const panel =
+      getCardGroupPanel(
+        cardType
+      );
+
+    if (!panel) {
+      return null;
+    }
+
+    const buttons =
+      Array.from(
+        panel.querySelectorAll(
+          "form button"
+        )
+      );
+
+    return (
+      buttons.find(
+        button =>
+          /查询|搜索/.test(
+            cleanText(
+              button.textContent
+            )
+          )
+      ) ||
+      null
+    );
+  }
+
+  async function processPendingCardGroupQuery() {
+    if (
+      cardGroupPendingRunning ||
+      !location.hash.startsWith(
+        CARD_GROUP_ROUTE
+      )
+    ) {
+      return;
+    }
+
+    const pending =
+      readPendingCardGroupQuery();
+
+    if (!pending) {
+      return;
+    }
+
+    cardGroupPendingRunning =
+      true;
+
+    try {
+      const tab =
+        await waitForCardGroupElement(
+          () =>
+            getCardGroupTab(
+              pending.cardType
+            ),
+          {
+            timeout:
+              15000,
+            label:
+              pending.cardType ===
+                "storage"
+                ? "储值卡页签"
+                : "套餐卡页签"
+          }
+        );
+
+      if (
+        !isCardGroupTabActive(
+          tab
+        )
+      ) {
+        tab.click();
+      }
+
+      /*
+       * 等待目标页签真正激活。
+       * 不能只在 click 后马上继续，否则 Ant Tabs 的内容还未挂载完成。
+       */
+      await waitForCardGroupElement(
+        () =>
+          isCardGroupTabActive(
+            getCardGroupTab(
+              pending.cardType
+            )
+          )
+            ? true
+            : null,
+        {
+          timeout:
+            8000,
+          label:
+            "卡池页签激活"
+        }
+      );
+
+      /*
+       * 再等待目标 panel 可见。
+       */
+      const panel =
+        await waitForCardGroupElement(
+          () => {
+            const current =
+              getCardGroupPanel(
+                pending.cardType
+              );
+
+            return (
+              current &&
+              isElementVisible(
+                current
+              )
+            )
+              ? current
+              : null;
+          },
+          {
+            timeout:
+              10000,
+            label:
+              "卡池查询区域"
+          }
+        );
+
+      const input =
+        await waitForCardGroupElement(
+          () => {
+            const scoped =
+              panel.querySelector(
+                "#cardCorpCode, input[id='cardCorpCode']"
+              );
+
+            const fallback =
+              document.querySelector(
+                "#cardCorpCode"
+              );
+
+            const candidate =
+              scoped ||
+              fallback;
+
+            return (
+              candidate &&
+              !candidate.disabled &&
+              isElementVisible(
+                candidate
+              )
+            )
+              ? candidate
+              : null;
+          },
+          {
+            timeout:
+              10000,
+            label:
+              "单位代码输入框"
+          }
+        );
+
+      input.focus();
+
+      setNativeInputValue(
+        input,
+        pending.cardCorpCode
+      );
+
+      /*
+       * 补齐框架常见受控输入事件，
+       * 确保 React/Ant Design 的表单状态同步。
+       */
+      input.dispatchEvent(
+        new Event(
+          "input",
+          {
+            bubbles:
+              true
+          }
+        )
+      );
+
+      input.dispatchEvent(
+        new Event(
+          "change",
+          {
+            bubbles:
+              true
+          }
+        )
+      );
+
+      /*
+       * 等待页面确认输入值已经写入。
+       */
+      await waitForCardGroupElement(
+        () =>
+          cleanText(
+            input.value
+          ) ===
+          pending.cardCorpCode
+            ? true
+            : null,
+        {
+          timeout:
+            5000,
+          interval:
+            80,
+          label:
+            "单位代码写入"
+        }
+      );
+
+      input.blur();
+
+      /*
+       * 给 Ant Form 留出状态提交时间。
+       * v1.30 的问题主要就是此处操作过快。
+       */
+      await sleep(
+        650
+      );
+
+      let queryButton =
+        findCardGroupQueryButton(
+          pending.cardType
+        );
+
+      if (
+        !queryButton ||
+        queryButton.disabled ||
+        !isElementVisible(
+          queryButton
+        )
+      ) {
+        queryButton =
+          await waitForCardGroupElement(
+            () => {
+              const button =
+                findCardGroupQueryButton(
+                  pending.cardType
+                );
+
+              return (
+                button &&
+                !button.disabled &&
+                isElementVisible(
+                  button
+                )
+              )
+                ? button
+                : null;
+            },
+            {
+              timeout:
+                8000,
+              interval:
+                120,
+              label:
+                "卡池查询按钮"
+            }
+          );
+      }
+
+      /*
+       * 优先真实点击查询按钮。
+       */
+      queryButton.focus();
+
+      await sleep(
+        180
+      );
+
+      queryButton.click();
+
+      /*
+       * 点击后不立即清任务，稍等一下，
+       * 避免页面状态尚未接收点击。
+       */
+      await sleep(
+        500
+      );
+
+      clearPendingCardGroupQuery();
+
+      console.log(
+        "[SOA流程自动化] 已打开新标签页并查询卡池：",
+        {
+          cardType:
+            pending.cardType,
+          cardCorpCode:
+            pending.cardCorpCode
+        }
+      );
+    } catch (error) {
+      console.warn(
+        "[SOA流程自动化] 卡池自动查询失败：",
+        error
+      );
+
+      /*
+       * 失败时保留任务一小段时间，便于路由重新触发时再试；
+       * 任务本身仍有2分钟过期保护。
+       */
+      throw error;
+    } finally {
+      cardGroupPendingRunning =
+        false;
+    }
+  }
+
   function renderCardPoolSummary(
     data,
     cardCorpCode
@@ -5770,6 +6398,20 @@
                 result?.ok
               );
 
+            const numericValue =
+              success
+                ? Number(
+                    result.totalNum
+                  )
+                : null;
+
+            const clickable =
+              success &&
+              Number.isFinite(
+                numericValue
+              ) &&
+              numericValue > 0;
+
             const value =
               success
                 ? result.totalNum
@@ -5799,6 +6441,17 @@
                   "&quot;"
                 );
 
+            const cardType =
+              label ===
+              "储值卡"
+                ? "storage"
+                : "general";
+
+            const clickAttrs =
+              clickable
+                ? `data-soa-card-type="${cardType}" data-soa-card-code="${cardCorpCode}"`
+                : "";
+
             return `
               <div style="
                 min-width:0;
@@ -5823,23 +6476,44 @@
                   line-height:1.2;
                 ">${label}</div>
 
-                <div style="
-                  overflow:hidden;
-                  text-overflow:ellipsis;
-                  white-space:nowrap;
-                  color:${
-                    success
-                      ? "#389e0d"
-                      : "#cf1322"
-                  };
-                  font-size:${
-                    success
-                      ? "16px"
-                      : "10px"
-                  };
-                  font-weight:700;
-                  line-height:1.35;
-                " title="${safeValue}">${safeValue}</div>
+                <div
+                  ${clickAttrs}
+                  style="
+                    overflow:hidden;
+                    text-overflow:ellipsis;
+                    white-space:nowrap;
+                    color:${
+                      !success
+                        ? "#cf1322"
+                        : clickable
+                          ? "#389e0d"
+                          : "#222"
+                    };
+                    font-size:${
+                      success
+                        ? "16px"
+                        : "10px"
+                    };
+                    font-weight:700;
+                    line-height:1.35;
+                    cursor:${
+                      clickable
+                        ? "pointer"
+                        : "default"
+                    };
+                    text-decoration:${
+                      clickable
+                        ? "underline"
+                        : "none"
+                    };
+                    text-underline-offset:2px;
+                  "
+                  title="${
+                    clickable
+                      ? `点击新建标签页打开${label}卡池并查询单位代码 ${cardCorpCode}`
+                      : safeValue
+                  }"
+                >${safeValue}</div>
               </div>
             `;
           }
@@ -5851,6 +6525,42 @@
 
     grid.title =
       `cardCorpCode：${cardCorpCode}`;
+
+    grid
+      .querySelectorAll(
+        "[data-soa-card-type][data-soa-card-code]"
+      )
+      .forEach(
+        element => {
+          element.addEventListener(
+            "click",
+            () => {
+              const cardType =
+                element.getAttribute(
+                  "data-soa-card-type"
+                );
+
+              const code =
+                element.getAttribute(
+                  "data-soa-card-code"
+                );
+
+              try {
+                openCardGroupForQuery(
+                  cardType,
+                  code
+                );
+              } catch (error) {
+                updatePanelStatus(
+                  error?.message ||
+                  String(error),
+                  "error"
+                );
+              }
+            }
+          );
+        }
+      );
   }
 
   function getCurrentFlowStage() {
@@ -8521,7 +9231,7 @@
           min-width:0;
           font-size:15px;
         ">
-          SOA订单流程自动化 v1.29
+          SOA订单流程自动化 v1.31
         </strong>
 
         <button
@@ -8603,7 +9313,7 @@
 
           <div style="margin-bottom:3px;">
             <strong style="color:#444;">数据：</strong>
-            落单数据可复制；体检数据同时读取体检汇总、套餐卡和储值卡，未加载汇总时才自动切换体检名单。
+            落单数据可复制；体检数据同时读取体检汇总、套餐卡和储值卡；卡数量大于0时可点击并在新标签页自动查询对应卡池。
           </div>
 
           <div>
@@ -9948,6 +10658,24 @@
 
   function routeCheck() {
     if (
+      location.hash.startsWith(
+        CARD_GROUP_ROUTE
+      )
+    ) {
+      teardownRouteUi();
+
+      processPendingCardGroupQuery()
+        .catch(error => {
+          console.warn(
+            "[SOA流程自动化] 卡池自动查询失败：",
+            error
+          );
+        });
+
+      return;
+    }
+
+    if (
       isTargetRoute()
     ) {
       /*
@@ -10054,6 +10782,6 @@
   routeCheck();
 
   console.log(
-    "[SOA流程自动化] v1.29 已加载"
+    "[SOA流程自动化] v1.31 已加载"
   );
 })();
