@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOA.2.5订单流程自动化
 // @namespace    https://tampermonkey.net/
-// @version      1.23
+// @version      1.25
 // @description  SOA订单流程自动化：内勤复核、合同补充、发起落单、落单审核、落单完成及数据提取；支持文件绑定、异常等待和流程状态判定。
 
 // @match        https://checkup-soa3.health-100.cn/*
@@ -26,15 +26,17 @@
  *
  * 更新记录
  *
+ * v1.25  -  2026-8-31
+ * - UI：体检日期右侧改为显示“剩余有效期”，按今天至结束日期计算。
+ * - 显示：不足1个月为“剩X天”，不足1年为“剩X个月”，1年以上为“剩X年”，当天到期为“今日到期”。
+ * - 规则：任一日期异常时不显示剩余有效期；悬停可查看订单总周期天数与剩余天数。
+ *
+ * v1.24  -  2026-8-31
+ * - UI：已落单主按钮显示绿色“订单已完成”，数据工具继续按需使用。
+ *
  * v1.23  -  2026-8-31
- * - 清理：移除未使用函数、常量及已淘汰兼容分支，合并重复日期工具；不改变现有业务流程。
- * - UI：重新精简“使用说明”，同步当前真实按钮、数据和安全规则。
+ * - 清理冗余代码并精简使用说明，不改变现有业务流程。
  *
- * v1.22  -  2026-8-31
- * - 稳定：移除缩放功能，面板固定原始尺寸；保留拖动、折叠和位置记忆。
- *
- * v1.0  -  2026-8-30
- * - 首个 Tampermonkey 正式版。
  */
 
 (function () {
@@ -1432,7 +1434,7 @@
     );
   }
 
-  function getExamDurationText(
+  function getExamRemainingInfo(
     beginDate,
     endDate
   ) {
@@ -1442,59 +1444,130 @@
       endDate <
         beginDate
     ) {
-      return "";
+      return {
+        text: "",
+        title: ""
+      };
     }
 
-    let totalMonths =
+    const today =
+      new Date();
+
+    today.setHours(
+      0,
+      0,
+      0,
+      0
+    );
+
+    const begin =
+      new Date(
+        beginDate.getFullYear(),
+        beginDate.getMonth(),
+        beginDate.getDate()
+      );
+
+    const end =
+      new Date(
+        endDate.getFullYear(),
+        endDate.getMonth(),
+        endDate.getDate()
+      );
+
+    /*
+     * 正常状态下 end 不会早于今天。
+     * 此处仍保留保护，避免页面切换瞬间产生错误显示。
+     */
+    if (
+      end <
+      today
+    ) {
+      return {
+        text: "",
+        title: ""
+      };
+    }
+
+    const totalDays =
+      dateDiffDays(
+        begin,
+        end
+      );
+
+    const remainingDays =
+      dateDiffDays(
+        today,
+        end
+      );
+
+    if (
+      end.getTime() ===
+      today.getTime()
+    ) {
+      return {
+        text:
+          "今日到期",
+        title:
+          `订单总周期：${totalDays}天；剩余周期：0天`
+      };
+    }
+
+    let remainingMonths =
       (
-        endDate.getFullYear() -
-        beginDate.getFullYear()
+        end.getFullYear() -
+        today.getFullYear()
       ) * 12 +
       (
-        endDate.getMonth() -
-        beginDate.getMonth()
+        end.getMonth() -
+        today.getMonth()
       );
 
     let anchor =
       addCalendarMonths(
-        beginDate,
-        totalMonths
+        today,
+        remainingMonths
       );
 
     if (
       anchor >
-      endDate
+      end
     ) {
-      totalMonths -= 1;
+      remainingMonths -= 1;
 
       anchor =
         addCalendarMonths(
-          beginDate,
-          totalMonths
+          today,
+          remainingMonths
         );
     }
 
+    let text = "";
+
     if (
-      totalMonths >= 12
+      remainingMonths >= 12
     ) {
       const years =
         Math.floor(
-          totalMonths / 12
+          remainingMonths / 12
         );
 
-      return `${years}年`;
-    }
-
-    if (
-      totalMonths >= 1
+      text =
+        `剩${years}年`;
+    } else if (
+      remainingMonths >= 1
     ) {
-      return `${totalMonths}个月`;
+      text =
+        `剩${remainingMonths}个月`;
+    } else {
+      text =
+        `剩${remainingDays}天`;
     }
 
-    return `${dateDiffDays(
-      beginDate,
-      endDate
-    )}天`;
+    return {
+      text,
+      title:
+        `订单总周期：${totalDays}天；剩余周期：${remainingDays}天`
+    };
   }
 
   function readDateInputText(
@@ -1861,31 +1934,38 @@
         : "体检结束日期";
 
     /*
-     * 区间时长只针对完全正常的日期计算。
-     * 任一日期异常时隐藏，避免错误日期产生误导。
+     * 剩余有效期只针对完全正常的日期计算。
+     * 任一日期异常时隐藏，避免异常日期产生误导。
      */
     if (
       !state.abnormal &&
       state.beginDate &&
       state.endDate
     ) {
-      const durationText =
-        getExamDurationText(
+      const remainingInfo =
+        getExamRemainingInfo(
           state.beginDate,
           state.endDate
         );
 
       durationSpan.textContent =
-        durationText
-          ? `· ${durationText}`
+        remainingInfo.text
+          ? `· ${remainingInfo.text}`
           : "";
 
+      durationSpan.title =
+        remainingInfo.title ||
+        "";
+
       durationSpan.style.display =
-        durationText
+        remainingInfo.text
           ? "inline"
           : "none";
     } else {
       durationSpan.textContent =
+        "";
+
+      durationSpan.title =
         "";
 
       durationSpan.style.display =
@@ -5524,6 +5604,31 @@
       return;
     }
 
+    if (
+      stage ===
+      "已落单"
+    ) {
+      button.disabled =
+        true;
+
+      button.textContent =
+        "订单已完成";
+
+      button.style.background =
+        "#52c41a";
+
+      button.style.color =
+        "#fff";
+
+      button.style.cursor =
+        "default";
+
+      button.title =
+        "当前订单流程已完成；如需查看数据，请使用下方落单数据或体检数据。";
+
+      return;
+    }
+
     const issue =
       getAutomationStageIssue(
         stage
@@ -5635,7 +5740,7 @@
         size: "16px",
         weight: "700",
         hint:
-          "可点击下方“落单数据”按需读取并复制订单数据。"
+          "流程已完成，下方数据工具可按需使用。"
       }
     };
 
@@ -7202,7 +7307,7 @@
           "已落单"
         ) {
           updatePanelStatus(
-            "✓ 当前订单已落单，可点击“落单数据”按需读取。",
+            "✓ 当前订单流程已完成。",
             "success"
           );
 
@@ -7778,7 +7883,7 @@
           min-width:0;
           font-size:15px;
         ">
-          SOA订单流程自动化 v1.23
+          SOA订单流程自动化 v1.25
         </strong>
 
         <button
@@ -7850,12 +7955,12 @@
 
           <div style="margin-bottom:4px;">
             <strong>流程：</strong>
-            仅内勤复核及后续支持阶段可处理；运行中可“点击停止”。更早或未知阶段会红色拦截，不会等待后自动执行。
+            仅内勤复核及后续支持阶段可处理；运行中可“点击停止”。更早或未知阶段会红色拦截；已落单后主按钮显示绿色“订单已完成”，不会再次执行流程。
           </div>
 
           <div style="margin-bottom:4px;">
             <strong>日期：</strong>
-            报价确认起检测体检区间，仅标红异常日期；报价确认阶段可点“修改时间”改为今天至3年后，不自动保存或回退。
+            报价确认起检测体检区间，仅标红异常日期；日期正常时右侧显示距结束日期的剩余有效期。报价确认阶段可点“修改时间”改为今天至3年后，不自动保存或回退。
           </div>
 
           <div style="margin-bottom:4px;">
@@ -8214,7 +8319,7 @@
                   font-weight:600;
                   white-space:nowrap;
                 "
-                title="体检区间时长"
+                title="剩余有效期"
               ></span>
             </span>
           </div>
@@ -9286,6 +9391,6 @@
   routeCheck();
 
   console.log(
-    "[SOA流程自动化] v1.23 已加载"
+    "[SOA流程自动化] v1.25 已加载"
   );
 })();
