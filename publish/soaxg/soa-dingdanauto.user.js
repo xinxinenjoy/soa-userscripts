@@ -2,7 +2,7 @@
 // @name         SOA.2.5订单流程自动化
 // @namespace    https://tampermonkey.net/
 // @version      1.31
-// @description  SOA订单流程自动化：内勤复核、合同补充、发起落单、落单审核、落单完成及数据提取；支持文件绑定、异常等待、流程状态判定及卡池数量查询。
+// @description  SOA订单流程自动化脚本，支持订单详情各阶段自动处理，包括审批备注填写、合同配置、体检时间修正等功能，提供数据汇总及操作面板。
 
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
