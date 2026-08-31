@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SOA.2.5订单流程自动化
 // @namespace    https://tampermonkey.net/
-// @version      1.25
-// @description  SOA订单流程自动化：内勤复核、合同补充、发起落单、落单审核、落单完成及数据提取；支持文件绑定、异常等待和流程状态判定。
+// @version      1.29
+// @description  SOA订单流程自动化：内勤复核、合同补充、发起落单、落单审核、落单完成及数据提取；支持文件绑定、异常等待、流程状态判定及卡池数量查询。
 
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
@@ -21,22 +21,20 @@
  * - 覆盖订单详情各业务页签，识别流程阶段并执行已支持的自动处理。
  * - 支持审批备注、签单主体、合同/授权书共用文件配置。
  * - 支持体检时间异常检测与报价确认阶段时间修正。
- * - 提供按需落单数据、体检汇总数据及网页提示记录。
+ * - 提供按需落单数据、体检汇总/卡池数据及网页提示记录。
  * - 面板支持显示开关、拖动、折叠、位置记忆和流程停止。
  *
  * 更新记录
  *
- * v1.25  -  2026-8-31
- * - UI：体检日期右侧改为显示“剩余有效期”，按今天至结束日期计算。
- * - 显示：不足1个月为“剩X天”，不足1年为“剩X个月”，1年以上为“剩X年”，当天到期为“今日到期”。
- * - 规则：任一日期异常时不显示剩余有效期；悬停可查看订单总周期天数与剩余天数。
+ * v1.29  -  2026-9-1
+ * - UI：精简面板使用说明，归并为配置、流程、日期、数据、窗口五项。
+ * - 维护：更新记录仅保留当前版、最近稳定版和初始版。
  *
- * v1.24  -  2026-8-31
- * - UI：已落单主按钮显示绿色“订单已完成”，数据工具继续按需使用。
+ * v1.28  -  2026-9-1
+ * - 体检数据优先读取当前 DOM，未加载时自动切换体检名单；卡池数据继续合并展示。
  *
- * v1.23  -  2026-8-31
- * - 清理冗余代码并精简使用说明，不改变现有业务流程。
- *
+ * v1.0  -  2026-8-30
+ * - 首个 Tampermonkey 正式版。
  */
 
 (function () {
@@ -103,6 +101,12 @@
 
     PROCESS_LOG_API:
       "/soa/api/v1/order/processlogs",
+
+    PACKAGE_CARD_POOL_API:
+      "/soa-card/api/v1/card/business/pool/display",
+
+    STORED_VALUE_CARD_POOL_API:
+      "/soa-card/api/v1/bqcard/page/pool",
 
     EXTRACT_ORDER_NAME_SELECTOR:
       "#register > div",
@@ -200,6 +204,9 @@
     PHYSICAL_DATA_GRID_ID:
       "__soa_flow_physical_data_grid_v116",
 
+    CARD_POOL_DATA_GRID_ID:
+      "__soa_flow_card_pool_data_grid_v126",
+
     HELP_BUTTON_ID:
       "__soa_flow_help_button_v14",
     HELP_PANEL_ID:
@@ -277,6 +284,22 @@
   let lastDataPanelOrderCode = "";
 
   let panelStatusHideTimer = null;
+
+  const CARD_POOL_CACHE_MS =
+    15000;
+
+  let physicalDataQueryRunning =
+    false;
+
+  let cardPoolQueryCache = {
+    orderCode: "",
+    cardCorpCode: "",
+    timestamp: 0,
+    data: null
+  };
+
+  const cardCorpCodeMemory =
+    new Map();
 
   function hidePanelStatus() {
     const status =
@@ -5339,16 +5362,30 @@
     }
   }
 
-  async function ensurePhysicalExamListVisible(
+  async function ensurePhysicalExamSummaryAvailable(
     token = null
   ) {
+    /*
+     * 第一优先级：直接读取当前 DOM。
+     * 如果用户此前访问过体检名单、真实汇总数据仍保留在隐藏 DOM 中，
+     * 则无需切换页签。
+     */
     const existing =
       tryExtractPhysicalExamSummary();
 
     if (existing) {
-      return existing;
+      return {
+        data:
+          existing,
+        navigated:
+          false
+      };
     }
 
+    /*
+     * 当前页面只有体检名单的空壳 / placeholder 时，
+     * 说明真实汇总尚未加载，此时再自动切换到体检名单。
+     */
     const tab =
       await waitForReactiveCondition(
         () =>
@@ -5367,24 +5404,31 @@
       );
 
     updatePanelStatus(
-      "正在切换到体检名单并读取汇总数据..."
+      "当前页尚未加载体检汇总，正在切换到体检名单读取..."
     );
 
     tab.click();
 
-    return await waitForReactiveCondition(
-      () =>
-        tryExtractPhysicalExamSummary() ||
-        null,
-      {
-        label:
-          "体检名单汇总数据",
-        token,
-        blockerCheck:
-          () =>
-            getVisibleErrorFeedback()
-      }
-    );
+    const data =
+      await waitForReactiveCondition(
+        () =>
+          tryExtractPhysicalExamSummary() ||
+          null,
+        {
+          label:
+            "体检名单汇总数据",
+          token,
+          blockerCheck:
+            () =>
+              getVisibleErrorFeedback()
+        }
+      );
+
+    return {
+      data,
+      navigated:
+        true
+    };
   }
 
   function renderPhysicalExamSummary(
@@ -5443,6 +5487,370 @@
 
     grid.style.display =
       "grid";
+  }
+
+  function getCurrentCardCorpCode() {
+    const raw =
+      (
+        queryText(
+          CONFIG.EXTRACT_OPPORTUNITY_CODE_SELECTOR
+        ) ||
+        getFormItemTextByFor(
+          "register_opportunity_id"
+        )
+      )
+        .replace(
+          /^'+/,
+          ""
+        )
+        .trim();
+
+    const match =
+      raw.match(
+        /\d{8,}/
+      );
+
+    const current =
+      match?.[0] ||
+      "";
+
+    const orderCode =
+      getCurrentOrderCode();
+
+    if (
+      current &&
+      orderCode
+    ) {
+      cardCorpCodeMemory.set(
+        orderCode,
+        current
+      );
+    }
+
+    if (current) {
+      return current;
+    }
+
+    if (
+      orderCode &&
+      cardCorpCodeMemory.has(
+        orderCode
+      )
+    ) {
+      return (
+        cardCorpCodeMemory.get(
+          orderCode
+        ) ||
+        ""
+      );
+    }
+
+    return "";
+  }
+
+  function getCardPoolBackendError(
+    payload
+  ) {
+    if (
+      !payload ||
+      typeof payload !==
+        "object"
+    ) {
+      return "";
+    }
+
+    const resultCode =
+      cleanText(
+        payload.result_code
+      ).toUpperCase();
+
+    const errorCode =
+      cleanText(
+        payload.error_code
+      );
+
+    const errorDesc =
+      cleanText(
+        payload.error_desc
+      );
+
+    const message =
+      cleanText(
+        payload.msg
+      );
+
+    if (
+      resultCode === "FAIL" ||
+      errorCode ||
+      errorDesc
+    ) {
+      return (
+        errorDesc ||
+        message ||
+        errorCode ||
+        "接口返回失败"
+      );
+    }
+
+    return "";
+  }
+
+  function extractCardPoolTotalNum(
+    payload
+  ) {
+    const value =
+      Number(
+        payload?.data?.total_num
+      );
+
+    return Number.isFinite(
+      value
+    )
+      ? value
+      : null;
+  }
+
+  async function fetchCardPoolTotalNum(
+    api,
+    cardCorpCode
+  ) {
+    const response =
+      await fetch(
+        api,
+        {
+          method:
+            "POST",
+          headers: {
+            "accept":
+              "application/json, text/plain, */*",
+            "content-type":
+              "application/json;charset=UTF-8",
+            "mnclientid":
+              "MN_SOA3"
+          },
+          body:
+            JSON.stringify({
+              region_code:
+                "XX",
+              page_index:
+                1,
+              page_size:
+                20,
+              cardCorpCode
+            }),
+          credentials:
+            "include"
+        }
+      );
+
+    if (!response.ok) {
+      throw new Error(
+        `HTTP ${response.status}`
+      );
+    }
+
+    const payload =
+      await response.json();
+
+    const backendError =
+      getCardPoolBackendError(
+        payload
+      );
+
+    if (backendError) {
+      throw new Error(
+        backendError
+      );
+    }
+
+    const totalNum =
+      extractCardPoolTotalNum(
+        payload
+      );
+
+    if (
+      totalNum === null
+    ) {
+      console.warn(
+        "[SOA流程自动化] 卡池接口未返回 data.total_num：",
+        {
+          api,
+          payload
+        }
+      );
+
+      throw new Error(
+        "接口成功，但未返回 total_num"
+      );
+    }
+
+    return totalNum;
+  }
+
+  async function safeFetchCardPoolTotal(
+    api,
+    cardCorpCode
+  ) {
+    try {
+      return {
+        ok:
+          true,
+        totalNum:
+          await fetchCardPoolTotalNum(
+            api,
+            cardCorpCode
+          )
+      };
+    } catch (error) {
+      return {
+        ok:
+          false,
+        error:
+          error?.message ||
+          String(error)
+      };
+    }
+  }
+
+  async function fetchBothCardPoolTotals(
+    cardCorpCode
+  ) {
+    const packageCard =
+      await safeFetchCardPoolTotal(
+        CONFIG.PACKAGE_CARD_POOL_API,
+        cardCorpCode
+      );
+
+    await sleep(
+      150
+    );
+
+    const storedValueCard =
+      await safeFetchCardPoolTotal(
+        CONFIG.STORED_VALUE_CARD_POOL_API,
+        cardCorpCode
+      );
+
+    return {
+      packageCard,
+      storedValueCard
+    };
+  }
+
+  function renderCardPoolSummary(
+    data,
+    cardCorpCode
+  ) {
+    const grid =
+      document.getElementById(
+        UI.CARD_POOL_DATA_GRID_ID
+      );
+
+    if (!grid) {
+      return;
+    }
+
+    const items = [
+      [
+        "套餐卡",
+        data.packageCard
+      ],
+      [
+        "储值卡",
+        data.storedValueCard
+      ]
+    ];
+
+    grid.innerHTML =
+      items
+        .map(
+          ([label, result]) => {
+            const success =
+              Boolean(
+                result?.ok
+              );
+
+            const value =
+              success
+                ? result.totalNum
+                : (
+                    result?.error ||
+                    "查询失败"
+                  );
+
+            const safeValue =
+              cleanCellText(
+                value
+              )
+                .replace(
+                  /&/g,
+                  "&amp;"
+                )
+                .replace(
+                  /</g,
+                  "&lt;"
+                )
+                .replace(
+                  />/g,
+                  "&gt;"
+                )
+                .replace(
+                  /"/g,
+                  "&quot;"
+                );
+
+            return `
+              <div style="
+                min-width:0;
+                padding:8px 6px;
+                border:1px solid ${
+                  success
+                    ? "#d9f7be"
+                    : "#ffccc7"
+                };
+                border-radius:5px;
+                background:${
+                  success
+                    ? "#f6ffed"
+                    : "#fff2f0"
+                };
+                text-align:center;
+              ">
+                <div style="
+                  margin-bottom:3px;
+                  color:#999;
+                  font-size:10px;
+                  line-height:1.2;
+                ">${label}</div>
+
+                <div style="
+                  overflow:hidden;
+                  text-overflow:ellipsis;
+                  white-space:nowrap;
+                  color:${
+                    success
+                      ? "#389e0d"
+                      : "#cf1322"
+                  };
+                  font-size:${
+                    success
+                      ? "16px"
+                      : "10px"
+                  };
+                  font-weight:700;
+                  line-height:1.35;
+                " title="${safeValue}">${safeValue}</div>
+              </div>
+            `;
+          }
+        )
+        .join("");
+
+    grid.style.display =
+      "grid";
+
+    grid.title =
+      `cardCorpCode：${cardCorpCode}`;
   }
 
   function getCurrentFlowStage() {
@@ -5944,6 +6352,11 @@
         UI.PHYSICAL_DATA_GRID_ID
       );
 
+    const cardPoolGrid =
+      document.getElementById(
+        UI.CARD_POOL_DATA_GRID_ID
+      );
+
     const preview =
       document.getElementById(
         UI.EXTRACT_PREVIEW_ID
@@ -5963,6 +6376,17 @@
 
       physicalGrid.style.display =
         "none";
+    }
+
+    if (cardPoolGrid) {
+      cardPoolGrid.innerHTML =
+        "";
+
+      cardPoolGrid.style.display =
+        "none";
+
+      cardPoolGrid.title =
+        "";
     }
 
     if (preview) {
@@ -6048,6 +6472,14 @@
         orderCode
     ) {
       cachedLandingTimeOptions = [];
+
+      cardPoolQueryCache = {
+        orderCode: "",
+        cardCorpCode: "",
+        timestamp: 0,
+        data: null
+      };
+
       closeDataPanel();
     }
 
@@ -6124,7 +6556,27 @@
       activeDataPanelMode ===
       "physical"
     ) {
+      if (
+        physicalDataQueryRunning
+      ) {
+        updatePanelStatus(
+          "数据正在查询中，请稍候..."
+        );
+
+        return;
+      }
+
       closeDataPanel();
+      return;
+    }
+
+    if (
+      physicalDataQueryRunning
+    ) {
+      updatePanelStatus(
+        "数据正在查询中，请稍候..."
+      );
+
       return;
     }
 
@@ -6137,13 +6589,98 @@
       return;
     }
 
+    physicalDataQueryRunning =
+      true;
+
+    const button =
+      document.getElementById(
+        UI.PHYSICAL_DATA_BUTTON_ID
+      );
+
+    if (button) {
+      button.disabled =
+        true;
+
+      button.textContent =
+        "读取中...";
+    }
+
     try {
-      const data =
-        await ensurePhysicalExamListVisible();
+      /*
+       * 当前 DOM 有完整汇总则直接读取；
+       * 没有真实数据时才自动切换到体检名单。
+       */
+      const physicalResult =
+        await ensurePhysicalExamSummaryAvailable();
+
+      const physical =
+        physicalResult.data;
 
       renderPhysicalExamSummary(
-        data
+        physical
       );
+
+      const orderCode =
+        getCurrentOrderCode();
+
+      const cardCorpCode =
+        getCurrentCardCorpCode();
+
+      let cardPool =
+        null;
+
+      if (!cardCorpCode) {
+        renderCardPoolCodeUnavailable();
+      } else {
+        cardPool =
+          getCachedCardPoolData(
+            orderCode,
+            cardCorpCode
+          );
+
+        if (!cardPool) {
+          const grid =
+            document.getElementById(
+              UI.CARD_POOL_DATA_GRID_ID
+            );
+
+          if (grid) {
+            grid.innerHTML = `
+              <div style="
+                grid-column:1 / -1;
+                padding:8px;
+                border:1px solid #e5e7eb;
+                border-radius:5px;
+                background:#fafafa;
+                color:#999;
+                font-size:11px;
+                text-align:center;
+              ">
+                正在查询套餐卡、储值卡...
+              </div>
+            `;
+
+            grid.style.display =
+              "grid";
+          }
+
+          cardPool =
+            await fetchBothCardPoolTotals(
+              cardCorpCode
+            );
+
+          saveCachedCardPoolData(
+            orderCode,
+            cardCorpCode,
+            cardPool
+          );
+        }
+
+        renderCardPoolSummary(
+          cardPool,
+          cardCorpCode
+        );
+      }
 
       const title =
         document.getElementById(
@@ -6155,23 +6692,124 @@
           "体检数据 · 汇总";
       }
 
-      updatePanelStatus(
-        "✓ 已读取体检名单汇总数据。",
-        "success"
-      );
-    } catch (error) {
-      const title =
-        document.getElementById(
-          UI.DATA_PANEL_TITLE_ID
+      const cardSuccessCount =
+        cardPool
+          ? [
+              cardPool.packageCard,
+              cardPool.storedValueCard
+            ].filter(
+              item =>
+                item?.ok
+            ).length
+          : 0;
+
+      if (
+        physical &&
+        cardSuccessCount === 2
+      ) {
+        updatePanelStatus(
+          physicalResult.navigated
+            ? "✓ 已切换体检名单并读取体检汇总及卡池数量。"
+            : "✓ 已直接读取当前页体检汇总及卡池数量。",
+          "success"
         );
-
-      if (title) {
-        title.textContent =
-          "体检数据 · 读取失败";
+      } else if (
+        physical ||
+        cardSuccessCount > 0
+      ) {
+        updatePanelStatus(
+          "数据已部分读取，请查看结果。"
+        );
+      } else {
+        updatePanelStatus(
+          "未读取到可用数据。",
+          "error"
+        );
       }
+    } finally {
+      physicalDataQueryRunning =
+        false;
 
-      throw error;
+      if (button) {
+        button.disabled =
+          false;
+
+        button.textContent =
+          "体检数据";
+      }
     }
+  }
+
+  function getCachedCardPoolData(
+    orderCode,
+    cardCorpCode
+  ) {
+    if (
+      !orderCode ||
+      !cardCorpCode ||
+      cardPoolQueryCache.orderCode !==
+        orderCode ||
+      cardPoolQueryCache.cardCorpCode !==
+        cardCorpCode ||
+      !cardPoolQueryCache.data
+    ) {
+      return null;
+    }
+
+    if (
+      Date.now() -
+        cardPoolQueryCache.timestamp >
+      CARD_POOL_CACHE_MS
+    ) {
+      return null;
+    }
+
+    return cardPoolQueryCache.data;
+  }
+
+  function saveCachedCardPoolData(
+    orderCode,
+    cardCorpCode,
+    data
+  ) {
+    cardPoolQueryCache = {
+      orderCode,
+      cardCorpCode,
+      timestamp:
+        Date.now(),
+      data:
+        data || null
+    };
+  }
+
+  function renderCardPoolCodeUnavailable() {
+    const grid =
+      document.getElementById(
+        UI.CARD_POOL_DATA_GRID_ID
+      );
+
+    if (!grid) {
+      return;
+    }
+
+    grid.innerHTML = `
+      <div style="
+        grid-column:1 / -1;
+        padding:8px;
+        border:1px solid #ffccc7;
+        border-radius:5px;
+        background:#fff2f0;
+        color:#cf1322;
+        font-size:11px;
+        line-height:1.45;
+        text-align:center;
+      ">
+        当前页面未读取到商机代码，暂无法查询套餐卡、储值卡。
+      </div>
+    `;
+
+    grid.style.display =
+      "grid";
   }
 
   function updateDataActionButtons(
@@ -7883,7 +8521,7 @@
           min-width:0;
           font-size:15px;
         ">
-          SOA订单流程自动化 v1.25
+          SOA订单流程自动化 v1.29
         </strong>
 
         <button
@@ -7931,46 +8569,46 @@
           style="
             display:none;
             margin-bottom:8px;
-            padding:9px 10px;
+            padding:8px 10px;
             border:1px solid #d9d9d9;
             border-radius:6px;
             background:#fafafa;
             color:#555;
-            font-size:11px;
-            line-height:1.55;
+            font-size:10.5px;
+            line-height:1.45;
           "
         >
           <div style="
-            margin-bottom:6px;
+            margin-bottom:5px;
             font-weight:700;
             color:#333;
           ">
             使用说明
           </div>
 
-          <div style="margin-bottom:4px;">
-            <strong>配置：</strong>
-            备注默认已填写，可改为自定义；签单主体默认选第一个可用项，也可按完整名称匹配；文件选择一次后可复用。
+          <div style="margin-bottom:3px;">
+            <strong style="color:#444;">配置：</strong>
+            顶部设置备注、签单主体和共用文件；绿色表示已就绪。
           </div>
 
-          <div style="margin-bottom:4px;">
-            <strong>流程：</strong>
-            仅内勤复核及后续支持阶段可处理；运行中可“点击停止”。更早或未知阶段会红色拦截；已落单后主按钮显示绿色“订单已完成”，不会再次执行流程。
+          <div style="margin-bottom:3px;">
+            <strong style="color:#444;">流程：</strong>
+            内勤复核及后续阶段可执行；运行中可停止；已落单仅保留数据查询。
           </div>
 
-          <div style="margin-bottom:4px;">
-            <strong>日期：</strong>
-            报价确认起检测体检区间，仅标红异常日期；日期正常时右侧显示距结束日期的剩余有效期。报价确认阶段可点“修改时间”改为今天至3年后，不自动保存或回退。
+          <div style="margin-bottom:3px;">
+            <strong style="color:#444;">日期：</strong>
+            报价确认起检测体检时间，异常日期单独标红；“修改时间”仅改为今天至3年后，不自动保存。
           </div>
 
-          <div style="margin-bottom:4px;">
-            <strong>数据：</strong>
-            落单数据按需读取并可复制；体检数据只读取展示6项汇总。
+          <div style="margin-bottom:3px;">
+            <strong style="color:#444;">数据：</strong>
+            落单数据可复制；体检数据同时读取体检汇总、套餐卡和储值卡，未加载汇总时才自动切换体检名单。
           </div>
 
           <div>
-            <strong>提示/窗口：</strong>
-            网页提示最多5条、可清空；文件权限失效时才重新授权。拖动标题栏移动，右上角“−”折叠，位置与折叠状态自动保存。
+            <strong style="color:#444;">窗口：</strong>
+            拖动标题栏移动，右上角“−”折叠；提示最多5条可清空，文件权限失效时再重新授权。
           </div>
         </div>
 
@@ -8407,10 +9045,11 @@
                 font-weight:600;
                 cursor:pointer;
               "
-              title="点击后自动切换到体检名单并读取合计数据"
+              title="优先直接读取当前页体检汇总；尚未加载时自动切换体检名单，并同时查询套餐卡、储值卡"
             >
               体检数据
             </button>
+
           </div>
 
           <div
@@ -8446,6 +9085,18 @@
                 display:none;
                 grid-template-columns:repeat(3,1fr);
                 gap:5px;
+              "
+            ></div>
+
+            <div
+              id="${UI.CARD_POOL_DATA_GRID_ID}"
+              style="
+                display:none;
+                grid-template-columns:1fr 1fr;
+                gap:6px;
+                margin-top:6px;
+                padding-top:6px;
+                border-top:1px dashed #eee;
               "
             ></div>
 
@@ -9267,6 +9918,18 @@
 
     cachedLandingTimeOptions = [];
 
+    physicalDataQueryRunning =
+      false;
+
+    cardPoolQueryCache = {
+      orderCode: "",
+      cardCorpCode: "",
+      timestamp: 0,
+      data: null
+    };
+
+    cardCorpCodeMemory.clear();
+
     resetWebNoticeHistory();
 
     removeAutomationSwitch();
@@ -9391,6 +10054,6 @@
   routeCheck();
 
   console.log(
-    "[SOA流程自动化] v1.25 已加载"
+    "[SOA流程自动化] v1.29 已加载"
   );
 })();
