@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOA.2.5订单流程自动化
 // @namespace    https://tampermonkey.net/
-// @version      1.22
+// @version      1.23
 // @description  SOA订单流程自动化：内勤复核、合同补充、发起落单、落单审核、落单完成及数据提取；支持文件绑定、异常等待和流程状态判定。
 
 // @match        https://checkup-soa3.health-100.cn/*
@@ -18,22 +18,20 @@
  * SOA.2.5订单流程自动化
  *
  * 功能：
- * - 自动识别订单当前流程阶段并按页面真实状态推进。
- * - 内勤复核、落单审核分别维护独立审批备注。
- * - 合同补充自动填写、合同保存及按实际存在模块上传文件。
- * - 文件仅需绑定一次，后续复用已绑定文件。
- * - 落单完成后直接请求 processlogs 接口提取首次/修改后落单数据。
- * - 页面提供工具 UI 显示开关；工具面板支持拖动与 +/- 折叠。
+ * - 覆盖订单详情各业务页签，识别流程阶段并执行已支持的自动处理。
+ * - 支持审批备注、签单主体、合同/授权书共用文件配置。
+ * - 支持体检时间异常检测与报价确认阶段时间修正。
+ * - 提供按需落单数据、体检汇总数据及网页提示记录。
+ * - 面板支持显示开关、拖动、折叠、位置记忆和流程停止。
  *
  * 更新记录
  *
- * v1.22  -  2026-8-31
- * - 移除：彻底删除面板缩放比例功能、右下角缩放手柄、CSS zoom 及相关比例存储。
- * - 修复：面板恢复固定100%原始尺寸，拖动窗口完全使用浏览器原生坐标，避免缩放后鼠标与UI位置产生偏移。
- * - 保持：面板拖动、位置记忆、折叠/展开及全部业务功能不变。
+ * v1.23  -  2026-8-31
+ * - 清理：移除未使用函数、常量及已淘汰兼容分支，合并重复日期工具；不改变现有业务流程。
+ * - UI：重新精简“使用说明”，同步当前真实按钮、数据和安全规则。
  *
- * v1.21  -  2026-8-31
- * - UI：缩放算法改为几何跟随，并将新版默认比例恢复到100%。
+ * v1.22  -  2026-8-31
+ * - 稳定：移除缩放功能，面板固定原始尺寸；保留拖动、折叠和位置记忆。
  *
  * v1.0  -  2026-8-30
  * - 首个 Tampermonkey 正式版。
@@ -92,10 +90,7 @@
     INSPECTION_DAY_SELECTOR:
       "#inspectionPeopleDay",
 
-    EDIT_TIMEOUT: 6000,
-    OPTION_TIMEOUT: 5000,
     PICKER_TIMEOUT: 3500,
-    SAVE_TIMEOUT: 6000,
     UPLOAD_CONFIRM_TIMEOUT: 8000,
     POLL_INTERVAL: 100,
 
@@ -161,8 +156,6 @@
   const UI = {
     PANEL_ID:
       "__soa_contract_console_panel_v04",
-    FILE_NAME_ID:
-      "__soa_contract_console_filename_v04",
     STATUS_ID:
       "__soa_contract_console_status_v04",
     BIND_BUTTON_ID:
@@ -920,12 +913,6 @@
     });
   }
 
-  function isAutomationTokenActive(
-    token
-  ) {
-    return isTargetRoute();
-  }
-
   function getVisibleErrorFeedback() {
     const selectors = [
       ".ant-message-notice-content",
@@ -1325,70 +1312,6 @@
       ).padStart(2, "0");
 
     return `${year}-${month}-${day}`;
-  }
-
-  function addOneYear(date) {
-    const source =
-      new Date(date);
-
-    const targetYear =
-      source.getFullYear() + 1;
-
-    const month =
-      source.getMonth();
-
-    const day =
-      source.getDate();
-
-    const lastDay =
-      new Date(
-        targetYear,
-        month + 1,
-        0
-      ).getDate();
-
-    return new Date(
-      targetYear,
-      month,
-      Math.min(
-        day,
-        lastDay
-      )
-    );
-  }
-
-  function addCalendarYears(
-    date,
-    years
-  ) {
-    const source =
-      new Date(date);
-
-    const targetYear =
-      source.getFullYear() +
-      Number(years || 0);
-
-    const month =
-      source.getMonth();
-
-    const day =
-      source.getDate();
-
-    const lastDay =
-      new Date(
-        targetYear,
-        month + 1,
-        0
-      ).getDate();
-
-    return new Date(
-      targetYear,
-      month,
-      Math.min(
-        day,
-        lastDay
-      )
-    );
   }
 
   function parseYmdDate(
@@ -3062,8 +2985,9 @@
       new Date();
 
     const oneYearLater =
-      addOneYear(
-        today
+      addYearsClamped(
+        today,
+        1
       );
 
     const beginText =
@@ -3339,18 +3263,6 @@
     return null;
   }
 
-  function getUploaderInput(
-    kind
-  ) {
-    return (
-      findUploader(kind)
-        ?.querySelector(
-          'input[type="file"]'
-        ) ||
-      null
-    );
-  }
-
   function openBindingDb() {
     return new Promise(
       (resolve, reject) => {
@@ -3558,7 +3470,7 @@
 
     /*
      * showOpenFilePicker 必须直接由真实用户点击触发。
-     * 本函数在“绑定/更换共用文件”按钮事件中第一时间调用。
+     * 本函数在“文件绑定”按钮事件中第一时间调用。
      */
     const handles =
       await window
@@ -3584,7 +3496,7 @@
     updateBoundFileDisplay();
 
     log(
-      `✓ 已绑定共用文件：${handle.name}`
+      `✓ 已选择共用文件：${handle.name}`
     );
 
     return true;
@@ -3594,7 +3506,7 @@
   async function ensureBoundFilePermissionFromUserGesture() {
     if (!boundFileHandle) {
       throw new Error(
-        "尚未绑定共用文件，请先点击文件按钮完成绑定"
+        "尚未选择共用文件，请先点击文件按钮完成绑定"
       );
     }
 
@@ -3656,15 +3568,10 @@
     }
   }
 
-  async function getBoundFileForRun(
-    {
-      allowPermissionPrompt =
-        false
-    } = {}
-  ) {
+  async function getBoundFileForRun() {
     if (!boundFileHandle) {
       throw new Error(
-        "尚未绑定共用文件，请先点击“绑定/更换共用文件”"
+        "尚未选择共用文件，请先点击“待选择文件”"
       );
     }
 
@@ -3687,31 +3594,8 @@
       permission !==
       "granted"
     ) {
-      if (
-        allowPermissionPrompt &&
-        typeof boundFileHandle
-          .requestPermission ===
-          "function" &&
-        (
-          navigator.userActivation
-            ?.isActive ??
-          true
-        )
-      ) {
-        permission =
-          await boundFileHandle
-            .requestPermission({
-              mode: "read"
-            });
-      }
-    }
-
-    if (
-      permission !==
-      "granted"
-    ) {
       throw new Error(
-        "已绑定文件的读取权限需要重新授权。请点击“绑定/更换共用文件”后再开启自动流程。"
+        "文件读取权限已失效，请点击“文件已选择”重新授权或重新选择文件"
       );
     }
 
@@ -3729,7 +3613,7 @@
       return file;
     } catch (error) {
       throw new Error(
-        "已绑定文件可能被移动、删除或权限失效，请重新绑定文件"
+        "已选择文件可能被移动、删除或权限失效，请重新选择文件"
       );
     }
   }
@@ -6535,34 +6419,6 @@
     );
   }
 
-  function getRemarkStatusInfo() {
-    const review =
-      getReviewRemark();
-
-    const order =
-      getOrderRemark();
-
-    const missing = [];
-
-    if (!review) {
-      missing.push(
-        "内勤复核"
-      );
-    }
-
-    if (!order) {
-      missing.push(
-        "落单审核"
-      );
-    }
-
-    return {
-      ready:
-        missing.length === 0,
-      missing
-    };
-  }
-
   function updateRemarkStatus() {
     const button =
       document.getElementById(
@@ -7165,76 +7021,9 @@
     return nextStage;
   }
 
-  async function waitUntilFinalStage(
-    token = null
-  ) {
-    while (true) {
-      const stage =
-        getCurrentFlowStage();
-
-      if (
-        stage ===
-        "已落单"
-      ) {
-        return stage;
-      }
-
-      if (
-        stage ===
-        "落单审核"
-      ) {
-        await fillAndConfirmApproval(
-          "落单审核",
-          getOrderRemark(),
-          "确认落单",
-          token
-        );
-
-        continue;
-      }
-
-      if (
-        stage ===
-        "落单中"
-      ) {
-        updatePanelStatus(
-          "流程已进入“落单中”，正在等待页面实际变为“已落单”..."
-        );
-
-        await waitForStageChange(
-          "落单中",
-          token
-        );
-
-        continue;
-      }
-
-      if (stage) {
-        await waitForStageChange(
-          stage,
-          token
-        );
-        continue;
-      }
-
-      await waitForReactiveCondition(
-        () =>
-          getCurrentFlowStage() ||
-          null,
-        {
-          label:
-            "页面流程阶段",
-          token
-        }
-      );
-    }
-  }
-
   async function runFullFlow(
     {
-      token = null,
-      allowPermissionPrompt =
-        false
+      token = null
     } = {}
   ) {
     if (processRunning) {
@@ -7355,10 +7144,7 @@
           );
 
           await runContractProcess({
-            nested:
-              true,
-            token,
-            allowPermissionPrompt
+            token
           });
 
           throwIfFlowCancelled(
@@ -7471,105 +7257,77 @@
 
   async function runContractProcess(
     {
-      nested = false,
-      token = null,
-      allowPermissionPrompt =
-        false
+      token = null
     } = {}
   ) {
-    if (
-      !nested &&
-      processRunning
-    ) {
-      log(
-        "当前流程正在执行，请等待完成。"
-      );
-      return;
-    }
-
     if (!contractPageVisible()) {
       throw new Error(
         "当前没有显示合同页"
       );
     }
 
-    if (!nested) {
-      processRunning = true;
-    }
+    const sharedFile =
+      await getBoundFileForRun();
 
-    try {
-      const sharedFile =
-        await getBoundFileForRun({
-          allowPermissionPrompt
-        });
+    log(
+      `合同补充：使用已选择文件 ${sharedFile.name}`
+    );
 
-      log(
-        `合同补充：使用已绑定文件 ${sharedFile.name}`
-      );
+    await enterEditMode(
+      token
+    );
 
-      await enterEditMode(
+    await selectConfiguredContractCompany(
+      token
+    );
+
+    await setContractDates();
+
+    await fillInspectionPeopleDay();
+
+    await saveContractForm(
+      token
+    );
+
+    const contractUploadResult =
+      await uploadOne(
+        "contract",
+        sharedFile,
+        "已盖章合同",
         token
       );
 
-      await selectConfiguredContractCompany(
+    const authUploadResult =
+      await uploadOne(
+        "auth",
+        sharedFile,
+        "授权书",
         token
       );
 
-      await setContractDates();
+    const uploadResults = [
+      contractUploadResult,
+      authUploadResult
+    ];
 
-      await fillInspectionPeopleDay();
+    const handledUploads =
+      uploadResults.filter(
+        result =>
+          result &&
+          !result.skipped
+      ).length;
 
-      await saveContractForm(
-        token
-      );
+    const skippedUploads =
+      uploadResults.filter(
+        result =>
+          result &&
+          result.skipped
+      ).length;
 
-      const contractUploadResult =
-        await uploadOne(
-          "contract",
-          sharedFile,
-          "已盖章合同",
-          token
-        );
-
-      const authUploadResult =
-        await uploadOne(
-          "auth",
-          sharedFile,
-          "授权书",
-          token
-        );
-
-      const handledUploads =
-        [
-          contractUploadResult,
-          authUploadResult
-        ].filter(
-          result =>
-            result &&
-            !result.skipped
-        ).length;
-
-      const skippedUploads =
-        [
-          contractUploadResult,
-          authUploadResult
-        ].filter(
-          result =>
-            result &&
-            result.skipped
-        ).length;
-
-      updatePanelStatus(
-        `✓ 合同补充完成：已处理上传模块 ${handledUploads} 个，跳过不存在模块 ${skippedUploads} 个。`,
-        "success"
-      );
-    } finally {
-      if (!nested) {
-        processRunning =
-          false;
-      }
-
-    }
+    updatePanelStatus(
+      `✓ 合同补充完成：已处理上传模块 ${handledUploads} 个，跳过不存在模块 ${skippedUploads} 个。`,
+      "success"
+    );
   }
 
   function clamp(
@@ -8020,7 +7778,7 @@
           min-width:0;
           font-size:15px;
         ">
-          SOA订单流程自动化 v1.22
+          SOA订单流程自动化 v1.23
         </strong>
 
         <button
@@ -8085,34 +7843,29 @@
             使用说明
           </div>
 
-          <div style="margin-bottom:5px;">
-            <strong>1. 基础配置：</strong>
-            “默认备注/自定义备注”用于维护两阶段审批文字；“签单主体”默认选择第一个可用选项，也可按完整名称精确匹配；“待选择文件/文件已选择”用于绑定合同与授权书共用文件。
+          <div style="margin-bottom:4px;">
+            <strong>配置：</strong>
+            备注默认已填写，可改为自定义；签单主体默认选第一个可用项，也可按完整名称匹配；文件选择一次后可复用。
           </div>
 
-          <div style="margin-bottom:5px;">
-            <strong>2. 自动流程：</strong>
-            仅内勤复核及后续受支持阶段可启动。点击“立即处理订单”开始；运行中按钮变为“点击停止”。内勤复核之前或未知阶段会红色拦截，不会等待后自动执行。
+          <div style="margin-bottom:4px;">
+            <strong>流程：</strong>
+            仅内勤复核及后续支持阶段可处理；运行中可“点击停止”。更早或未知阶段会红色拦截，不会等待后自动执行。
           </div>
 
-          <div style="margin-bottom:5px;">
-            <strong>3. 体检时间：</strong>
-            从报价确认开始检测。开始日期晚于今天、结束日期早于今天时，只标红异常日期；日期正常时显示区间时长。报价确认阶段可用“修改时间”改为今天至3年后，但不会自动保存或回退流程。
+          <div style="margin-bottom:4px;">
+            <strong>日期：</strong>
+            报价确认起检测体检区间，仅标红异常日期；报价确认阶段可点“修改时间”改为今天至3年后，不自动保存或回退。
           </div>
 
-          <div style="margin-bottom:5px;">
-            <strong>4. 数据工具：</strong>
-            “落单数据”仅已落单后可用，并支持点击复制；“体检数据”只读取并展示总人数、已检/未检人数、到检总额、挂账金额、自费金额，不执行复制。
-          </div>
-
-          <div style="margin-bottom:5px;">
-            <strong>5. 提示与安全：</strong>
-            网页弹窗/通知记录按当前订单保存于本次页面会话，最多5条，可手动清空。运行等待提示只显示一次；文件权限已授权时不会重复弹窗，权限失效时才会重新请求。
+          <div style="margin-bottom:4px;">
+            <strong>数据：</strong>
+            落单数据按需读取并可复制；体检数据只读取展示6项汇总。
           </div>
 
           <div>
-            <strong>6. 窗口：</strong>
-            拖动标题栏移动窗口；点击右上角“−”折叠/展开。窗口位置和折叠状态会自动保存；面板固定使用100%原始尺寸，不再提供缩放功能。
+            <strong>提示/窗口：</strong>
+            网页提示最多5条、可清空；文件权限失效时才重新授权。拖动标题栏移动，右上角“−”折叠，位置与折叠状态自动保存。
           </div>
         </div>
 
@@ -9051,9 +8804,7 @@
               createFlowToken();
 
             runFullFlow({
-              token,
-              allowPermissionPrompt:
-                false
+              token
             }).catch(error => {
               warn(
                 error?.message ||
@@ -9535,6 +9286,6 @@
   routeCheck();
 
   console.log(
-    "[SOA流程自动化] v1.22 已加载"
+    "[SOA流程自动化] v1.23 已加载"
   );
 })();
