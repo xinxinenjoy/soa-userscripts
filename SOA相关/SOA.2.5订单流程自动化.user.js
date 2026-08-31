@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SOA.2.5订单流程自动化
 // @namespace    https://tampermonkey.net/
-// @version      1.14
+// @version      1.22
 // @description  SOA订单流程自动化：内勤复核、合同补充、发起落单、落单审核、落单完成及数据提取；支持文件绑定、异常等待和流程状态判定。
 
 // @match        https://checkup-soa3.health-100.cn/*
@@ -27,30 +27,51 @@
  *
  * 更新记录
  *
- * v1.14  -  2026-8-30
- * - UI：网页提示区域新增“清空”按钮，可手动清除本次提示记录。
- * - 优化：网页提示仅保留当前订单上下文；SPA 直接切换订单时自动清空上一订单提示，并过滤“流程进度”弹窗等低价值噪声。
- * - UI：体检区间时长字体加深；不足1个月显示天数、不足1年显示月数、1年以上仅显示整数年。
- * - 保持：提示记录仅存在当前脚本会话内，不做持久化；仍最多保留最近5条。
+ * v1.22  -  2026-8-31
+ * - 移除：彻底删除面板缩放比例功能、右下角缩放手柄、CSS zoom 及相关比例存储。
+ * - 修复：面板恢复固定100%原始尺寸，拖动窗口完全使用浏览器原生坐标，避免缩放后鼠标与UI位置产生偏移。
+ * - 保持：面板拖动、位置记忆、折叠/展开及全部业务功能不变。
  *
- * v1.13  -  2026-8-30
- * - UI：备注与文件改为两个并排状态按钮；正常体检日期增加区间时长显示。
+ * v1.21  -  2026-8-31
+ * - UI：缩放算法改为几何跟随，并将新版默认比例恢复到100%。
  *
  * v1.0  -  2026-8-30
- * - 首个 Tampermonkey 正式版：支持状态驱动审批、合同补充、落单处理、文件绑定及 processlogs 落单数据提取。
+ * - 首个 Tampermonkey 正式版。
  */
 
 (function () {
   "use strict";
 
-  const TARGET_HASH_PREFIX =
-    "#/order/info";
+  /*
+   * 订单详情是一个 SPA 工作区。
+   * 点击“基本信息 / 套餐与加项包 / 营销 / 合同 / 体检名单 / 开票”等页签时，
+   * Hash 会在 #/order/info、#/order/package、#/order/cost、
+   * #/order/contract 等子路由之间切换。
+   *
+   * 只要仍属于 #/order/... 且带有 orderCode，就视为同一个订单详情工作区，
+   * 不再因为切换页签而销毁工具。
+   */
+  const ORDER_ROUTE_PREFIX =
+    "#/order/";
 
   const isTargetRoute =
-    () =>
-      location.hash.startsWith(
-        TARGET_HASH_PREFIX
-      );
+    () => {
+      const hash =
+        String(
+          location.hash || ""
+        );
+
+      if (
+        !hash.startsWith(
+          ORDER_ROUTE_PREFIX
+        )
+      ) {
+        return false;
+      }
+
+      return /[?&]orderCode=SOA[A-Za-z0-9-]+/i
+        .test(hash);
+    };
 
   const CONFIG = {
     SWITCH_ORDER_DESC_SELECTOR:
@@ -101,7 +122,31 @@
       "#register_end_date",
 
     REGISTER_EDIT_BUTTON_SELECTOR:
-      "#root > div > div > div > div > div:nth-of-type(2) > div > div:nth-of-type(2) > button:nth-of-type(3)"
+      "#root > div > div > div > div > div:nth-of-type(2) > div > div:nth-of-type(2) > button:nth-of-type(3)",
+
+    PHYSICAL_TOTAL_PEOPLE_SELECTOR:
+      "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(2) > div > div > div > div > div > div > table > tbody > tr:nth-of-type(5) > td:nth-of-type(3) > div",
+    PHYSICAL_CHECKED_PEOPLE_SELECTOR:
+      "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(2) > div > div > div > div > div > div > table > tbody > tr:nth-of-type(5) > td:nth-of-type(6)",
+    PHYSICAL_UNCHECKED_PEOPLE_SELECTOR:
+      "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(2) > div > div > div > div > div > div > table > tbody > tr:nth-of-type(5) > td:nth-of-type(7)",
+    PHYSICAL_CHECKED_AMOUNT_SELECTOR:
+      "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(4) > div > div > div > div > div > div > table > tbody > tr:nth-of-type(5) > td:nth-of-type(3)",
+    PHYSICAL_ACCOUNT_AMOUNT_SELECTOR:
+      "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(4) > div > div > div > div > div > div > table > tbody > tr:nth-of-type(5) > td:nth-of-type(4)",
+    PHYSICAL_SELF_PAY_SELECTOR:
+      "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(4) > div > div > div > div > div > div > table > tbody > tr:nth-of-type(5) > td:nth-of-type(5)"
+  };
+
+  const DEFAULTS = {
+    REVIEW_REMARK:
+      "套餐复核系统要求，提交到合同补充阶段。",
+    ORDER_REMARK:
+      "已落单，请及时上传原版合同、授权书扫描件。",
+    SIGNING_COMPANY_MODE:
+      "first",
+    SIGNING_COMPANY_TEXT:
+      ""
   };
 
   const FILE_BINDING = {
@@ -149,6 +194,17 @@
     EXTRACT_PREVIEW_ID:
       "__soa_flow_extract_preview_v09",
 
+    DATA_PANEL_ID:
+      "__soa_flow_data_panel_v116",
+    DATA_PANEL_TITLE_ID:
+      "__soa_flow_data_panel_title_v116",
+    LANDING_DATA_BUTTON_ID:
+      "__soa_flow_landing_data_button_v116",
+    PHYSICAL_DATA_BUTTON_ID:
+      "__soa_flow_physical_data_button_v116",
+    PHYSICAL_DATA_GRID_ID:
+      "__soa_flow_physical_data_grid_v116",
+
     HELP_BUTTON_ID:
       "__soa_flow_help_button_v14",
     HELP_PANEL_ID:
@@ -158,6 +214,23 @@
       "__soa_flow_remark_button_v14",
     REMARK_PANEL_ID:
       "__soa_flow_remark_panel_v14",
+    REMARK_DEFAULT_BUTTON_ID:
+      "__soa_flow_remark_default_v118",
+
+    SIGNING_BUTTON_ID:
+      "__soa_flow_signing_button_v118",
+    SIGNING_PANEL_ID:
+      "__soa_flow_signing_panel_v118",
+    SIGNING_FIRST_ID:
+      "__soa_flow_signing_first_v118",
+    SIGNING_TEXT_MODE_ID:
+      "__soa_flow_signing_text_mode_v118",
+    SIGNING_TEXT_ID:
+      "__soa_flow_signing_text_v118",
+    SIGNING_MODE_KEY:
+      "__soa_flow_signing_mode_v118",
+    SIGNING_TEXT_KEY:
+      "__soa_flow_signing_text_key_v118",
 
     WEB_NOTICE_ID:
       "__soa_flow_web_notice_v14",
@@ -187,6 +260,7 @@
 
   let boundFileHandle = null;
   let processRunning = false;
+  let activeFlowToken = null;
 
   let panelVisible = false;
 
@@ -203,6 +277,9 @@
   let lastWebNoticeOrderCode = "";
 
   let lastDisplayedFlowStage = "";
+
+  let activeDataPanelMode = "";
+  let lastDataPanelOrderCode = "";
 
   let panelStatusHideTimer = null;
 
@@ -753,6 +830,71 @@
     }
   }
 
+  class FlowCancelledError extends Error {
+    constructor(
+      message =
+        "自动流程已由用户停止"
+    ) {
+      super(message);
+      this.name =
+        "FlowCancelledError";
+    }
+  }
+
+  function createFlowToken() {
+    return {
+      cancelled: false
+    };
+  }
+
+  function throwIfFlowCancelled(
+    token
+  ) {
+    if (
+      token &&
+      token.cancelled
+    ) {
+      throw new FlowCancelledError();
+    }
+  }
+
+  function requestFlowStop() {
+    if (
+      !processRunning ||
+      !activeFlowToken
+    ) {
+      return false;
+    }
+
+    activeFlowToken.cancelled =
+      true;
+
+    const button =
+      document.getElementById(
+        UI.FLOW_RUN_BUTTON_ID
+      );
+
+    if (button) {
+      button.disabled =
+        true;
+
+      button.textContent =
+        "停止中...";
+
+      button.style.background =
+        "#ff7875";
+
+      button.style.color =
+        "#fff";
+    }
+
+    updatePanelStatus(
+      "正在停止自动流程，将在当前安全等待节点终止后续操作..."
+    );
+
+    return true;
+  }
+
   function nextPaint(
     count = 2
   ) {
@@ -944,6 +1086,27 @@
         let pollTimer = null;
         let noticeTimer = null;
 
+        const waitingMessage =
+          `仍在等待：${label}。页面较慢时会继续等待，不会重复提交。`;
+
+        const clearOwnWaitingStatus =
+          () => {
+            const status =
+              document.getElementById(
+                UI.STATUS_ID
+              );
+
+            if (
+              status &&
+              status.style.display !==
+                "none" &&
+              status.textContent ===
+                waitingMessage
+            ) {
+              hidePanelStatus();
+            }
+          };
+
         const cleanup =
           () => {
             if (observer) {
@@ -959,7 +1122,7 @@
             }
 
             if (noticeTimer) {
-              clearInterval(
+              clearTimeout(
                 noticeTimer
               );
               noticeTimer = null;
@@ -974,6 +1137,7 @@
 
             finished = true;
             cleanup();
+            clearOwnWaitingStatus();
             resolve(value);
           };
 
@@ -985,11 +1149,22 @@
 
             finished = true;
             cleanup();
+            clearOwnWaitingStatus();
             reject(error);
           };
 
         const check =
           () => {
+            if (
+              token &&
+              token.cancelled
+            ) {
+              finishReject(
+                new FlowCancelledError()
+              );
+              return;
+            }
+
             if (blockerCheck) {
               const blocker =
                 blockerCheck();
@@ -1044,13 +1219,26 @@
           );
 
         /*
-         * 这里只提示“仍在等待”，不会因为时间到了就自动点下一步。
+         * 等待提示只出现一次并保持稳定，不再周期性“显示 -> 自动隐藏 -> 再显示”。
+         * 条件满足或等待失败后，由本等待实例主动清除自己的提示。
          */
         noticeTimer =
-          setInterval(
+          setTimeout(
             () => {
+              if (
+                token &&
+                token.cancelled
+              ) {
+                check();
+                return;
+              }
+
               updatePanelStatus(
-                `仍在等待：${label}。页面较慢时会继续等待，不会重复提交。`
+                waitingMessage,
+                "normal",
+                {
+                  persistent: true
+                }
               );
             },
             CONFIG.STALL_NOTICE_INTERVAL
@@ -1063,7 +1251,8 @@
 
   async function waitForStableControlledValue(
     element,
-    expected
+    expected,
+    token = null
   ) {
     const expectedText =
       String(expected);
@@ -1073,6 +1262,10 @@
       attempt < 4;
       attempt++
     ) {
+      throwIfFlowCancelled(
+        token
+      );
+
       if (
         String(
           element.value
@@ -1089,12 +1282,20 @@
        */
       await nextPaint(2);
 
+      throwIfFlowCancelled(
+        token
+      );
+
       if (
         String(
           element.value
         ) === expectedText
       ) {
         await nextPaint(2);
+
+        throwIfFlowCancelled(
+          token
+        );
 
         if (
           String(
@@ -2357,9 +2558,11 @@
     );
   }
 
-  function findFirstVisibleOption(
+  function getVisibleContractCompanyOptions(
     input
   ) {
+    const options = [];
+
     const controlsId =
       input?.getAttribute(
         "aria-controls"
@@ -2372,45 +2575,51 @@
         );
 
       if (list) {
-        const option =
-          Array.from(
+        options.push(
+          ...Array.from(
             list.querySelectorAll(
               ".ant-select-item-option:not(.ant-select-item-option-disabled)"
             )
-          ).find(isVisible);
+          ).filter(isVisible)
+        );
+      }
+    }
 
-        if (option) {
-          return option;
+    if (!options.length) {
+      const dropdowns =
+        Array.from(
+          document.querySelectorAll(
+            ".ant-select-dropdown"
+          )
+        )
+          .filter(isVisible)
+          .reverse();
+
+      for (
+        const dropdown
+        of dropdowns
+      ) {
+        const found =
+          Array.from(
+            dropdown.querySelectorAll(
+              ".ant-select-item-option:not(.ant-select-item-option-disabled)"
+            )
+          ).filter(isVisible);
+
+        if (found.length) {
+          options.push(
+            ...found
+          );
+
+          break;
         }
       }
     }
 
-    const dropdowns =
-      Array.from(
-        document.querySelectorAll(
-          ".ant-select-dropdown"
-        )
-      )
-        .filter(isVisible)
-        .reverse();
-
-    for (const dropdown of dropdowns) {
-      const option =
-        Array.from(
-          dropdown.querySelectorAll(
-            ".ant-select-item-option:not(.ant-select-item-option-disabled)"
-          )
-        ).find(isVisible);
-
-      if (option) {
-        return option;
-      }
-    }
-
-    return null;
+    return options;
   }
 
-  async function selectFirstContractCompany(
+  async function selectConfiguredContractCompany(
     token = null
   ) {
     const input =
@@ -2442,21 +2651,40 @@
       );
     }
 
+    const config =
+      getSigningCompanyConfig();
+
+    if (
+      config.mode === "text" &&
+      !config.text
+    ) {
+      throw new Error(
+        "签单主体已设置为“按名称匹配”，但尚未填写主体名称"
+      );
+    }
+
     log(
-      "2/5 选择己方签单主体第一个选项..."
+      config.mode === "first"
+        ? "2/5 选择己方签单主体：第一个可用选项..."
+        : `2/5 选择己方签单主体：${config.text}...`
     );
 
     fireMouseSequence(
       selector
     );
 
-    const option =
+    const options =
       await waitForReactiveCondition(
-        () =>
-          findFirstVisibleOption(
-            input
-          ) ||
-          null,
+        () => {
+          const found =
+            getVisibleContractCompanyOptions(
+              input
+            );
+
+          return found.length
+            ? found
+            : null;
+        },
         {
           label:
             "己方签单主体下拉选项",
@@ -2466,6 +2694,53 @@
               getVisibleErrorFeedback()
         }
       );
+
+    throwIfFlowCancelled(
+      token
+    );
+
+    let option = null;
+
+    if (
+      config.mode === "first"
+    ) {
+      option =
+        options[0] ||
+        null;
+    } else {
+      option =
+        options.find(item => {
+          return (
+            cleanText(
+              item.textContent
+            ) ===
+            config.text
+          );
+        }) ||
+        null;
+
+      if (!option) {
+        const available =
+          options
+            .map(item =>
+              cleanText(
+                item.textContent
+              )
+            )
+            .filter(Boolean)
+            .join("、");
+
+        throw new Error(
+          `未找到配置的己方签单主体“${config.text}”。当前可选：${available || "未读取到选项"}`
+        );
+      }
+    }
+
+    if (!option) {
+      throw new Error(
+        "未找到可选择的己方签单主体"
+      );
+    }
 
     const expectedText =
       cleanText(
@@ -2488,7 +2763,17 @@
 
     if (!selected) {
       throw new Error(
-        "已点击乙方第一项，但页面未确认选中结果"
+        "已点击己方签单主体，但页面未确认选中结果"
+      );
+    }
+
+    if (
+      config.mode === "text" &&
+      selected !==
+        config.text
+    ) {
+      throw new Error(
+        `己方签单主体选中结果异常：预期“${config.text}”，实际“${selected}”`
       );
     }
 
@@ -3214,20 +3499,12 @@
   }
 
   function updateBoundFileDisplay() {
-    const element =
-      document.getElementById(
-        UI.FILE_NAME_ID
-      );
-
     const button =
       document.getElementById(
         UI.BIND_BUTTON_ID
       );
 
-    if (
-      !element ||
-      !button
-    ) {
+    if (!button) {
       return;
     }
 
@@ -3236,11 +3513,11 @@
         boundFileHandle.name ||
         "已绑定文件";
 
-      element.textContent =
-        `文件已绑定 · ${name}`;
+      button.textContent =
+        "文件已选择";
 
       button.title =
-        `点击更换文件：${name}`;
+        `当前文件：${name}。点击重新选择`;
 
       button.style.color =
         "#389e0d";
@@ -3251,11 +3528,11 @@
       button.style.background =
         "#f6ffed";
     } else {
-      element.textContent =
-        "点击绑定文件";
+      button.textContent =
+        "待选择文件";
 
       button.title =
-        "尚未绑定共用文件，点击选择文件";
+        "尚未选择共用合同/授权书文件，点击选择";
 
       button.style.color =
         "#cf1322";
@@ -3311,6 +3588,72 @@
     );
 
     return true;
+  }
+
+
+  async function ensureBoundFilePermissionFromUserGesture() {
+    if (!boundFileHandle) {
+      throw new Error(
+        "尚未绑定共用文件，请先点击文件按钮完成绑定"
+      );
+    }
+
+    let permission =
+      "granted";
+
+    /*
+     * 该函数必须直接由真实用户点击触发。
+     * requestPermission 在调用瞬间即可利用当前 user activation；
+     * 已经授权时会直接返回 granted，不会重复弹窗。
+     */
+    if (
+      typeof boundFileHandle
+        .requestPermission ===
+      "function"
+    ) {
+      permission =
+        await boundFileHandle
+          .requestPermission({
+            mode: "read"
+          });
+    } else if (
+      typeof boundFileHandle
+        .queryPermission ===
+      "function"
+    ) {
+      permission =
+        await boundFileHandle
+          .queryPermission({
+            mode: "read"
+          });
+    }
+
+    if (
+      permission !==
+      "granted"
+    ) {
+      throw new Error(
+        "已绑定文件尚未获得读取权限，请重新授权或重新绑定文件"
+      );
+    }
+
+    try {
+      const file =
+        await boundFileHandle
+          .getFile();
+
+      if (!file) {
+        throw new Error(
+          "读取文件失败"
+        );
+      }
+
+      return file;
+    } catch (error) {
+      throw new Error(
+        "已绑定文件可能被移动、删除或权限失效，请重新绑定文件"
+      );
+    }
   }
 
   async function getBoundFileForRun(
@@ -3438,7 +3781,8 @@
 
   async function waitUploadVisible(
     kind,
-    file
+    file,
+    token = null
   ) {
     const uploader =
       findUploader(kind);
@@ -3452,54 +3796,59 @@
         file.name
       );
 
-    const confirmed =
-      await waitFor(
-        () => {
-          const text =
-            cleanText(
-              uploader.textContent
-            );
+    const startedAt =
+      Date.now();
 
-          if (
-            fileName &&
-            text.includes(
-              fileName
-            )
-          ) {
-            return true;
-          }
-
-          const list =
-            uploader.querySelector(
-              ".contract-list"
-            );
-
-          if (
-            list &&
-            !compactText(
-              list.textContent
-            ).includes(
-              "暂无数据"
-            )
-          ) {
-            return true;
-          }
-
-          return false;
-        },
-        CONFIG.UPLOAD_CONFIRM_TIMEOUT,
-        200
+    while (
+      Date.now() -
+        startedAt <
+      CONFIG.UPLOAD_CONFIRM_TIMEOUT
+    ) {
+      throwIfFlowCancelled(
+        token
       );
 
-    return Boolean(
-      confirmed
-    );
+      const text =
+        cleanText(
+          uploader.textContent
+        );
+
+      if (
+        fileName &&
+        text.includes(
+          fileName
+        )
+      ) {
+        return true;
+      }
+
+      const list =
+        uploader.querySelector(
+          ".contract-list"
+        );
+
+      if (
+        list &&
+        !compactText(
+          list.textContent
+        ).includes(
+          "暂无数据"
+        )
+      ) {
+        return true;
+      }
+
+      await sleep(200);
+    }
+
+    return false;
   }
 
   async function uploadOne(
     kind,
     file,
-    label
+    label,
+    token = null
   ) {
     if (!file) {
       warn(
@@ -3550,7 +3899,8 @@
     const confirmed =
       await waitUploadVisible(
         kind,
-        file
+        file,
+        token
       );
 
     if (confirmed) {
@@ -4674,7 +5024,6 @@
         : getLandingTimeOptions();
 
     if (!options.length) {
-      updateFlowStageDisplay();
       return options;
     }
 
@@ -4735,9 +5084,401 @@
       );
     });
 
-    updateFlowStageDisplay();
-
     return options;
+  }
+
+
+  function getVisibleTables() {
+    return Array.from(
+      document.querySelectorAll(
+        "table"
+      )
+    ).filter(isVisible);
+  }
+
+  function getTableHeaderTexts(
+    table
+  ) {
+    if (!table) {
+      return [];
+    }
+
+    const headerRow =
+      Array.from(
+        table.querySelectorAll(
+          "thead tr"
+        )
+      ).reverse()[0];
+
+    if (!headerRow) {
+      return [];
+    }
+
+    return Array.from(
+      headerRow.querySelectorAll(
+        "th"
+      )
+    ).map(cell =>
+      compactText(
+        cell.textContent
+      )
+    );
+  }
+
+  function findTableByHeaders(
+    requiredHeaders
+  ) {
+    return (
+      getVisibleTables()
+        .find(table => {
+          const headers =
+            getTableHeaderTexts(
+              table
+            );
+
+          return requiredHeaders
+            .every(required =>
+              headers.includes(
+                compactText(required)
+              )
+            );
+        }) ||
+      null
+    );
+  }
+
+  function findSummaryRow(
+    table
+  ) {
+    if (!table) {
+      return null;
+    }
+
+    const rows =
+      Array.from(
+        table.querySelectorAll(
+          "tbody tr"
+        )
+      ).filter(isVisible);
+
+    return (
+      rows.find(row => {
+        return Array.from(
+          row.querySelectorAll(
+            "td"
+          )
+        ).some(cell =>
+          compactText(
+            cell.textContent
+          ) === "合计"
+        );
+      }) ||
+      rows[
+        rows.length - 1
+      ] ||
+      null
+    );
+  }
+
+  function getSummaryCellByHeader(
+    table,
+    row,
+    headerCandidates
+  ) {
+    if (
+      !table ||
+      !row
+    ) {
+      return "";
+    }
+
+    const headers =
+      getTableHeaderTexts(
+        table
+      );
+
+    const normalizedCandidates =
+      headerCandidates.map(
+        compactText
+      );
+
+    const index =
+      headers.findIndex(header =>
+        normalizedCandidates
+          .includes(header)
+      );
+
+    if (index < 0) {
+      return "";
+    }
+
+    const cells =
+      Array.from(
+        row.querySelectorAll(
+          "td"
+        )
+      );
+
+    return cleanCellText(
+      cells[index]
+        ?.innerText ||
+      cells[index]
+        ?.textContent ||
+      ""
+    );
+  }
+
+  function queryPhysicalFallback(
+    selector
+  ) {
+    return cleanCellText(
+      document.querySelector(
+        selector
+      )?.innerText ||
+      document.querySelector(
+        selector
+      )?.textContent ||
+      ""
+    );
+  }
+
+  function extractPhysicalExamSummary() {
+    const peopleTable =
+      findTableByHeaders([
+        "人数",
+        "已检人数",
+        "未检人数"
+      ]);
+
+    const amountTable =
+      findTableByHeaders([
+        "已检总额",
+        "挂账金额",
+        "自费支付"
+      ]) ||
+      findTableByHeaders([
+        "到检总额",
+        "挂账金额",
+        "自费金额"
+      ]);
+
+    const peopleRow =
+      findSummaryRow(
+        peopleTable
+      );
+
+    const amountRow =
+      findSummaryRow(
+        amountTable
+      );
+
+    const result = {
+      totalPeople:
+        getSummaryCellByHeader(
+          peopleTable,
+          peopleRow,
+          ["人数"]
+        ) ||
+        queryPhysicalFallback(
+          CONFIG.PHYSICAL_TOTAL_PEOPLE_SELECTOR
+        ),
+
+      checkedPeople:
+        getSummaryCellByHeader(
+          peopleTable,
+          peopleRow,
+          ["已检人数"]
+        ) ||
+        queryPhysicalFallback(
+          CONFIG.PHYSICAL_CHECKED_PEOPLE_SELECTOR
+        ),
+
+      uncheckedPeople:
+        getSummaryCellByHeader(
+          peopleTable,
+          peopleRow,
+          ["未检人数"]
+        ) ||
+        queryPhysicalFallback(
+          CONFIG.PHYSICAL_UNCHECKED_PEOPLE_SELECTOR
+        ),
+
+      checkedAmount:
+        getSummaryCellByHeader(
+          amountTable,
+          amountRow,
+          [
+            "已检总额",
+            "到检总额"
+          ]
+        ) ||
+        queryPhysicalFallback(
+          CONFIG.PHYSICAL_CHECKED_AMOUNT_SELECTOR
+        ),
+
+      accountAmount:
+        getSummaryCellByHeader(
+          amountTable,
+          amountRow,
+          ["挂账金额"]
+        ) ||
+        queryPhysicalFallback(
+          CONFIG.PHYSICAL_ACCOUNT_AMOUNT_SELECTOR
+        ),
+
+      selfPayAmount:
+        getSummaryCellByHeader(
+          amountTable,
+          amountRow,
+          [
+            "自费支付",
+            "自费金额"
+          ]
+        ) ||
+        queryPhysicalFallback(
+          CONFIG.PHYSICAL_SELF_PAY_SELECTOR
+        )
+    };
+
+    const missing = [];
+
+    [
+      ["总人数", "totalPeople"],
+      ["已检人数", "checkedPeople"],
+      ["未检人数", "uncheckedPeople"],
+      ["到检总额", "checkedAmount"],
+      ["挂账金额", "accountAmount"],
+      ["自费金额", "selfPayAmount"]
+    ].forEach(
+      ([label, key]) => {
+        if (!result[key]) {
+          missing.push(label);
+        }
+      }
+    );
+
+    if (missing.length) {
+      throw new Error(
+        "体检名单数据读取不完整：" +
+        missing.join("、")
+      );
+    }
+
+    return result;
+  }
+
+  function tryExtractPhysicalExamSummary() {
+    try {
+      return extractPhysicalExamSummary();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function ensurePhysicalExamListVisible(
+    token = null
+  ) {
+    const existing =
+      tryExtractPhysicalExamSummary();
+
+    if (existing) {
+      return existing;
+    }
+
+    const tab =
+      await waitForReactiveCondition(
+        () =>
+          findTabByText(
+            "体检名单"
+          ) ||
+          null,
+        {
+          label:
+            "体检名单页签",
+          token,
+          blockerCheck:
+            () =>
+              getVisibleErrorFeedback()
+        }
+      );
+
+    updatePanelStatus(
+      "正在切换到体检名单并读取汇总数据..."
+    );
+
+    tab.click();
+
+    return await waitForReactiveCondition(
+      () =>
+        tryExtractPhysicalExamSummary() ||
+        null,
+      {
+        label:
+          "体检名单汇总数据",
+        token,
+        blockerCheck:
+          () =>
+            getVisibleErrorFeedback()
+      }
+    );
+  }
+
+  function renderPhysicalExamSummary(
+    data
+  ) {
+    const grid =
+      document.getElementById(
+        UI.PHYSICAL_DATA_GRID_ID
+      );
+
+    if (!grid) {
+      return;
+    }
+
+    const items = [
+      ["总人数", data.totalPeople],
+      ["已检人数", data.checkedPeople],
+      ["未检人数", data.uncheckedPeople],
+      ["到检总额", data.checkedAmount],
+      ["挂账金额", data.accountAmount],
+      ["自费金额", data.selfPayAmount]
+    ];
+
+    grid.innerHTML =
+      items
+        .map(
+          ([label, value]) => `
+            <div style="
+              min-width:0;
+              padding:6px 4px;
+              border:1px solid #f0f0f0;
+              border-radius:5px;
+              background:#fafafa;
+              text-align:center;
+              user-select:text;
+            ">
+              <div style="
+                margin-bottom:2px;
+                color:#999;
+                font-size:10px;
+                line-height:1.2;
+              ">${label}</div>
+              <div style="
+                overflow:hidden;
+                text-overflow:ellipsis;
+                white-space:nowrap;
+                color:#262626;
+                font-size:13px;
+                font-weight:700;
+                line-height:1.3;
+              " title="${value}">${value}</div>
+            </div>
+          `
+        )
+        .join("");
+
+    grid.style.display =
+      "grid";
   }
 
   function getCurrentFlowStage() {
@@ -4750,6 +5491,199 @@
     return cleanText(
       active?.textContent
     );
+  }
+
+
+  function getFlowStepTitles() {
+    return Array.from(
+      document.querySelectorAll(
+        ".ant-steps-item-title"
+      )
+    )
+      .map(element =>
+        cleanText(
+          element.textContent
+        )
+      )
+      .filter(Boolean);
+  }
+
+  function isStageBeforeInternalReview(
+    stage
+  ) {
+    if (!stage) {
+      return false;
+    }
+
+    const titles =
+      getFlowStepTitles();
+
+    const currentIndex =
+      titles.indexOf(stage);
+
+    const reviewIndex =
+      titles.indexOf(
+        "内勤复核"
+      );
+
+    if (
+      currentIndex >= 0 &&
+      reviewIndex >= 0
+    ) {
+      return (
+        currentIndex <
+        reviewIndex
+      );
+    }
+
+    /*
+     * DOM 顺序无法判断时使用已知早期阶段兜底。
+     * “制单”用于兼容部分订单页面对报价单设计阶段的不同命名。
+     */
+    return [
+      "制单",
+      "报价单设计",
+      "授权审批",
+      "报价确认"
+    ].includes(stage);
+  }
+
+  function isSupportedAutoProcessStage(
+    stage
+  ) {
+    return [
+      "内勤复核",
+      "合同补充",
+      "落单审核",
+      "落单中",
+      "已落单"
+    ].includes(stage);
+  }
+
+  function getAutomationStageIssue(
+    stage
+  ) {
+    if (!stage) {
+      return "阶段异常：暂未识别当前流程阶段";
+    }
+
+    if (
+      isStageBeforeInternalReview(
+        stage
+      )
+    ) {
+      return `阶段异常：当前“${stage}”尚未进入内勤复核`;
+    }
+
+    if (
+      !isSupportedAutoProcessStage(
+        stage
+      )
+    ) {
+      return `阶段异常：当前“${stage}”暂未配置自动处理动作`;
+    }
+
+    return "";
+  }
+
+  function updateFlowRunButtonState(
+    stage =
+      getCurrentFlowStage()
+  ) {
+    const button =
+      document.getElementById(
+        UI.FLOW_RUN_BUTTON_ID
+      );
+
+    if (!button) {
+      return;
+    }
+
+    if (processRunning) {
+      if (
+        activeFlowToken &&
+        activeFlowToken.cancelled
+      ) {
+        button.disabled =
+          true;
+
+        button.textContent =
+          "停止中...";
+
+        button.style.background =
+          "#ff7875";
+
+        button.style.color =
+          "#fff";
+
+        button.style.cursor =
+          "wait";
+
+        return;
+      }
+
+      button.disabled =
+        false;
+
+      button.textContent =
+        "点击停止";
+
+      button.style.background =
+        "#ff4d4f";
+
+      button.style.color =
+        "#fff";
+
+      button.style.cursor =
+        "pointer";
+
+      return;
+    }
+
+    const issue =
+      getAutomationStageIssue(
+        stage
+      );
+
+    if (issue) {
+      button.disabled =
+        true;
+
+      button.textContent =
+        "阶段异常：暂不可处理";
+
+      button.style.background =
+        "#ff4d4f";
+
+      button.style.color =
+        "#fff";
+
+      button.style.cursor =
+        "not-allowed";
+
+      button.title =
+        issue;
+
+      return;
+    }
+
+    button.disabled =
+      false;
+
+    button.textContent =
+      "立即处理订单";
+
+    button.style.background =
+      "#1677ff";
+
+    button.style.color =
+      "#fff";
+
+    button.style.cursor =
+      "pointer";
+
+    button.title =
+      "点击开始处理当前订单";
   }
 
   function getFlowStagePresentation(
@@ -4817,7 +5751,7 @@
         size: "16px",
         weight: "700",
         hint:
-          "点击下方按钮提取并复制落单数据。"
+          "可点击下方“落单数据”按需读取并复制订单数据。"
       }
     };
 
@@ -4872,6 +5806,11 @@
         stage
       );
 
+    const stageIssue =
+      getAutomationStageIssue(
+        stage
+      );
+
     labelElement.textContent =
       "当前阶段：";
 
@@ -4879,16 +5818,33 @@
       stage || "识别中";
 
     valueElement.style.color =
-      presentation.color;
+      stageIssue
+        ? "#cf1322"
+        : presentation.color;
 
     valueElement.style.fontSize =
-      presentation.size;
+      stageIssue
+        ? "14px"
+        : presentation.size;
 
     valueElement.style.fontWeight =
-      presentation.weight;
+      stageIssue
+        ? "700"
+        : presentation.weight;
 
     hintElement.textContent =
+      stageIssue ||
       presentation.hint;
+
+    hintElement.style.color =
+      stageIssue
+        ? "#cf1322"
+        : "#999";
+
+    hintElement.style.fontWeight =
+      stageIssue
+        ? "600"
+        : "400";
 
     if (
       stage !== "已落单"
@@ -4916,21 +5872,22 @@
     lastDisplayedFlowStage =
       stage;
 
-    if (
-      refreshOnLanding &&
-      changed &&
-      stage === "已落单"
-    ) {
-      refreshLandingTimeOptions()
-        .catch(error => {
-          console.warn(
-            "[SOA流程自动化] 进入已落单后刷新落单数据失败：",
-            error
-          );
-        });
+    if (changed) {
+      closeDataPanel();
     }
 
+    updateDataActionButtons(
+      stage
+    );
+
+    updateFlowRunButtonState(
+      stage
+    );
+
     /*
+     * 落单数据改为按需读取：
+     * 只有用户点击“落单数据”后才请求 processlogs。
+     *
      * 日期检测只在“实际阶段发生变化”时触发；
      * 另外还会在页面初始化、打开面板和执行订单时主动刷新。
      */
@@ -4941,6 +5898,588 @@
     }
 
     return stage;
+  }
+
+
+  function setDataButtonActive(
+    mode
+  ) {
+    const landing =
+      document.getElementById(
+        UI.LANDING_DATA_BUTTON_ID
+      );
+
+    const physical =
+      document.getElementById(
+        UI.PHYSICAL_DATA_BUTTON_ID
+      );
+
+    [
+      [landing, "landing"],
+      [physical, "physical"]
+    ].forEach(
+      ([button, buttonMode]) => {
+        if (!button) {
+          return;
+        }
+
+        const active =
+          mode === buttonMode;
+
+        button.style.background =
+          active
+            ? "#e6f4ff"
+            : "#fff";
+
+        button.style.borderColor =
+          active
+            ? "#1677ff"
+            : "#d9d9d9";
+
+        button.style.color =
+          active
+            ? "#1677ff"
+            : "#555";
+      }
+    );
+  }
+
+  function resetDataPanelContent() {
+    const landingOptions =
+      document.getElementById(
+        UI.EXTRACT_OPTIONS_ID
+      );
+
+    const physicalGrid =
+      document.getElementById(
+        UI.PHYSICAL_DATA_GRID_ID
+      );
+
+    const preview =
+      document.getElementById(
+        UI.EXTRACT_PREVIEW_ID
+      );
+
+    if (landingOptions) {
+      landingOptions.innerHTML =
+        "";
+
+      landingOptions.style.display =
+        "none";
+    }
+
+    if (physicalGrid) {
+      physicalGrid.innerHTML =
+        "";
+
+      physicalGrid.style.display =
+        "none";
+    }
+
+    if (preview) {
+      preview.style.display =
+        "none";
+
+      preview.textContent =
+        "";
+    }
+  }
+
+  function closeDataPanel() {
+    const panel =
+      document.getElementById(
+        UI.DATA_PANEL_ID
+      );
+
+    if (panel) {
+      panel.style.display =
+        "none";
+    }
+
+    activeDataPanelMode =
+      "";
+
+    setDataButtonActive(
+      ""
+    );
+
+    resetDataPanelContent();
+  }
+
+  function openDataPanelShell(
+    mode,
+    title
+  ) {
+    const panel =
+      document.getElementById(
+        UI.DATA_PANEL_ID
+      );
+
+    const titleElement =
+      document.getElementById(
+        UI.DATA_PANEL_TITLE_ID
+      );
+
+    if (
+      !panel ||
+      !titleElement
+    ) {
+      return false;
+    }
+
+    resetDataPanelContent();
+
+    activeDataPanelMode =
+      mode;
+
+    titleElement.textContent =
+      title;
+
+    panel.style.display =
+      "block";
+
+    setDataButtonActive(
+      mode
+    );
+
+    return true;
+  }
+
+  function syncDataOrderContext() {
+    const orderCode =
+      getCurrentOrderCode();
+
+    if (!orderCode) {
+      return;
+    }
+
+    if (
+      lastDataPanelOrderCode &&
+      lastDataPanelOrderCode !==
+        orderCode
+    ) {
+      cachedLandingTimeOptions = [];
+      closeDataPanel();
+    }
+
+    lastDataPanelOrderCode =
+      orderCode;
+  }
+
+  async function toggleLandingDataPanel() {
+    syncDataOrderContext();
+
+    if (
+      activeDataPanelMode ===
+      "landing"
+    ) {
+      closeDataPanel();
+      return;
+    }
+
+    if (
+      getCurrentFlowStage() !==
+      "已落单"
+    ) {
+      updatePanelStatus(
+        "当前订单尚未进入“已落单”，暂无落单数据。",
+        "error"
+      );
+
+      return;
+    }
+
+    if (
+      !openDataPanelShell(
+        "landing",
+        "落单数据"
+      )
+    ) {
+      return;
+    }
+
+    const title =
+      document.getElementById(
+        UI.DATA_PANEL_TITLE_ID
+      );
+
+    if (title) {
+      title.textContent =
+        "落单数据 · 读取中...";
+    }
+
+    try {
+      const options =
+        await refreshLandingTimeOptions();
+
+      if (title) {
+        title.textContent =
+          options.length
+            ? "落单数据 · 点击复制"
+            : "落单数据 · 未识别到记录";
+      }
+    } catch (error) {
+      if (title) {
+        title.textContent =
+          "落单数据 · 读取失败";
+      }
+
+      throw error;
+    }
+  }
+
+  async function togglePhysicalDataPanel() {
+    syncDataOrderContext();
+
+    if (
+      activeDataPanelMode ===
+      "physical"
+    ) {
+      closeDataPanel();
+      return;
+    }
+
+    if (
+      !openDataPanelShell(
+        "physical",
+        "体检数据 · 读取中..."
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const data =
+        await ensurePhysicalExamListVisible();
+
+      renderPhysicalExamSummary(
+        data
+      );
+
+      const title =
+        document.getElementById(
+          UI.DATA_PANEL_TITLE_ID
+        );
+
+      if (title) {
+        title.textContent =
+          "体检数据 · 汇总";
+      }
+
+      updatePanelStatus(
+        "✓ 已读取体检名单汇总数据。",
+        "success"
+      );
+    } catch (error) {
+      const title =
+        document.getElementById(
+          UI.DATA_PANEL_TITLE_ID
+        );
+
+      if (title) {
+        title.textContent =
+          "体检数据 · 读取失败";
+      }
+
+      throw error;
+    }
+  }
+
+  function updateDataActionButtons(
+    stage =
+      getCurrentFlowStage()
+  ) {
+    const landing =
+      document.getElementById(
+        UI.LANDING_DATA_BUTTON_ID
+      );
+
+    if (landing) {
+      const enabled =
+        stage ===
+        "已落单";
+
+      landing.disabled =
+        !enabled;
+
+      landing.style.opacity =
+        enabled
+          ? "1"
+          : "0.45";
+
+      landing.style.cursor =
+        enabled
+          ? "pointer"
+          : "not-allowed";
+
+      landing.title =
+        enabled
+          ? "点击读取当前订单落单数据"
+          : "订单进入已落单后可使用";
+    }
+  }
+
+
+  function ensureDefaultSettings() {
+    const review =
+      cleanText(
+        getStoredText(
+          UI.REVIEW_REMARK_KEY
+        )
+      );
+
+    const order =
+      cleanText(
+        getStoredText(
+          UI.ORDER_REMARK_KEY
+        )
+      );
+
+    if (!review) {
+      saveStoredText(
+        UI.REVIEW_REMARK_KEY,
+        DEFAULTS.REVIEW_REMARK
+      );
+    }
+
+    if (!order) {
+      saveStoredText(
+        UI.ORDER_REMARK_KEY,
+        DEFAULTS.ORDER_REMARK
+      );
+    }
+
+    const mode =
+      getStoredText(
+        UI.SIGNING_MODE_KEY,
+        DEFAULTS.SIGNING_COMPANY_MODE
+      );
+
+    if (
+      mode !== "first" &&
+      mode !== "text"
+    ) {
+      saveStoredText(
+        UI.SIGNING_MODE_KEY,
+        DEFAULTS.SIGNING_COMPANY_MODE
+      );
+    }
+  }
+
+  function restoreDefaultRemarks() {
+    saveStoredText(
+      UI.REVIEW_REMARK_KEY,
+      DEFAULTS.REVIEW_REMARK
+    );
+
+    saveStoredText(
+      UI.ORDER_REMARK_KEY,
+      DEFAULTS.ORDER_REMARK
+    );
+
+    const reviewInput =
+      document.getElementById(
+        UI.REVIEW_REMARK_ID
+      );
+
+    const orderInput =
+      document.getElementById(
+        UI.ORDER_REMARK_ID
+      );
+
+    if (reviewInput) {
+      reviewInput.value =
+        DEFAULTS.REVIEW_REMARK;
+    }
+
+    if (orderInput) {
+      orderInput.value =
+        DEFAULTS.ORDER_REMARK;
+    }
+
+    updateRemarkStatus();
+
+    updatePanelStatus(
+      "✓ 已恢复默认审批备注。",
+      "success"
+    );
+  }
+
+  function getSigningCompanyConfig() {
+    const storedMode =
+      getStoredText(
+        UI.SIGNING_MODE_KEY,
+        DEFAULTS.SIGNING_COMPANY_MODE
+      );
+
+    const mode =
+      storedMode === "text"
+        ? "text"
+        : "first";
+
+    const text =
+      cleanText(
+        getStoredText(
+          UI.SIGNING_TEXT_KEY,
+          DEFAULTS.SIGNING_COMPANY_TEXT
+        )
+      );
+
+    return {
+      mode,
+      text
+    };
+  }
+
+  function saveSigningCompanyConfig(
+    mode,
+    text = ""
+  ) {
+    const normalizedMode =
+      mode === "text"
+        ? "text"
+        : "first";
+
+    saveStoredText(
+      UI.SIGNING_MODE_KEY,
+      normalizedMode
+    );
+
+    saveStoredText(
+      UI.SIGNING_TEXT_KEY,
+      cleanText(text)
+    );
+
+    updateSigningCompanyUi();
+  }
+
+  function updateSigningCompanyUi() {
+    const button =
+      document.getElementById(
+        UI.SIGNING_BUTTON_ID
+      );
+
+    const firstRadio =
+      document.getElementById(
+        UI.SIGNING_FIRST_ID
+      );
+
+    const textRadio =
+      document.getElementById(
+        UI.SIGNING_TEXT_MODE_ID
+      );
+
+    const textInput =
+      document.getElementById(
+        UI.SIGNING_TEXT_ID
+      );
+
+    const config =
+      getSigningCompanyConfig();
+
+    if (button) {
+      button.textContent =
+        "签单主体";
+
+      if (
+        config.mode === "first"
+      ) {
+        button.style.color =
+          "#389e0d";
+
+        button.style.borderColor =
+          "#b7eb8f";
+
+        button.style.background =
+          "#f6ffed";
+
+        button.title =
+          "当前：按下拉顺序选择第一个可用选项";
+      } else if (
+        config.text
+      ) {
+        button.style.color =
+          "#389e0d";
+
+        button.style.borderColor =
+          "#b7eb8f";
+
+        button.style.background =
+          "#f6ffed";
+
+        button.title =
+          `当前：按名称精确匹配“${config.text}”`;
+      } else {
+        button.style.color =
+          "#cf1322";
+
+        button.style.borderColor =
+          "#ffccc7";
+
+        button.style.background =
+          "#fff2f0";
+
+        button.title =
+          "已选择按名称匹配，但尚未填写签单主体名称";
+      }
+    }
+
+    if (firstRadio) {
+      firstRadio.checked =
+        config.mode === "first";
+    }
+
+    if (textRadio) {
+      textRadio.checked =
+        config.mode === "text";
+    }
+
+    if (textInput) {
+      textInput.value =
+        config.text;
+
+      textInput.disabled =
+        config.mode !== "text";
+
+      textInput.style.opacity =
+        config.mode === "text"
+          ? "1"
+          : "0.55";
+    }
+  }
+
+  function toggleSigningPanel() {
+    const panel =
+      document.getElementById(
+        UI.SIGNING_PANEL_ID
+      );
+
+    if (!panel) {
+      return;
+    }
+
+    const opening =
+      panel.style.display ===
+      "none";
+
+    panel.style.display =
+      opening
+        ? "block"
+        : "none";
+
+    if (opening) {
+      const remarkPanel =
+        document.getElementById(
+          UI.REMARK_PANEL_ID
+        );
+
+      if (remarkPanel) {
+        remarkPanel.style.display =
+          "none";
+      }
+
+      updateSigningCompanyUi();
+    }
   }
 
   function getStoredText(
@@ -4978,7 +6517,8 @@
         UI.REVIEW_REMARK_ID
       )?.value ||
       getStoredText(
-        UI.REVIEW_REMARK_KEY
+        UI.REVIEW_REMARK_KEY,
+        DEFAULTS.REVIEW_REMARK
       )
     );
   }
@@ -4989,7 +6529,8 @@
         UI.ORDER_REMARK_ID
       )?.value ||
       getStoredText(
-        UI.ORDER_REMARK_KEY
+        UI.ORDER_REMARK_KEY,
+        DEFAULTS.ORDER_REMARK
       )
     );
   }
@@ -5032,44 +6573,58 @@
       return;
     }
 
-    const info =
-      getRemarkStatusInfo();
+    const review =
+      getReviewRemark();
 
-    if (info.ready) {
+    const order =
+      getOrderRemark();
+
+    if (
+      !review ||
+      !order
+    ) {
       button.textContent =
-        "备注已配置";
+        "备注待设置";
 
       button.style.color =
-        "#389e0d";
+        "#cf1322";
 
       button.style.borderColor =
-        "#b7eb8f";
+        "#ffccc7";
 
       button.style.background =
-        "#f6ffed";
+        "#fff2f0";
 
       button.title =
-        "审批备注已配置，点击可查看或修改";
+        "审批备注不完整，点击设置";
 
       return;
     }
 
+    const usingDefault =
+      review ===
+        DEFAULTS.REVIEW_REMARK &&
+      order ===
+        DEFAULTS.ORDER_REMARK;
+
     button.textContent =
-      "点击设置备注";
+      usingDefault
+        ? "默认备注"
+        : "自定义备注";
 
     button.style.color =
-      "#cf1322";
+      "#389e0d";
 
     button.style.borderColor =
-      "#ffccc7";
+      "#b7eb8f";
 
     button.style.background =
-      "#fff2f0";
+      "#f6ffed";
 
     button.title =
-      info.missing.length
-        ? `尚缺：${info.missing.join("、")}，点击设置`
-        : "点击设置审批备注";
+      usingDefault
+        ? "当前使用脚本默认备注，点击可修改"
+        : "当前使用自定义备注，点击可修改或恢复默认";
   }
 
   function toggleHelpPanel() {
@@ -5131,6 +6686,18 @@
       opening
         ? "block"
         : "none";
+
+    if (opening) {
+      const signingPanel =
+        document.getElementById(
+          UI.SIGNING_PANEL_ID
+        );
+
+      if (signingPanel) {
+        signingPanel.style.display =
+          "none";
+      }
+    }
 
     button.setAttribute(
       "aria-expanded",
@@ -5419,7 +6986,8 @@
     const stable =
       await waitForStableControlledValue(
         controls.remark,
-        remarkText
+        remarkText,
+        token
       );
 
     if (!stable) {
@@ -5670,30 +7238,31 @@
     } = {}
   ) {
     if (processRunning) {
-      log(
-        "当前已有流程正在执行，忽略重复启动。"
-      );
+      requestFlowStop();
       return;
     }
 
+    token =
+      token ||
+      createFlowToken();
+
+    activeFlowToken =
+      token;
+
     processRunning = true;
 
-    const flowButton =
-      document.getElementById(
-        UI.FLOW_RUN_BUTTON_ID
-      );
-
-    if (flowButton) {
-      flowButton.disabled =
-        true;
-      flowButton.textContent =
-        "流程处理中...";
-    }
+    updateFlowRunButtonState(
+      getCurrentFlowStage()
+    );
 
     try {
       while (
         isTargetRoute()
       ) {
+        throwIfFlowCancelled(
+          token
+        );
+
         const blocker =
           getPageBlocker({
             allowApprovalModal:
@@ -5728,6 +7297,10 @@
             );
         }
 
+        throwIfFlowCancelled(
+          token
+        );
+
         log(
           `当前流程阶段：${stage}`
         );
@@ -5735,6 +7308,25 @@
         refreshExamDateInfo(
           stage
         );
+
+        updateFlowRunButtonState(
+          stage
+        );
+
+        const stageIssue =
+          getAutomationStageIssue(
+            stage
+          );
+
+        if (stageIssue) {
+          updatePanelStatus(
+            stageIssue +
+            "。本次不会等待阶段变化，也不会自动继续。",
+            "error"
+          );
+
+          return;
+        }
 
         if (
           stage ===
@@ -5746,6 +7338,7 @@
             "",
             token
           );
+
           continue;
         }
 
@@ -5757,12 +7350,20 @@
             token
           );
 
+          throwIfFlowCancelled(
+            token
+          );
+
           await runContractProcess({
             nested:
               true,
             token,
             allowPermissionPrompt
           });
+
+          throwIfFlowCancelled(
+            token
+          );
 
           /*
            * runContractProcess 只处理合同内容/保存/上传，
@@ -5790,6 +7391,7 @@
             "确认落单",
             token
           );
+
           continue;
         }
 
@@ -5813,38 +7415,57 @@
           stage ===
           "已落单"
         ) {
-          await refreshLandingTimeOptions();
-
           updatePanelStatus(
-            "✓ 当前订单已落单，落单数据按钮已刷新。",
+            "✓ 当前订单已落单，可点击“落单数据”按需读取。",
             "success"
+          );
+
+          updateDataActionButtons(
+            stage
           );
 
           return;
         }
 
         /*
-         * 未配置自动动作的早期阶段不乱点，
-         * 只观察流程发生真实变化。
+         * 理论上所有未支持阶段都会在 stageIssue 中被拦截。
+         * 保留此处作为最终安全兜底：绝不等待未知阶段自动变化。
          */
         updatePanelStatus(
-          `当前为“${stage}”，该阶段不执行自动点击，等待页面进入已支持阶段。`
+          `阶段异常：当前“${stage || "未知"}”不可自动处理。`,
+          "error"
         );
 
-        await waitForStageChange(
-          stage,
-          token
-        );
+        return;
       }
+    } catch (error) {
+      if (
+        error instanceof
+          FlowCancelledError ||
+        token.cancelled
+      ) {
+        updatePanelStatus(
+          "■ 自动流程已停止。"
+        );
+
+        return;
+      }
+
+      throw error;
     } finally {
       processRunning = false;
 
-      if (flowButton) {
-        flowButton.disabled =
-          false;
-        flowButton.textContent =
-          "立即处理订单";
+      if (
+        activeFlowToken ===
+        token
+      ) {
+        activeFlowToken =
+          null;
       }
+
+      updateFlowRunButtonState(
+        getCurrentFlowStage()
+      );
     }
   }
 
@@ -5890,7 +7511,7 @@
         token
       );
 
-      await selectFirstContractCompany(
+      await selectConfiguredContractCompany(
         token
       );
 
@@ -5906,14 +7527,16 @@
         await uploadOne(
           "contract",
           sharedFile,
-          "已盖章合同"
+          "已盖章合同",
+          token
         );
 
       const authUploadResult =
         await uploadOne(
           "auth",
           sharedFile,
-          "授权书"
+          "授权书",
+          token
         );
 
       const handledUploads =
@@ -6095,9 +7718,13 @@
           return;
         }
 
+        /*
+         * 标题栏中的按钮/输入控件只执行自身功能，
+         * 不允许同时触发窗口拖动。
+         */
         if (
           event.target.closest(
-            `#${UI.COLLAPSE_BUTTON_ID}`
+            "button,input,textarea,select,label,a,[role='button']"
           )
         ) {
           return;
@@ -6266,6 +7893,7 @@
     );
   }
 
+
   function getPanelCollapsed() {
     try {
       return (
@@ -6327,6 +7955,8 @@
   }
 
   function createTestPanel() {
+    ensureDefaultSettings();
+
     const existing =
       document.getElementById(
         UI.PANEL_ID
@@ -6335,11 +7965,9 @@
     if (existing) {
       updateBoundFileDisplay();
       updateRemarkStatus();
+      updateSigningCompanyUi();
       renderWebNoticeHistory();
-      updateFlowStageDisplay({
-        refreshOnLanding:
-          true
-      });
+      updateFlowStageDisplay();
       refreshExamDateInfo(
         getCurrentFlowStage()
       );
@@ -6392,7 +8020,7 @@
           min-width:0;
           font-size:15px;
         ">
-          SOA订单流程自动化 v1.14
+          SOA订单流程自动化 v1.22
         </strong>
 
         <button
@@ -6436,135 +8064,61 @@
 
       <div id="${UI.PANEL_BODY_ID}">
         <div
-          id="${UI.STATUS_ID}"
-          style="
-            display:none;
-            min-height:30px;
-            margin-bottom:8px;
-            padding:7px 9px;
-            border:1px solid #eee;
-            border-radius:6px;
-            background:#fcfcfc;
-            color:#555;
-            line-height:1.45;
-            font-size:12px;
-            word-break:break-all;
-          "
-        ></div>
-
-        <div
-          id="${UI.WEB_NOTICE_ID}"
-          style="
-            display:none;
-            margin-bottom:8px;
-            padding:7px 9px;
-            border:1px solid #bae7ff;
-            border-radius:6px;
-            background:#f0faff;
-          "
-        >
-          <div style="
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap:8px;
-            margin-bottom:3px;
-          ">
-            <span style="
-              color:#096dd9;
-              font-size:12px;
-              font-weight:600;
-            ">
-              网页提示
-            </span>
-
-            <button
-              id="${UI.WEB_NOTICE_CLEAR_ID}"
-              type="button"
-              style="
-                flex:0 0 auto;
-                height:20px;
-                padding:0 6px;
-                border:1px solid #ffccc7;
-                border-radius:4px;
-                background:#fff;
-                color:#cf1322;
-                font-size:10px;
-                line-height:18px;
-                cursor:pointer;
-              "
-              title="清空当前订单的网页提示记录"
-            >
-              清空
-            </button>
-          </div>
-
-          <div
-            id="${UI.WEB_NOTICE_LIST_ID}"
-            style="
-              max-height:62px;
-              overflow:auto;
-              color:#555;
-              font-size:11px;
-              line-height:1.45;
-              white-space:pre-wrap;
-              word-break:break-all;
-            "
-          ></div>
-        </div>
-
-        <div
           id="${UI.HELP_PANEL_ID}"
           style="
             display:none;
             margin-bottom:8px;
-            padding:8px 10px;
+            padding:9px 10px;
             border:1px solid #d9d9d9;
             border-radius:6px;
             background:#fafafa;
             color:#555;
-            font-size:12px;
-            line-height:1.6;
+            font-size:11px;
+            line-height:1.55;
           "
         >
           <div style="
-            margin-bottom:4px;
-            font-weight:600;
+            margin-bottom:6px;
+            font-weight:700;
             color:#333;
           ">
             使用说明
           </div>
-          <ol style="
-            margin:0;
-            padding-left:18px;
-          ">
-            <li>
-              页面“智能审批”按钮只负责显示/隐藏本工具，不会自动执行订单。
-            </li>
-            <li>
-              文件按钮会直接显示绑定状态；未绑定时红色提示，绑定完成后绿色显示文件名，点击可重新选择。
-            </li>
-            <li>
-              备注按钮会直接显示配置状态：未配置时红色提示“点击设置备注”，配置完成后绿色显示“备注已配置”。
-            </li>
-            <li>
-              点击“立即处理订单”，脚本根据当前流程阶段自动审批、合同补充、发起落单并等待状态变化。
-            </li>
-            <li>
-              从“报价确认”开始检查体检时间，开始/结束日期统一显示在当前阶段右侧；仅异常的日期加粗标红。日期均正常时同时显示区间时长：不足1个月显示天数、不足1年显示月数、1年以上仅显示整数年；异常时不计算时长。报价确认阶段异常时可点击“修改时间”，脚本只进入编辑并改为今天至3年后，不自动回退、保存或提交。
-            </li>
-            <li>
-              面板底部会实时显示当前流程阶段；不同阶段使用不同颜色突出显示，订单已落单后会自动出现首次/修改后落单数据按钮。
-            </li>
-            <li>
-              网页出现消息、通知或确认提示时，会同步显示在“网页提示”区域；记录仅属于当前订单和当前脚本会话，可点击“清空”手动清除。
-            </li>
-          </ol>
+
+          <div style="margin-bottom:5px;">
+            <strong>1. 基础配置：</strong>
+            “默认备注/自定义备注”用于维护两阶段审批文字；“签单主体”默认选择第一个可用选项，也可按完整名称精确匹配；“待选择文件/文件已选择”用于绑定合同与授权书共用文件。
+          </div>
+
+          <div style="margin-bottom:5px;">
+            <strong>2. 自动流程：</strong>
+            仅内勤复核及后续受支持阶段可启动。点击“立即处理订单”开始；运行中按钮变为“点击停止”。内勤复核之前或未知阶段会红色拦截，不会等待后自动执行。
+          </div>
+
+          <div style="margin-bottom:5px;">
+            <strong>3. 体检时间：</strong>
+            从报价确认开始检测。开始日期晚于今天、结束日期早于今天时，只标红异常日期；日期正常时显示区间时长。报价确认阶段可用“修改时间”改为今天至3年后，但不会自动保存或回退流程。
+          </div>
+
+          <div style="margin-bottom:5px;">
+            <strong>4. 数据工具：</strong>
+            “落单数据”仅已落单后可用，并支持点击复制；“体检数据”只读取并展示总人数、已检/未检人数、到检总额、挂账金额、自费金额，不执行复制。
+          </div>
+
+          <div style="margin-bottom:5px;">
+            <strong>5. 提示与安全：</strong>
+            网页弹窗/通知记录按当前订单保存于本次页面会话，最多5条，可手动清空。运行等待提示只显示一次；文件权限已授权时不会重复弹窗，权限失效时才会重新请求。
+          </div>
+
+          <div>
+            <strong>6. 窗口：</strong>
+            拖动标题栏移动窗口；点击右上角“−”折叠/展开。窗口位置和折叠状态会自动保存；面板固定使用100%原始尺寸，不再提供缩放功能。
+          </div>
         </div>
 
         <div style="
-          display:flex;
-          align-items:center;
+          display:grid;
+          grid-template-columns:repeat(3,1fr);
           gap:6px;
           margin-bottom:6px;
         ">
@@ -6573,10 +8127,9 @@
             type="button"
             aria-expanded="false"
             style="
-              flex:1 1 0;
               min-width:0;
               height:28px;
-              padding:0 8px;
+              padding:0 6px;
               overflow:hidden;
               text-overflow:ellipsis;
               white-space:nowrap;
@@ -6586,44 +8139,57 @@
               color:#999;
               font-size:11px;
               font-weight:600;
-              line-height:26px;
               cursor:pointer;
             "
-            title="审批备注状态"
+            title="修改审批备注"
           >
-            检查备注...
+            修改备注
           </button>
 
           <button
-            id="${UI.BIND_BUTTON_ID}"
+            id="${UI.SIGNING_BUTTON_ID}"
             type="button"
             style="
-              flex:1 1 0;
               min-width:0;
               height:28px;
-              padding:0 8px;
+              padding:0 6px;
               overflow:hidden;
+              text-overflow:ellipsis;
+              white-space:nowrap;
               border:1px solid #d9d9d9;
               border-radius:6px;
               background:#fff;
               color:#999;
               font-size:11px;
               font-weight:600;
-              line-height:26px;
               cursor:pointer;
             "
-            title="文件绑定状态"
+            title="配置己方签单主体"
           >
-            <span
-              id="${UI.FILE_NAME_ID}"
-              style="
-                display:block;
-                min-width:0;
-                overflow:hidden;
-                text-overflow:ellipsis;
-                white-space:nowrap;
-              "
-            >读取文件...</span>
+            签单主体
+          </button>
+
+          <button
+            id="${UI.BIND_BUTTON_ID}"
+            type="button"
+            style="
+              min-width:0;
+              height:28px;
+              padding:0 6px;
+              overflow:hidden;
+              text-overflow:ellipsis;
+              white-space:nowrap;
+              border:1px solid #d9d9d9;
+              border-radius:6px;
+              background:#fff;
+              color:#999;
+              font-size:11px;
+              font-weight:600;
+              cursor:pointer;
+            "
+            title="文件绑定"
+          >
+            文件绑定
           </button>
         </div>
 
@@ -6638,6 +8204,29 @@
             background:#fafafa;
           "
         >
+          <div style="
+            display:flex;
+            justify-content:flex-end;
+            margin-bottom:6px;
+          ">
+            <button
+              id="${UI.REMARK_DEFAULT_BUTTON_ID}"
+              type="button"
+              style="
+                height:22px;
+                padding:0 7px;
+                border:1px solid #d9d9d9;
+                border-radius:5px;
+                background:#fff;
+                color:#666;
+                font-size:10px;
+                cursor:pointer;
+              "
+            >
+              恢复默认备注
+            </button>
+          </div>
+
           <div style="margin-bottom:8px;">
             <div style="
               margin-bottom:4px;
@@ -6690,6 +8279,84 @@
                 font-size:12px;
               "
             ></textarea>
+          </div>
+        </div>
+
+        <div
+          id="${UI.SIGNING_PANEL_ID}"
+          style="
+            display:none;
+            margin-bottom:6px;
+            padding:8px;
+            border:1px solid #d9d9d9;
+            border-radius:6px;
+            background:#fafafa;
+            font-size:11px;
+          "
+        >
+          <div style="
+            margin-bottom:7px;
+            color:#555;
+            font-weight:600;
+          ">
+            己方签单主体选择方式
+          </div>
+
+          <label style="
+            display:flex;
+            align-items:center;
+            gap:5px;
+            margin-bottom:6px;
+            cursor:pointer;
+          ">
+            <input
+              id="${UI.SIGNING_FIRST_ID}"
+              type="radio"
+              name="__soa_signing_mode_v118"
+              value="first"
+            >
+            <span>第一个可用选项（当前默认）</span>
+          </label>
+
+          <label style="
+            display:flex;
+            align-items:center;
+            gap:5px;
+            margin-bottom:6px;
+            cursor:pointer;
+          ">
+            <input
+              id="${UI.SIGNING_TEXT_MODE_ID}"
+              type="radio"
+              name="__soa_signing_mode_v118"
+              value="text"
+            >
+            <span>按名称精确匹配</span>
+          </label>
+
+          <input
+            id="${UI.SIGNING_TEXT_ID}"
+            type="text"
+            placeholder="请输入下拉框中的完整主体名称"
+            style="
+              width:100%;
+              height:30px;
+              box-sizing:border-box;
+              padding:0 8px;
+              border:1px solid #d9d9d9;
+              border-radius:5px;
+              font-size:11px;
+              outline:none;
+            "
+          >
+
+          <div style="
+            margin-top:6px;
+            color:#999;
+            font-size:10px;
+            line-height:1.5;
+          ">
+            按名称模式采用精确匹配；找不到配置主体时会停止合同处理，不会改选第一项。
           </div>
         </div>
 
@@ -6844,32 +8511,192 @@
             </button>
           </div>
 
-          <div
-            id="${UI.EXTRACT_OPTIONS_ID}"
-            style="display:none;"
-          ></div>
+          <div style="
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:6px;
+            margin-top:7px;
+          ">
+            <button
+              id="${UI.LANDING_DATA_BUTTON_ID}"
+              type="button"
+              style="
+                height:30px;
+                padding:0 8px;
+                border:1px solid #d9d9d9;
+                border-radius:6px;
+                background:#fff;
+                color:#555;
+                font-size:11px;
+                font-weight:600;
+                cursor:pointer;
+              "
+            >
+              落单数据
+            </button>
+
+            <button
+              id="${UI.PHYSICAL_DATA_BUTTON_ID}"
+              type="button"
+              style="
+                height:30px;
+                padding:0 8px;
+                border:1px solid #d9d9d9;
+                border-radius:6px;
+                background:#fff;
+                color:#555;
+                font-size:11px;
+                font-weight:600;
+                cursor:pointer;
+              "
+              title="点击后自动切换到体检名单并读取合计数据"
+            >
+              体检数据
+            </button>
+          </div>
 
           <div
-            id="${UI.EXTRACT_PREVIEW_ID}"
+            id="${UI.DATA_PANEL_ID}"
             style="
               display:none;
-              margin-top:8px;
-              padding:7px 8px;
-              border:1px solid #d9f7be;
+              margin-top:7px;
+              padding:7px;
+              border:1px solid #e5e7eb;
               border-radius:6px;
-              background:#fcfff8;
+              background:#fff;
+            "
+          >
+            <div
+              id="${UI.DATA_PANEL_TITLE_ID}"
+              style="
+                margin-bottom:6px;
+                color:#555;
+                font-size:11px;
+                font-weight:600;
+                text-align:center;
+              "
+            ></div>
+
+            <div
+              id="${UI.EXTRACT_OPTIONS_ID}"
+              style="display:none;"
+            ></div>
+
+            <div
+              id="${UI.PHYSICAL_DATA_GRID_ID}"
+              style="
+                display:none;
+                grid-template-columns:repeat(3,1fr);
+                gap:5px;
+              "
+            ></div>
+
+            <div
+              id="${UI.EXTRACT_PREVIEW_ID}"
+              style="
+                display:none;
+                margin-top:6px;
+                padding:6px 7px;
+                border:1px solid #d9f7be;
+                border-radius:5px;
+                background:#fcfff8;
+                color:#555;
+                font-size:10px;
+                line-height:1.4;
+                white-space:pre-wrap;
+                word-break:break-all;
+                user-select:text;
+              "
+              title="复制后的 Tab 分隔内容，可在这里查看"
+            ></div>
+          </div>
+        </div>
+
+        <div style="
+          margin-top:8px;
+          padding-top:1px;
+          border-top:1px dashed #f0f0f0;
+        ">
+        <div
+          id="${UI.STATUS_ID}"
+          style="
+            display:none;
+            min-height:30px;
+            margin-top:8px;
+            padding:7px 9px;
+            border:1px solid #eee;
+            border-radius:6px;
+            background:#fcfcfc;
+            color:#555;
+            line-height:1.45;
+            font-size:12px;
+            word-break:break-all;
+          "
+        ></div>
+
+        <div
+          id="${UI.WEB_NOTICE_ID}"
+          style="
+            display:none;
+            margin-top:8px;
+            padding:7px 9px;
+            border:1px solid #bae7ff;
+            border-radius:6px;
+            background:#f0faff;
+          "
+        >
+          <div style="
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:8px;
+            margin-bottom:3px;
+          ">
+            <span style="
+              color:#096dd9;
+              font-size:12px;
+              font-weight:600;
+            ">
+              网页提示
+            </span>
+
+            <button
+              id="${UI.WEB_NOTICE_CLEAR_ID}"
+              type="button"
+              style="
+                flex:0 0 auto;
+                height:20px;
+                padding:0 6px;
+                border:1px solid #ffccc7;
+                border-radius:4px;
+                background:#fff;
+                color:#cf1322;
+                font-size:10px;
+                line-height:18px;
+                cursor:pointer;
+              "
+              title="清空当前订单的网页提示记录"
+            >
+              清空
+            </button>
+          </div>
+
+          <div
+            id="${UI.WEB_NOTICE_LIST_ID}"
+            style="
+              max-height:62px;
+              overflow:auto;
               color:#555;
               font-size:11px;
               line-height:1.45;
               white-space:pre-wrap;
               word-break:break-all;
-              user-select:text;
             "
-            title="复制失败时可在这里手动复制"
           ></div>
         </div>
-      </div>
-    `;
+
+        </div>
+      </div>    `;
 
     document.body.appendChild(
       panel
@@ -6930,6 +8757,107 @@
         }
       );
 
+    document
+      .getElementById(
+        UI.SIGNING_BUTTON_ID
+      )
+      ?.addEventListener(
+        "click",
+        () => {
+          toggleSigningPanel();
+        }
+      );
+
+    document
+      .getElementById(
+        UI.REMARK_DEFAULT_BUTTON_ID
+      )
+      ?.addEventListener(
+        "click",
+        () => {
+          restoreDefaultRemarks();
+        }
+      );
+
+    document
+      .getElementById(
+        UI.SIGNING_FIRST_ID
+      )
+      ?.addEventListener(
+        "change",
+        event => {
+          if (
+            event.currentTarget
+              ?.checked
+          ) {
+            saveSigningCompanyConfig(
+              "first",
+              document.getElementById(
+                UI.SIGNING_TEXT_ID
+              )?.value || ""
+            );
+          }
+        }
+      );
+
+    document
+      .getElementById(
+        UI.SIGNING_TEXT_MODE_ID
+      )
+      ?.addEventListener(
+        "change",
+        event => {
+          if (
+            event.currentTarget
+              ?.checked
+          ) {
+            saveSigningCompanyConfig(
+              "text",
+              document.getElementById(
+                UI.SIGNING_TEXT_ID
+              )?.value || ""
+            );
+
+            document.getElementById(
+              UI.SIGNING_TEXT_ID
+            )?.focus();
+          }
+        }
+      );
+
+    document
+      .getElementById(
+        UI.SIGNING_TEXT_ID
+      )
+      ?.addEventListener(
+        "input",
+        event => {
+          const text =
+            event.currentTarget
+              ?.value || "";
+
+          const textRadio =
+            document.getElementById(
+              UI.SIGNING_TEXT_MODE_ID
+            );
+
+          if (
+            textRadio &&
+            textRadio.checked
+          ) {
+            saveSigningCompanyConfig(
+              "text",
+              text
+            );
+          } else {
+            saveStoredText(
+              UI.SIGNING_TEXT_KEY,
+              text
+            );
+          }
+        }
+      );
+
     setPanelCollapsed(
       getPanelCollapsed()
     );
@@ -6947,7 +8875,8 @@
     if (reviewRemarkInput) {
       reviewRemarkInput.value =
         getStoredText(
-          UI.REVIEW_REMARK_KEY
+          UI.REVIEW_REMARK_KEY,
+          DEFAULTS.REVIEW_REMARK
         );
 
       reviewRemarkInput.addEventListener(
@@ -6966,7 +8895,8 @@
     if (orderRemarkInput) {
       orderRemarkInput.value =
         getStoredText(
-          UI.ORDER_REMARK_KEY
+          UI.ORDER_REMARK_KEY,
+          DEFAULTS.ORDER_REMARK
         );
 
       orderRemarkInput.addEventListener(
@@ -7011,6 +8941,40 @@
 
     document
       .getElementById(
+        UI.LANDING_DATA_BUTTON_ID
+      )
+      ?.addEventListener(
+        "click",
+        () => {
+          toggleLandingDataPanel()
+            .catch(error => {
+              warn(
+                error?.message ||
+                String(error)
+              );
+            });
+        }
+      );
+
+    document
+      .getElementById(
+        UI.PHYSICAL_DATA_BUTTON_ID
+      )
+      ?.addEventListener(
+        "click",
+        () => {
+          togglePhysicalDataPanel()
+            .catch(error => {
+              warn(
+                error?.message ||
+                String(error)
+              );
+            });
+        }
+      );
+
+    document
+      .getElementById(
         UI.EXAM_DATE_FIX_BUTTON_ID
       )
       ?.addEventListener(
@@ -7037,39 +9001,99 @@
       )
       ?.addEventListener(
         "click",
-        () => {
-          runFullFlow({
-            allowPermissionPrompt:
-              true
-          }).catch(error => {
+        async () => {
+          if (processRunning) {
+            requestFlowStop();
+            return;
+          }
+
+          const stage =
+            getCurrentFlowStage();
+
+          const stageIssue =
+            getAutomationStageIssue(
+              stage
+            );
+
+          if (stageIssue) {
+            updatePanelStatus(
+              stageIssue +
+              "。请先在网页中将流程推进到内勤复核或后续支持阶段。",
+              "error"
+            );
+
+            updateFlowRunButtonState(
+              stage
+            );
+
+            return;
+          }
+
+          try {
+            /*
+             * 内勤复核继续执行后通常会进入合同补充；
+             * 合同补充则会立即使用绑定文件。
+             *
+             * 在真实用户点击的当前瞬间先申请读取权限，
+             * 避免稍后跑到合同阶段时 user activation 已失效，
+             * 浏览器无法再弹出权限授权。
+             */
+            if (
+              stage ===
+                "内勤复核" ||
+              stage ===
+                "合同补充"
+            ) {
+              await ensureBoundFilePermissionFromUserGesture();
+            }
+
+            const token =
+              createFlowToken();
+
+            runFullFlow({
+              token,
+              allowPermissionPrompt:
+                false
+            }).catch(error => {
+              warn(
+                error?.message ||
+                String(error)
+              );
+
+              console.error(
+                "[SOA流程自动化]",
+                error
+              );
+            });
+          } catch (error) {
             warn(
               error?.message ||
               String(error)
             );
 
             console.error(
-              "[SOA流程自动化]",
+              "[SOA流程自动化] 启动前检查失败：",
               error
             );
-          });
+          }
         }
       );
 
-    /*
-     * 页面刷新或重新进入订单详情时，面板首次创建即后台刷新一次。
-     */
-    refreshLandingTimeOptions()
-      .catch(error => {
-        console.warn(
-          "[SOA流程自动化] 页面初始化刷新落单数据失败：",
-          error
-        );
-      });
-
     updateBoundFileDisplay();
     updateRemarkStatus();
+    updateSigningCompanyUi();
     renderWebNoticeHistory();
+
+    syncDataOrderContext();
     updateFlowStageDisplay();
+    updateDataActionButtons(
+      getCurrentFlowStage()
+    );
+
+    updateFlowRunButtonState(
+      getCurrentFlowStage()
+    );
+
     refreshExamDateInfo(
       getCurrentFlowStage()
     );
@@ -7156,21 +9180,16 @@
     updateAutomationSwitch();
 
     /*
-     * 每次打开工具面板，都重新获取一次当前订单落单数据。
+     * 打开工具面板时只刷新状态和日期。
+     * 落单数据 / 体检数据均由对应按钮按需触发。
      */
     if (panelVisible) {
+      syncDataOrderContext();
+
       updateFlowStageDisplay();
       refreshExamDateInfo(
         getCurrentFlowStage()
       );
-
-      refreshLandingTimeOptions()
-        .catch(error => {
-          console.warn(
-            "[SOA流程自动化] 打开面板刷新落单数据失败：",
-            error
-          );
-        });
     }
   }
 
@@ -7343,10 +9362,8 @@
             return;
           }
 
-          updateFlowStageDisplay({
-            refreshOnLanding:
-              true
-          });
+          syncDataOrderContext();
+          updateFlowStageDisplay();
 
           scheduleEnsureRouteUi();
         }
@@ -7386,6 +9403,14 @@
     lastWebNoticeOrderCode =
       "";
 
+    lastDataPanelOrderCode =
+      "";
+
+    activeDataPanelMode =
+      "";
+
+    cachedLandingTimeOptions = [];
+
     resetWebNoticeHistory();
 
     removeAutomationSwitch();
@@ -7407,7 +9432,7 @@
       isTargetRoute()
     ) {
       /*
-       * 每次进入订单详情路由，工具 UI 默认保持关闭。
+       * 首次进入订单详情工作区时，工具 UI 默认保持关闭；同一订单各业务页签之间切换不会关闭工具。
        * 只有用户点击页面蓝色按钮后才显示。
        */
       if (
@@ -7510,6 +9535,6 @@
   routeCheck();
 
   console.log(
-    "[SOA流程自动化] v1.14 已加载"
+    "[SOA流程自动化] v1.22 已加载"
   );
 })();
