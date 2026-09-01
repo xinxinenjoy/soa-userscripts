@@ -8,7 +8,7 @@
 
 GitHub 作为唯一开发源，Cloudflare Pages 提供展示、安装与自动更新。
 
-当前正式发布 **9** 个脚本 · 最近修改 **2026-09-01 09:12**
+当前正式发布 **9** 个脚本 · 最近修改 **2026-09-01 17:07**
 
 </div>
 
@@ -51,7 +51,7 @@ GitHub 作为唯一开发源，Cloudflare Pages 提供展示、安装与自动�
 | **SOA.2.2订单发票页面** | `1.6` | 2026-09-01 09:12 | SOA订单发票列表页面增强：列重排、宽度调整、文案替换、复制优化。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-dingdanfapiao.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-dingdanfapiao.user.js) |
 | **SOA.2.3首页排序模块** | `4.6` | 2026-09-01 09:12 | SOA首页模块排序，支持拖拽排序、保存顺序、恢复默认顺序、设置每行显示列数、设置模块宽度、设置列间距。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-shouyepaixu.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-shouyepaixu.user.js) |
 | **SOA.2.4前台批量模块** | `1.15` | 2026-09-01 09:12 | 批量预约单号；支持SPA常驻、14位预约单号智能提取、可调宽度窗口及“已到检”首次查询自动仅当日。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-qiantaipiliang.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-qiantaipiliang.user.js) |
-| **SOA.2.5订单流程自动化** | `1.31` | 2026-09-01 09:12 | SOA订单流程自动化脚本，支持订单详情各阶段自动处理，包括审批备注填写、合同配置、体检时间修正等功能，提供数据汇总及操作面板。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-dingdanauto.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-dingdanauto.user.js) |
+| **SOA.2.5订单流程自动化** | `1.32` | 2026-09-01 17:07 | SOA订单流程自动化：内勤复核、合同补充、发起落单、落单审核、落单完成及数据提取；支持文件绑定、异常等待、流程状态判定及卡池数量查询。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-dingdanauto.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-dingdanauto.user.js) |
 
 ### 红领巾的游戏脚本 · 2 个
 
