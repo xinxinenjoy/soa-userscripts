@@ -191,6 +191,11 @@ jobs:
                       if len(relative.parts) > 1
                       else "根目录"
                   ),
+                  "folder": (
+                      relative.parent.as_posix()
+                      if relative.parent != Path(".")
+                      else "根目录"
+                  ),
                   "modified_at": modified_at,
                   "modified_dt": modified_dt,
               }
@@ -234,11 +239,13 @@ jobs:
 
               if source:
                   display_group = source["group"]
+                  display_folder = source["folder"]
                   modified_at = source["modified_at"]
                   modified_dt = source["modified_dt"]
                   source_relative = source["relative"]
               else:
                   display_group = publish_group
+                  display_folder = publish_group
                   modified_at = "-"
                   modified_dt = None
                   source_relative = None
@@ -297,6 +304,7 @@ jobs:
                   "version": version,
                   "description": description,
                   "display_group": display_group,
+                  "display_folder": display_folder,
                   "publish_group": publish_group,
                   "publish_id": publish_id,
                   "modified_at": modified_at,
@@ -500,69 +508,169 @@ jobs:
               "https://addons.mozilla.org/zh-CN/firefox/addon/tampermonkey/"
           )
 
+          SITE_ICON = (
+              "https://xinxinenjoy.github.io/picx-images-hosting/"
+              "红领巾头像.8z6ofxnuml.jpg"
+          )
+
+          SERIES_RE = re.compile(
+              r"(?:^|[^0-9])(\d+)\.(\d+)(?=[^0-9]|$)"
+          )
+
+
+          def detect_series(name):
+              match = SERIES_RE.search(str(name or ""))
+
+              if not match:
+                  return "其他"
+
+              return f"{int(match.group(1))}.x"
+
+
+          def series_sort_key(value):
+              match = re.match(r"^(\d+)\.x$", str(value or ""))
+
+              if match:
+                  return (0, int(match.group(1)))
+
+              return (1, str(value or "").lower())
+
+
+          # Cloudflare 页面采用两级分区：源文件夹 → 1.x / 2.x / 3.x 系列
+          page_groups = {}
+
+          for item in items:
+              series = detect_series(item["name"])
+              item["series_group"] = series
+
+              page_groups.setdefault(
+                  item["display_folder"], {}
+              ).setdefault(series, []).append(item)
+
           buttons = [
               '<button class="filter active" data-group="all">全部</button>'
           ]
 
-          for group in sorted(groups, key=str.lower):
+          for folder in sorted(page_groups, key=str.lower):
+              folder_count = sum(
+                  len(group_items)
+                  for group_items in page_groups[folder].values()
+              )
               buttons.append(
-                  f'<button class="filter" data-group="{h(group)}">{h(group)}</button>'
+                  f'<button class="filter" data-group="{h(folder)}">'
+                  f'{h(folder)} · {folder_count}'
+                  '</button>'
               )
 
-          cards = []
+          page_sections = []
 
-          for group in sorted(groups, key=str.lower):
-              for item in sorted(
-                  groups[group],
-                  key=lambda x: (
-                      x["name"].lower(),
-                      x["publish_id"].lower(),
-                  ),
-              ):
-                  search_text = " ".join([
-                      item["name"],
-                      item["description"],
-                      item["display_group"],
-                      item["publish_id"],
-                  ]).lower()
+          for folder in sorted(page_groups, key=str.lower):
+              series_map = page_groups[folder]
+              folder_count = sum(
+                  len(group_items)
+                  for group_items in series_map.values()
+              )
+              series_sections = []
 
-                  cards.append(
+              for series in sorted(series_map, key=series_sort_key):
+                  group_items = sorted(
+                      series_map[series],
+                      key=lambda x: (
+                          x["name"].lower(),
+                          x["publish_id"].lower(),
+                      ),
+                  )
+
+                  cards = []
+
+                  for item in group_items:
+                      search_text = " ".join([
+                          item["name"],
+                          item["description"],
+                          item["display_group"],
+                          item["display_folder"],
+                          item["series_group"],
+                          item["publish_id"],
+                      ]).lower()
+
+                      cards.append(
+                          f"""
+                          <article class="script-card"
+                                   data-folder="{h(item["display_folder"])}"
+                                   data-series="{h(item["series_group"])}"
+                                   data-search="{h(search_text)}">
+                            <div class="script-card-head">
+                              <div class="script-title-wrap">
+                                <span class="script-category">
+                                  {h(item["series_group"])} 系列
+                                </span>
+                                <h3>{h(item["name"])}</h3>
+                              </div>
+                              <span class="script-version">v{h(item["version"])}</span>
+                            </div>
+
+                            <p class="script-description">
+                              {h(item["description"]) or "暂无功能说明"}
+                            </p>
+
+                            <div class="script-meta">
+                              <span>更新：{h(item["modified_at"])}</span>
+                              <span>ID：{h(item["publish_id"])}</span>
+                            </div>
+
+                            <div class="script-actions">
+                              <a class="button button-primary"
+                                 href="{h(item["install_url"])}">
+                                立即安装
+                              </a>
+                              <a class="button button-secondary"
+                                 href="{h(item["github_source"])}"
+                                 target="_blank"
+                                 rel="noopener noreferrer">
+                                查看源码
+                              </a>
+                            </div>
+                          </article>
+                          """
+                      )
+
+                  series_sections.append(
                       f"""
-                      <article class="script-card"
-                               data-group="{h(item["display_group"])}"
-                               data-search="{h(search_text)}">
-                        <div class="script-card-head">
-                          <div class="script-title-wrap">
-                            <span class="script-category">{h(item["display_group"])}</span>
-                            <h3>{h(item["name"])}</h3>
+                      <section class="series-group"
+                               data-folder="{h(folder)}"
+                               data-series="{h(series)}">
+                        <div class="series-head">
+                          <div class="series-title-wrap">
+                            <span class="series-badge">{h(series)}</span>
+                            <h3>{h(series)} 系列</h3>
                           </div>
-                          <span class="script-version">v{h(item["version"])}</span>
+                          <span class="series-count">{len(group_items)} 个脚本</span>
                         </div>
 
-                        <p class="script-description">
-                          {h(item["description"]) or "暂无功能说明"}
-                        </p>
-
-                        <div class="script-meta">
-                          <span>更新：{h(item["modified_at"])}</span>
-                          <span>ID：{h(item["publish_id"])}</span>
+                        <div class="script-grid">
+                          {''.join(cards)}
                         </div>
-
-                        <div class="script-actions">
-                          <a class="button button-primary"
-                             href="{h(item["install_url"])}">
-                            立即安装
-                          </a>
-                          <a class="button button-secondary"
-                             href="{h(item["github_source"])}"
-                             target="_blank"
-                             rel="noopener noreferrer">
-                            查看源码
-                          </a>
-                        </div>
-                      </article>
+                      </section>
                       """
                   )
+
+              page_sections.append(
+                  f"""
+                  <section class="folder-group" data-folder="{h(folder)}">
+                    <div class="folder-head">
+                      <div>
+                        <p class="folder-eyebrow">SOURCE FOLDER</p>
+                        <h2>{h(folder)}</h2>
+                      </div>
+                      <span class="folder-count">{folder_count} 个脚本</span>
+                    </div>
+
+                    <div class="folder-series">
+                      {''.join(series_sections)}
+                    </div>
+                  </section>
+                  """
+              )
 
           html = f"""<!doctype html>
           <html lang="zh-CN">
@@ -572,6 +680,9 @@ jobs:
             <meta name="description"
                   content="WanXin Userscripts：Tampermonkey 用户脚本安装、更新与使用主页">
             <meta name="color-scheme" content="light">
+            <link rel="icon" type="image/jpeg" href="{h(SITE_ICON)}">
+            <link rel="shortcut icon" href="{h(SITE_ICON)}">
+            <link rel="apple-touch-icon" href="{h(SITE_ICON)}">
             <title>WanXin Userscripts</title>
 
             <style>
@@ -665,25 +776,18 @@ jobs:
                 gap: 15px;
               }}
 
-              .brand-mark {{
-                display: grid;
-                width: 52px;
-                height: 52px;
-                grid-template-columns: repeat(2, 1fr);
-                gap: 4px;
-                align-items: center;
-                padding: 7px;
-                border-radius: 15px;
-                background: #222;
-                box-shadow: 0 8px 18px rgba(0,0,0,.14);
-              }}
-
-              .brand-mark span {{
+              .brand-avatar {{
                 display: block;
-                width: 100%;
-                aspect-ratio: 1;
-                border-radius: 50%;
-                background: #f2f2f2;
+                width: 58px;
+                height: 58px;
+                flex: 0 0 auto;
+                object-fit: cover;
+                border: 3px solid #fff;
+                border-radius: 18px;
+                background: #fff;
+                box-shadow:
+                  0 0 0 1px rgba(229, 72, 77, .12),
+                  0 9px 22px rgba(23, 28, 38, .13);
               }}
 
               .eyebrow {{
@@ -1052,6 +1156,95 @@ jobs:
                 padding: 8px 0 42px;
               }}
 
+              .folder-group {{
+                margin-bottom: 26px;
+                padding: 26px;
+                border: 1px solid var(--line);
+                border-radius: var(--radius-xl);
+                background: rgba(255, 255, 255, .72);
+                box-shadow: 0 10px 28px rgba(23, 28, 38, .04);
+              }}
+
+              .folder-group.hidden,
+              .series-group.hidden {{
+                display: none;
+              }}
+
+              .folder-head {{
+                display: flex;
+                gap: 18px;
+                align-items: flex-end;
+                justify-content: space-between;
+                margin-bottom: 22px;
+                padding-bottom: 18px;
+                border-bottom: 1px solid var(--line);
+              }}
+
+              .folder-head h2 {{
+                margin: 3px 0 0;
+                font-size: 27px;
+                line-height: 1.3;
+              }}
+
+              .folder-eyebrow {{
+                margin: 0;
+                color: var(--accent);
+                font-size: 11px;
+                font-weight: 850;
+                letter-spacing: .08em;
+              }}
+
+              .folder-count,
+              .series-count {{
+                flex: 0 0 auto;
+                color: var(--muted);
+                font-size: 12px;
+                font-weight: 700;
+              }}
+
+              .folder-series {{
+                display: grid;
+                gap: 26px;
+              }}
+
+              .series-group {{
+                scroll-margin-top: 90px;
+              }}
+
+              .series-head {{
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 13px;
+              }}
+
+              .series-title-wrap {{
+                display: flex;
+                gap: 10px;
+                align-items: center;
+              }}
+
+              .series-title-wrap h3 {{
+                margin: 0;
+                font-size: 18px;
+                line-height: 1.35;
+              }}
+
+              .series-badge {{
+                display: inline-flex;
+                min-width: 46px;
+                height: 28px;
+                align-items: center;
+                justify-content: center;
+                padding: 0 10px;
+                border-radius: 999px;
+                color: var(--accent);
+                background: var(--accent-soft);
+                font-size: 12px;
+                font-weight: 850;
+              }}
+
               .script-grid {{
                 display: grid;
                 grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1202,9 +1395,20 @@ jobs:
                   padding: 27px 21px;
                 }}
 
-                .brand-mark {{
-                  width: 46px;
-                  height: 46px;
+                .brand-avatar {{
+                  width: 50px;
+                  height: 50px;
+                  border-radius: 15px;
+                }}
+
+                .folder-group {{
+                  padding: 20px;
+                }}
+
+                .folder-head {{
+                  align-items: flex-start;
+                  flex-direction: column;
+                  gap: 8px;
                 }}
 
                 .section-head {{
@@ -1246,9 +1450,9 @@ jobs:
               <div class="wrap">
                 <div class="hero-panel">
                   <div class="brand-row">
-                    <div class="brand-mark" aria-hidden="true">
-                      <span></span><span></span>
-                    </div>
+                    <img class="brand-avatar"
+                         src="{h(SITE_ICON)}"
+                         alt="WanXin Userscripts 图标">
                     <div>
                       <p class="eyebrow">Userscript Center</p>
                       <h1>WanXin Userscripts</h1>
@@ -1408,7 +1612,8 @@ jobs:
                   <div>
                     <h2 class="section-title">脚本列表</h2>
                     <p class="section-desc">
-                      可按分类筛选或直接搜索名称、说明和脚本 ID。
+                      按源代码文件夹分区展示；同一文件夹内再按脚本编号自动划分为
+                      1.x、2.x、3.x 等系列。也可通过上方筛选或搜索快速定位。
                       “立即安装”使用本站固定 Cloudflare 地址，后续自动更新地址保持一致。
                     </p>
                   </div>
@@ -1422,7 +1627,7 @@ jobs:
                   id="search"
                   class="search"
                   type="search"
-                  placeholder="搜索脚本名称、说明或 ID..."
+                  placeholder="搜索脚本名称、文件夹、系列、说明或 ID..."
                   autocomplete="off"
                 >
                 <div class="filters">
@@ -1433,9 +1638,9 @@ jobs:
 
             <main class="scripts-content">
               <div class="wrap">
-                <section class="script-grid">
-                  {''.join(cards)}
-                </section>
+                <div id="script-groups">
+                  {''.join(page_sections)}
+                </div>
                 <div id="empty" class="empty">没有找到匹配的脚本。</div>
               </div>
             </main>
@@ -1481,6 +1686,8 @@ jobs:
               (() => {{
                 const search = document.getElementById("search");
                 const cards = [...document.querySelectorAll(".script-card")];
+                const seriesGroups = [...document.querySelectorAll(".series-group")];
+                const folderGroups = [...document.querySelectorAll(".folder-group")];
                 const filters = [...document.querySelectorAll(".filter")];
                 const empty = document.getElementById("empty");
                 const ua = navigator.userAgent;
@@ -1513,7 +1720,7 @@ jobs:
                   cards.forEach(card => {{
                     const groupMatch =
                       activeGroup === "all" ||
-                      card.dataset.group === activeGroup;
+                      card.dataset.folder === activeGroup;
 
                     const textMatch =
                       !query ||
@@ -1526,6 +1733,20 @@ jobs:
                     if (show) {{
                       visible += 1;
                     }}
+                  }});
+
+                  seriesGroups.forEach(group => {{
+                    const hasVisibleCard = [...group.querySelectorAll(".script-card")]
+                      .some(card => !card.classList.contains("hidden"));
+
+                    group.classList.toggle("hidden", !hasVisibleCard);
+                  }});
+
+                  folderGroups.forEach(group => {{
+                    const hasVisibleCard = [...group.querySelectorAll(".script-card")]
+                      .some(card => !card.classList.contains("hidden"));
+
+                    group.classList.toggle("hidden", !hasVisibleCard);
                   }});
 
                   empty.style.display = visible ? "none" : "block";

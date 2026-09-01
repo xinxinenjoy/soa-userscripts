@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         SOA.2.4前台批量模块
+// @name         前台-1.1批量预约工具
 // @namespace    https://tampermonkey.net/
 // @version      1.15
 // @description  批量预约单号；支持SPA常驻、14位预约单号智能提取、可调宽度窗口及“已到检”首次查询自动仅当日。

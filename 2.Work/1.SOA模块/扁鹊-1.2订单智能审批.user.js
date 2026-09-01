@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         SOA.3.1订单智能审批
+// @name         扁鹊-1.2订单智能审批
 // @namespace    https://tampermonkey.net/
 // @version      2.2
 // @description  SOA智能审批：阶段识别、日期校验、内勤复核、合同智能补全、文件上传、发起落单及落单审核。

@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         SOA.3.2体检数据查询
+// @name         扁鹊-1.3体检数据查询
 // @namespace    https://tampermonkey.net/
 // @version      1.2
 // @description  SOA体检数据：打开模块后自动读取落单数据、体检汇总及套餐卡/储值卡数量，并支持卡池新标签页自动查询。

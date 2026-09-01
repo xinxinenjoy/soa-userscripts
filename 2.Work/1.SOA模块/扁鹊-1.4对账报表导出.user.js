@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         SOA.3.3对账报表导出
+// @name         扁鹊-1.4对账报表导出
 // @namespace    https://tampermonkey.net/
 // @version      1.6
 // @description  SOA对账报表：支持自定义日期、自动分段、体检名单自动读取、金额差异核对与分段导出。
