@@ -9,8 +9,8 @@
 // @run-at       document-start
 
 // @author       WanXin
-// @publishGroup soaxg
-// @publishID    soa-qiantaipiliang
+// @publishGroup qiantai
+// @publishID    qiantai-piliangyuyue
 // @updateURL    https://scripts.wanxinxin.dpdns.org/soaxg/soa-qiantaipiliang.user.js
 // @downloadURL  https://scripts.wanxinxin.dpdns.org/soaxg/soa-qiantaipiliang.user.js
 // ==/UserScript==

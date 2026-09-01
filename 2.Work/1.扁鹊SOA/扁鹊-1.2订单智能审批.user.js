@@ -8,7 +8,7 @@
 // @grant        none
 
 // @author       WanXin
-// @publishGroup soaxg
+// @publishGroup bianque
 // @publishID    soa-dingdanauto
 // @updateURL    https://scripts.wanxinxin.dpdns.org/soaxg/soa-dingdanauto.user.js
 // @downloadURL  https://scripts.wanxinxin.dpdns.org/soaxg/soa-dingdanauto.user.js

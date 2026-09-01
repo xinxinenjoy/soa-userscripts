@@ -18,7 +18,7 @@
 // @run-at       document-start
 
 // @author       WanXin
-// @publishGroup soaxg
+// @publishGroup bianque
 // @publishID    soa-duizhangbaobiao
 // @updateURL    https://scripts.wanxinxin.dpdns.org/soaxg/soa-duizhangbaobiao.user.js
 // @downloadURL  https://scripts.wanxinxin.dpdns.org/soaxg/soa-duizhangbaobiao.user.js

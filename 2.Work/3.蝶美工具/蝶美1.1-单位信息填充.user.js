@@ -11,8 +11,8 @@
 //
 
 // @author       WanXin
-// @publishGroup soaxg
-// @publishID    soa-danweixinxi
+// @publishGroup diemei
+// @publishID    diemei-danweixinxi
 // @updateURL    https://scripts.wanxinxin.dpdns.org/soaxg/soa-danweixinxi.user.js
 // @downloadURL  https://scripts.wanxinxin.dpdns.org/soaxg/soa-danweixinxi.user.js
 // ==/UserScript==
