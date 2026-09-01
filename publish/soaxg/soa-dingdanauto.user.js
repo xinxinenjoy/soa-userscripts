@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SOA.2.5订单流程自动化
 // @namespace    https://tampermonkey.net/
-// @version      1.31
-// @description  SOA订单流程自动化脚本，支持订单详情各阶段自动处理，包括审批备注填写、合同配置、体检时间修正等功能，提供数据汇总及操作面板。
+// @version      1.32
+// @description  SOA订单流程自动化：内勤复核、合同补充、发起落单、落单审核、落单完成及数据提取；支持文件绑定、异常等待、流程状态判定及卡池数量查询。
 
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
@@ -26,16 +26,12 @@
  *
  * 更新记录
  *
+ * v1.32  -  2026-9-1
+ * - 合同阶段改为逐项判断：已有签单主体、日期、名单时限均保留，仅补充空字段。
+ * - 已存在合同文件/授权书时跳过上传；全部完整时直接进入下一步，避免重复保存和上传。
+ *
  * v1.31  -  2026-9-1
- * - 优化：点击卡数量改为新建标签页打开卡池查询，不影响当前订单页面。
- * - 修复：卡池页自动查询增加页签激活、输入完成和按钮可用等待，避免跳转后操作过快导致查询未触发。
- * - UI：数量大于0时可点击并显示颜色+下划线；数量为0时显示黑色普通文字且不可交互。
- *
- * v1.30  -  2026-9-1
- * - 新增点击卡数量自动打开对应卡池并查询。
- *
- * v1.29  -  2026-9-1
- * - 精简 UI 使用说明及脚本更新记录。
+ * - 卡池正数支持新标签页自动查询，0值不可交互。
  *
  * v1.0  -  2026-8-30
  * - 首个 Tampermonkey 正式版。
@@ -2666,12 +2662,34 @@
         CONFIG.CONTRACT_COMPANY_SELECTOR
       );
 
-    if (
-      !input ||
-      input.disabled
-    ) {
+    if (!input) {
       throw new Error(
-        "己方签单主体（乙方）当前不可编辑"
+        "未找到己方签单主体（乙方）"
+      );
+    }
+
+    const existingText =
+      getSelectVisibleText(
+        input
+      ) ||
+      cleanText(
+        input.value
+      );
+
+    if (existingText) {
+      log(
+        `✓ 己方签单主体已有值：${existingText}，跳过。`
+      );
+
+      return {
+        skipped: true,
+        value: existingText
+      };
+    }
+
+    if (input.disabled) {
+      throw new Error(
+        "己方签单主体（乙方）为空且当前不可编辑"
       );
     }
 
@@ -3097,74 +3115,141 @@
       );
     }
 
+    const existingBegin =
+      cleanText(
+        begin.value
+      );
+
+    const existingEnd =
+      cleanText(
+        end.value
+      );
+
+    if (
+      existingBegin &&
+      existingEnd
+    ) {
+      log(
+        `✓ 合同日期已有值：${existingBegin} → ${existingEnd}，跳过。`
+      );
+
+      return {
+        skipped: true
+      };
+    }
+
     const today =
       new Date();
 
-    const oneYearLater =
-      addYearsClamped(
-        today,
-        1
+    let beginTarget =
+      null;
+
+    let endTarget =
+      null;
+
+    if (!existingBegin) {
+      beginTarget =
+        today;
+    }
+
+    if (!existingEnd) {
+      const existingBeginDate =
+        existingBegin
+          ? parseYmdDate(
+              existingBegin
+            )
+          : null;
+
+      endTarget =
+        addYearsClamped(
+          existingBeginDate ||
+          beginTarget ||
+          today,
+          1
+        );
+    }
+
+    if (beginTarget) {
+      const beginText =
+        formatDate(
+          beginTarget
+        );
+
+      log(
+        `合同开始日期为空，补充为 ${beginText}...`
       );
 
-    const beginText =
-      formatDate(
-        today
-      );
-
-    const endText =
-      formatDate(
-        oneYearLater
-      );
-
-    log(
-      `3/5 填写合同日期：${beginText} → ${endText}`
-    );
-
-    let beginOk =
-      await chooseDateByPicker(
-        begin,
-        today
-      );
-
-    if (!beginOk) {
-      beginOk =
-        await setDateFallback(
+      let beginOk =
+        await chooseDateByPicker(
           begin,
-          today
+          beginTarget
         );
-    }
 
-    if (!beginOk) {
-      throw new Error(
-        `合同开始日期未能写入 ${beginText}`
+      if (!beginOk) {
+        beginOk =
+          await setDateFallback(
+            begin,
+            beginTarget
+          );
+      }
+
+      if (!beginOk) {
+        throw new Error(
+          `合同开始日期未能写入 ${beginText}`
+        );
+      }
+
+      await sleep(
+        180
+      );
+    } else {
+      log(
+        `✓ 合同开始日期已有值：${existingBegin}，保留。`
       );
     }
 
-    await sleep(180);
+    if (endTarget) {
+      const endText =
+        formatDate(
+          endTarget
+        );
 
-    let endOk =
-      await chooseDateByPicker(
-        end,
-        oneYearLater
+      log(
+        `合同结束日期为空，补充为 ${endText}...`
       );
 
-    if (!endOk) {
-      endOk =
-        await setDateFallback(
+      let endOk =
+        await chooseDateByPicker(
           end,
-          oneYearLater
+          endTarget
         );
-    }
 
-    if (!endOk) {
-      throw new Error(
-        `合同结束日期未能写入 ${endText}`
+      if (!endOk) {
+        endOk =
+          await setDateFallback(
+            end,
+            endTarget
+          );
+      }
+
+      if (!endOk) {
+        throw new Error(
+          `合同结束日期未能写入 ${endText}`
+        );
+      }
+    } else {
+      log(
+        `✓ 合同结束日期已有值：${existingEnd}，保留。`
       );
     }
 
     log(
       `✓ 合同日期：${begin.value} → ${end.value}`
     );
+
+    return {
+      skipped: false
+    };
   }
 
   async function fillInspectionPeopleDay() {
@@ -3180,12 +3265,28 @@
       return;
     }
 
+    const existingValue =
+      cleanText(
+        input.value
+      );
+
+    if (existingValue) {
+      log(
+        `✓ 提交名单时限已有值：${existingValue}，跳过。`
+      );
+
+      return {
+        skipped: true,
+        value: existingValue
+      };
+    }
+
     if (
       input.disabled ||
       input.readOnly
     ) {
       warn(
-        "4/5 #inspectionPeopleDay 存在但不可编辑，跳过。"
+        "4/5 #inspectionPeopleDay 为空但当前不可编辑，跳过。"
       );
       return;
     }
@@ -3779,6 +3880,179 @@
     );
   }
 
+  function getUploaderFileState(
+    kind
+  ) {
+    const uploader =
+      findUploader(
+        kind
+      );
+
+    if (!uploader) {
+      return {
+        moduleExists:
+          false,
+        hasFile:
+          false
+      };
+    }
+
+    const list =
+      uploader.querySelector(
+        ".contract-list"
+      );
+
+    if (list) {
+      const text =
+        compactText(
+          list.textContent
+        );
+
+      if (
+        text &&
+        !text.includes(
+          "暂无数据"
+        )
+      ) {
+        return {
+          moduleExists:
+            true,
+          hasFile:
+            true
+        };
+      }
+    }
+
+    const existingItem =
+      uploader.querySelector(
+        ".ant-upload-list-item, .contract-list .ant-list-item, .contract-list [class*='file-item']"
+      );
+
+    return {
+      moduleExists:
+        true,
+      hasFile:
+        Boolean(
+          existingItem
+        )
+    };
+  }
+
+  function contractNeedsBoundFile() {
+    const contract =
+      getUploaderFileState(
+        "contract"
+      );
+
+    const auth =
+      getUploaderFileState(
+        "auth"
+      );
+
+    return Boolean(
+      (
+        contract.moduleExists &&
+        !contract.hasFile
+      ) ||
+      (
+        auth.moduleExists &&
+        !auth.hasFile
+      )
+    );
+  }
+
+  function getContractCompletionState() {
+    const company =
+      document.querySelector(
+        CONFIG.CONTRACT_COMPANY_SELECTOR
+      );
+
+    const begin =
+      document.querySelector(
+        CONFIG.CONTRACT_BEGIN_SELECTOR
+      );
+
+    const end =
+      document.querySelector(
+        CONFIG.CONTRACT_END_SELECTOR
+      );
+
+    const inspection =
+      document.querySelector(
+        CONFIG.INSPECTION_DAY_SELECTOR
+      );
+
+    const companyValue =
+      getSelectVisibleText(
+        company
+      ) ||
+      cleanText(
+        company?.value
+      );
+
+    const beginValue =
+      cleanText(
+        begin?.value
+      );
+
+    const endValue =
+      cleanText(
+        end?.value
+      );
+
+    const inspectionValue =
+      cleanText(
+        inspection?.value
+      );
+
+    const formNeedsEdit =
+      Boolean(
+        !companyValue ||
+        !beginValue ||
+        !endValue ||
+        (
+          inspection &&
+          !inspectionValue
+        )
+      );
+
+    const contractUpload =
+      getUploaderFileState(
+        "contract"
+      );
+
+    const authUpload =
+      getUploaderFileState(
+        "auth"
+      );
+
+    const uploadNeedsFile =
+      Boolean(
+        (
+          contractUpload.moduleExists &&
+          !contractUpload.hasFile
+        ) ||
+        (
+          authUpload.moduleExists &&
+          !authUpload.hasFile
+        )
+      );
+
+    return {
+      companyValue,
+      beginValue,
+      endValue,
+      inspectionValue,
+      formNeedsEdit,
+      contractUpload,
+      authUpload,
+      uploadNeedsFile,
+      complete:
+        !formNeedsEdit &&
+        !uploadNeedsFile
+    };
+  }
+
   async function waitUploadVisible(
     kind,
     file,
@@ -3850,11 +4124,34 @@
     label,
     token = null
   ) {
+    const currentState =
+      getUploaderFileState(
+        kind
+      );
+
+    if (
+      currentState.moduleExists &&
+      currentState.hasFile
+    ) {
+      log(
+        `✓ ${label}已有文件，跳过重复上传。`
+      );
+
+      return {
+        skipped: true,
+        reason: "existing-file"
+      };
+    }
+
     if (!file) {
       warn(
         `未选择${label}，本次跳过。`
       );
-      return;
+
+      return {
+        skipped: true,
+        reason: "file-missing"
+      };
     }
 
     const uploader =
@@ -8719,28 +9016,165 @@
       );
     }
 
-    const sharedFile =
-      await getBoundFileForRun();
+    const initialState =
+      getContractCompletionState();
 
-    log(
-      `合同补充：使用已选择文件 ${sharedFile.name}`
-    );
+    if (
+      initialState.complete
+    ) {
+      log(
+        "✓ 合同字段及现有上传文件已完整，跳过合同编辑、保存和重复上传。"
+      );
 
-    await enterEditMode(
-      token
-    );
+      updatePanelStatus(
+        "✓ 合同资料已完整，直接进入下一步。",
+        "success"
+      );
 
-    await selectConfiguredContractCompany(
-      token
-    );
+      return;
+    }
 
-    await setContractDates();
+    let formChanged =
+      false;
 
-    await fillInspectionPeopleDay();
+    if (
+      initialState.formNeedsEdit
+    ) {
+      log(
+        "合同补充：检测到空字段，仅补充缺失内容..."
+      );
 
-    await saveContractForm(
-      token
-    );
+      await enterEditMode(
+        token
+      );
+
+      const beforeCompany =
+        getSelectVisibleText(
+          document.querySelector(
+            CONFIG.CONTRACT_COMPANY_SELECTOR
+          )
+        ) ||
+        cleanText(
+          document.querySelector(
+            CONFIG.CONTRACT_COMPANY_SELECTOR
+          )?.value
+        );
+
+      const beforeBegin =
+        cleanText(
+          document.querySelector(
+            CONFIG.CONTRACT_BEGIN_SELECTOR
+          )?.value
+        );
+
+      const beforeEnd =
+        cleanText(
+          document.querySelector(
+            CONFIG.CONTRACT_END_SELECTOR
+          )?.value
+        );
+
+      const beforeInspection =
+        cleanText(
+          document.querySelector(
+            CONFIG.INSPECTION_DAY_SELECTOR
+          )?.value
+        );
+
+      await selectConfiguredContractCompany(
+        token
+      );
+
+      await setContractDates();
+
+      await fillInspectionPeopleDay();
+
+      const afterCompany =
+        getSelectVisibleText(
+          document.querySelector(
+            CONFIG.CONTRACT_COMPANY_SELECTOR
+          )
+        ) ||
+        cleanText(
+          document.querySelector(
+            CONFIG.CONTRACT_COMPANY_SELECTOR
+          )?.value
+        );
+
+      const afterBegin =
+        cleanText(
+          document.querySelector(
+            CONFIG.CONTRACT_BEGIN_SELECTOR
+          )?.value
+        );
+
+      const afterEnd =
+        cleanText(
+          document.querySelector(
+            CONFIG.CONTRACT_END_SELECTOR
+          )?.value
+        );
+
+      const afterInspection =
+        cleanText(
+          document.querySelector(
+            CONFIG.INSPECTION_DAY_SELECTOR
+          )?.value
+        );
+
+      formChanged =
+        (
+          beforeCompany !==
+          afterCompany
+        ) ||
+        (
+          beforeBegin !==
+          afterBegin
+        ) ||
+        (
+          beforeEnd !==
+          afterEnd
+        ) ||
+        (
+          beforeInspection !==
+          afterInspection
+        );
+
+      if (formChanged) {
+        await saveContractForm(
+          token
+        );
+      } else {
+        log(
+          "✓ 合同字段无需修改，跳过合同保存。"
+        );
+      }
+    } else {
+      log(
+        "✓ 合同字段均已有值，跳过编辑和保存。"
+      );
+    }
+
+    const uploadState =
+      getContractCompletionState();
+
+    let sharedFile =
+      null;
+
+    if (
+      uploadState.uploadNeedsFile
+    ) {
+      sharedFile =
+        await getBoundFileForRun();
+
+      log(
+        `合同补充：仅为缺失上传项使用已选择文件 ${sharedFile.name}`
+      );
+    } else {
+      log(
+        "✓ 合同文件/授权书已存在或对应模块不存在，不读取绑定文件。"
+      );
+    }
 
     const contractUploadResult =
       await uploadOne(
@@ -8763,23 +9197,35 @@
       authUploadResult
     ];
 
-    const handledUploads =
+    const uploadedCount =
       uploadResults.filter(
         result =>
           result &&
           !result.skipped
       ).length;
 
-    const skippedUploads =
+    const existingCount =
       uploadResults.filter(
         result =>
-          result &&
-          result.skipped
+          result?.reason ===
+          "existing-file"
       ).length;
 
+    const finalState =
+      getContractCompletionState();
+
     updatePanelStatus(
-      `✓ 合同补充完成：已处理上传模块 ${handledUploads} 个，跳过不存在模块 ${skippedUploads} 个。`,
-      "success"
+      finalState.complete
+        ? (
+            uploadedCount > 0 ||
+            formChanged
+              ? `✓ 合同补充完成：新增上传 ${uploadedCount} 项，已有文件跳过 ${existingCount} 项。`
+              : "✓ 合同资料已完整，无需重复处理。"
+          )
+        : "合同补充已按现有状态处理，请检查仍未完成的项目。",
+      finalState.complete
+        ? "success"
+        : "normal"
     );
   }
 
@@ -9231,7 +9677,7 @@
           min-width:0;
           font-size:15px;
         ">
-          SOA订单流程自动化 v1.31
+          SOA订单流程自动化 v1.32
         </strong>
 
         <button
@@ -9303,7 +9749,7 @@
 
           <div style="margin-bottom:3px;">
             <strong style="color:#444;">流程：</strong>
-            内勤复核及后续阶段可执行；运行中可停止；已落单仅保留数据查询。
+            内勤复核及后续阶段可执行；合同阶段只补空字段并跳过已有文件；运行中可停止，已落单仅保留数据查询。
           </div>
 
           <div style="margin-bottom:3px;">
@@ -10257,12 +10703,19 @@
              * 避免稍后跑到合同阶段时 user activation 已失效，
              * 浏览器无法再弹出权限授权。
              */
-            if (
+            const shouldPrepareBoundFile =
               stage ===
                 "内勤复核" ||
-              stage ===
-                "合同补充"
-            ) {
+              (
+                stage ===
+                  "合同补充" &&
+                (
+                  !contractPageVisible() ||
+                  contractNeedsBoundFile()
+                )
+              );
+
+            if (shouldPrepareBoundFile) {
               await ensureBoundFilePermissionFromUserGesture();
             }
 
@@ -10782,6 +11235,6 @@
   routeCheck();
 
   console.log(
-    "[SOA流程自动化] v1.31 已加载"
+    "[SOA流程自动化] v1.32 已加载"
   );
 })();
