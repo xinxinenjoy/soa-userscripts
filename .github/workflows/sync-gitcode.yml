@@ -12,7 +12,7 @@ env:
 
 on:
   # README 完成后再同步。
-  # GitCode 只承担国内脚本分发，不再镜像完整开发仓库。
+  # GitCode 只承担国内浏览 / 展示镜像，不参与 Tampermonkey 自动更新。
   workflow_run:
     workflows:
       - "Update Userscripts README"
@@ -142,7 +142,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # GitCode 只作为国内发布仓库。
+          # GitCode 只作为国内浏览 / 展示镜像。
           # 清理旧的源代码、Workflow 等镜像内容，只保留 README + publish/。
           find gitcode \
             -mindepth 1 \
@@ -203,7 +203,7 @@ jobs:
             exit 1
           fi
 
-          echo "GitCode 国内分发仓库同步完成。"
+          echo "GitCode 国内展示镜像同步完成。"
 
       - name: Sync Summary
         shell: bash
@@ -211,13 +211,13 @@ jobs:
           SCRIPT_COUNT="$(find "source/${PUBLISH_DIR}" -type f -name '*.user.js' | wc -l | tr -d ' ')"
 
           {
-            echo "## GitCode 国内分发同步"
+            echo "## GitCode 国内展示镜像同步"
             echo
             echo "✅ README 已生成"
             echo
             echo "✅ 正式发布脚本：${SCRIPT_COUNT} 个"
             echo
-            echo "✅ GitCode 仅同步 \`${PUBLISH_DIR}/\` + \`${README_FILE}\`"
+            echo "✅ GitCode 仅同步 \`${PUBLISH_DIR}/\` + \`${README_FILE}\`，用于国内浏览 / 展示"
             echo
             echo "✅ GitCode 使用浅克隆，并对 Clone / Push 自动重试 3 次"
             echo

@@ -5,9 +5,8 @@ env:
   README_FILE: README.md
   PUBLISH_DIR: publish
 
-  GITCODE_OWNER: gcw_7DpHPfUr
-  GITCODE_REPO: wanxin-userscripts
-  GITCODE_BRANCH: main
+  # 与 Build Userscripts 保持一致的固定分发域名
+  DISTRIBUTION_BASE_URL: https://scripts.wanxinxin.dpdns.org
 
 on:
   workflow_run:
@@ -61,9 +60,10 @@ jobs:
           PUBLISH_DIR = os.environ.get("PUBLISH_DIR", "publish")
           PUBLISH_ROOT = ROOT / PUBLISH_DIR
 
-          GITCODE_OWNER = os.environ["GITCODE_OWNER"]
-          GITCODE_REPO = os.environ["GITCODE_REPO"]
-          GITCODE_BRANCH = os.environ["GITCODE_BRANCH"]
+          DISTRIBUTION_BASE_URL = os.environ.get(
+              "DISTRIBUTION_BASE_URL",
+              "https://scripts.wanxinxin.dpdns.org"
+          ).rstrip("/")
           GITHUB_REPOSITORY = os.environ["GITHUB_REPOSITORY"]
           GITHUB_BRANCH = os.environ.get("GITHUB_BRANCH", "main")
 
@@ -267,10 +267,31 @@ jobs:
 
               encoded = encode_relative(relative)
 
-              gitcode_url = (
-                  f"https://raw.gitcode.com/{GITCODE_OWNER}/{GITCODE_REPO}/"
-                  f"raw/{GITCODE_BRANCH}/{encoded}"
+              # README 的推荐安装地址与脚本内部 @downloadURL / @updateURL
+              # 必须使用同一个 Cloudflare Pages 固定域名。
+              filename = f"{publish_id}.user.js"
+              expected_install_url = (
+                  f"{DISTRIBUTION_BASE_URL}/"
+                  f"{quote(publish_group, safe='._-')}/"
+                  f"{quote(filename, safe='._-')}"
               )
+
+              update_url = first(meta, "updateURL")
+              download_url = first(meta, "downloadURL")
+
+              if update_url != expected_install_url:
+                  errors.append(
+                      f"{relative}: @updateURL 与 Cloudflare 固定地址不一致："
+                      f"{update_url or '[缺失]'}"
+                  )
+                  continue
+
+              if download_url != expected_install_url:
+                  errors.append(
+                      f"{relative}: @downloadURL 与 Cloudflare 固定地址不一致："
+                      f"{download_url or '[缺失]'}"
+                  )
+                  continue
 
               github_url = (
                   f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/"
@@ -286,7 +307,7 @@ jobs:
                       "publish_group": publish_group,
                       "publish_id": publish_id,
                       "modified_at": modified_at,
-                      "gitcode_url": gitcode_url,
+                      "install_url": expected_install_url,
                       "github_url": github_url,
                   }
               )
@@ -315,7 +336,7 @@ jobs:
               '',
               '**个人维护的 Tampermonkey 用户脚本集合**',
               '',
-              '以 GitHub 作为开发源，GitCode 提供国内安装与更新地址。',
+              '以 GitHub 作为开发源，Cloudflare Pages 提供稳定安装与自动更新地址，GitCode 保留国内展示镜像。',
               '',
               f'当前正式发布 **{len(items)}** 个脚本 · 每条记录显示源脚本最近修改时间',
               '',
@@ -338,15 +359,15 @@ jobs:
               '',
               '### 2. 安装需要的脚本',
               '',
-              '在下方脚本列表中点击 **「国内安装」**。浏览器会打开 Tampermonkey 安装页面，确认脚本名称和权限后点击 **安装** 即可。',
+              '在下方脚本列表中点击 **「推荐安装」**。浏览器会打开 Tampermonkey 安装页面，确认脚本名称和权限后点击 **安装** 即可。',
               '',
-              '> 国内用户优先使用 GitCode 地址。GitHub 地址仅作为备用安装源。',
+              '> 推荐安装地址使用自有域名 `scripts.wanxinxin.dpdns.org`，由 Cloudflare Pages 提供分发；GitHub Raw 仅作为备用安装源。',
               '',
               '### 3. 使用与更新',
               '',
               '脚本安装完成后，打开对应业务页面并刷新即可生效。脚本通过 `@version` 判断新版，通过固定的 `@updateURL` / `@downloadURL` 自动更新。',
               '',
-              '需要主动检查时，可打开：**Tampermonkey → 管理面板 → 检查用户脚本更新**。如果刚发布的新版本暂时没有检测到，通常是 GitCode Raw/CDN 缓存尚未刷新，可以稍后再试；也可以重新点击本 README 中的安装链接进行覆盖更新。',
+              '需要主动检查时，可打开：**Tampermonkey → 管理面板 → 检查用户脚本更新**。刚发布新版时，请先等待 GitHub Actions 与 Cloudflare Pages 部署完成；如需立即覆盖更新，也可以重新点击本 README 中的推荐安装链接。',
               '',
               '---',
               '',
@@ -378,7 +399,7 @@ jobs:
 
                   for item in group_items:
                       install_links = (
-                          f"[🇨🇳 国内安装]({item['gitcode_url']})"
+                          f"[⚡ 推荐安装]({item['install_url']})"
                           f" · [GitHub 备用]({item['github_url']})"
                       )
 
@@ -424,9 +445,9 @@ jobs:
               '<details>',
               '<summary><strong>刚发布新版但检查不到怎么办</strong></summary>',
               '',
-              '先确认 README 中显示的版本已经更新。如果 README 已经更新，但 Tampermonkey 仍提示无新版，通常可以等待几分钟后再次检查。GitCode Raw/CDN 可能存在短暂缓存。',
+              '先确认 README 中显示的版本已经更新，并确认 Cloudflare Pages 最新部署已经完成。如果 Tampermonkey 仍提示无新版，可以稍后再次检查。',
               '',
-              '如果需要立即更新，重新点击该脚本的 **国内安装** 链接，Tampermonkey 会识别为同一脚本并进入覆盖更新流程。',
+              '如果需要立即更新，重新点击该脚本的 **推荐安装** 链接，Tampermonkey 会识别为同一脚本并进入覆盖更新流程。',
               '',
               '</details>',
               '',
@@ -445,12 +466,16 @@ jobs:
               '      ↓',
               'Update Userscripts README',
               '      ↓',
-              'GitCode 国内发布镜像',
+              'Cloudflare Pages 固定域名分发',
+              '      ↓',
+              'Tampermonkey 安装 / 自动更新',
+              '',
+              '同时：README + publish/ → GitCode 国内展示镜像',
               '```',
               '',
               '每个脚本使用固定的 `@publishGroup + @publishID` 生成永久安装地址，因此源文件改名或移动目录后，已经安装的脚本仍可继续更新。',
               '',
-              'GitCode 仅作为国内脚本分发镜像，正式开发和版本维护以 GitHub `main` 为准。',
+              'Cloudflare Pages 自定义域名负责脚本安装与自动更新；GitCode 仅作为国内浏览和展示镜像。正式开发与版本维护始终以 GitHub `main` 为准。',
               '',
               '---',
               '',
