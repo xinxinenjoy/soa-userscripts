@@ -8,10 +8,10 @@
 // @grant        none
 
 // @author       WanXin
-// @publishGroup soaxg
-// @publishID    soa-shouyepaixu
-// @updateURL    https://scripts.wanxinxin.dpdns.org/soaxg/soa-shouyepaixu.user.js
-// @downloadURL  https://scripts.wanxinxin.dpdns.org/soaxg/soa-shouyepaixu.user.js
+// @publishGroup bianque
+// @publishID    soa-shouye
+// @updateURL    https://scripts.wanxinxin.dpdns.org/bianque/soa-shouye.user.js
+// @downloadURL  https://scripts.wanxinxin.dpdns.org/bianque/soa-shouye.user.js
 // ==/UserScript==
 
 /*

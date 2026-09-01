@@ -10,8 +10,8 @@
 // @author       WanXin
 // @publishGroup fapiao
 // @publishID    fapiao-quanju
-// @updateURL    https://scripts.wanxinxin.dpdns.org/soaxg/soa-quanjufapiao.user.js
-// @downloadURL  https://scripts.wanxinxin.dpdns.org/soaxg/soa-quanjufapiao.user.js
+// @updateURL    https://scripts.wanxinxin.dpdns.org/fapiao/fapiao-quanju.user.js
+// @downloadURL  https://scripts.wanxinxin.dpdns.org/fapiao/fapiao-quanju.user.js
 // ==/UserScript==
 
 /*

@@ -10,10 +10,10 @@
 // @noframes
 
 // @author       WanXin
-// @publishGroup soaxg
-// @publishID    soa-weihaihedui
-// @updateURL    https://scripts.wanxinxin.dpdns.org/soaxg/soa-weihaihedui.user.js
-// @downloadURL  https://scripts.wanxinxin.dpdns.org/soaxg/soa-weihaihedui.user.js
+// @publishGroup diemei
+// @publishID    diemei-weihaihedui
+// @updateURL    https://scripts.wanxinxin.dpdns.org/diemei/diemei-weihaihedui.user.js
+// @downloadURL  https://scripts.wanxinxin.dpdns.org/diemei/diemei-weihaihedui.user.js
 // ==/UserScript==
 
 /*

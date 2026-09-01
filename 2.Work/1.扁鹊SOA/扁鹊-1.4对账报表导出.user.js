@@ -20,8 +20,8 @@
 // @author       WanXin
 // @publishGroup bianque
 // @publishID    soa-duizhangbaobiao
-// @updateURL    https://scripts.wanxinxin.dpdns.org/soaxg/soa-duizhangbaobiao.user.js
-// @downloadURL  https://scripts.wanxinxin.dpdns.org/soaxg/soa-duizhangbaobiao.user.js
+// @updateURL    https://scripts.wanxinxin.dpdns.org/bianque/soa-duizhangbaobiao.user.js
+// @downloadURL  https://scripts.wanxinxin.dpdns.org/bianque/soa-duizhangbaobiao.user.js
 // ==/UserScript==
 
 /*

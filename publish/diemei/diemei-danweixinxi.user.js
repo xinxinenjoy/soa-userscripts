@@ -11,10 +11,10 @@
 //
 
 // @author       WanXin
-// @publishGroup soaxg
-// @publishID    soa-danweixinxi
-// @updateURL    https://scripts.wanxinxin.dpdns.org/soaxg/soa-danweixinxi.user.js
-// @downloadURL  https://scripts.wanxinxin.dpdns.org/soaxg/soa-danweixinxi.user.js
+// @publishGroup diemei
+// @publishID    diemei-danweixinxi
+// @updateURL    https://scripts.wanxinxin.dpdns.org/diemei/diemei-danweixinxi.user.js
+// @downloadURL  https://scripts.wanxinxin.dpdns.org/diemei/diemei-danweixinxi.user.js
 // ==/UserScript==
 
 /*
