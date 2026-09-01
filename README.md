@@ -8,7 +8,7 @@
 
 GitHub 作为唯一开发源，Cloudflare Pages 提供展示、安装与自动更新。
 
-当前正式发布 **11** 个脚本 · 最近修改 **2026-09-02 00:30**
+当前正式发布 **11** 个脚本 · 最近修改 **2026-09-02 00:39**
 
 </div>
 
@@ -52,15 +52,15 @@ GitHub 作为唯一开发源，Cloudflare Pages 提供展示、安装与自动�
 
 | 脚本 | 版本 | 修改时间 | 功能说明 | 安装 |
 |---|---:|---|---|---|
-| **前台-1.1批量预约工具** | `1.15` | 2026-09-02 00:30 | 批量预约单号；支持SPA常驻、14位预约单号智能提取、可调宽度窗口及“已到检”首次查询自动仅当日。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-qiantaipiliang.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-qiantaipiliang.user.js) |
-| **发票1.1全局页面** | `6.14` | 2026-09-02 00:30 | 优化SOA发票页面的表格布局、文案显示和复制功能，支持动态加载内容的处理。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-quanjufapiao.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-quanjufapiao.user.js) |
-| **发票1.2订单页面** | `1.6` | 2026-09-02 00:30 | SOA订单发票列表页面增强：列重排、宽度调整、文案替换、复制优化。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-dingdanfapiao.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-dingdanfapiao.user.js) |
-| **扁鹊-1.1首页模块排序** | `4.6` | 2026-09-02 00:30 | SOA首页模块排序，支持拖拽排序、保存顺序、恢复默认顺序、设置每行显示列数、设置模块宽度、设置列间距。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-shouyepaixu.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-shouyepaixu.user.js) |
-| **扁鹊-1.2订单智能审批** | `2.2` | 2026-09-02 00:30 | SOA智能审批：阶段识别、日期校验、内勤复核、合同智能补全、文件上传、发起落单及落单审核。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-dingdanauto.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-dingdanauto.user.js) |
-| **扁鹊-1.3体检数据查询** | `1.2` | 2026-09-02 00:30 | SOA体检数据：打开模块后自动读取落单数据、体检汇总及套餐卡/储值卡数量，并支持卡池新标签页自动查询。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-dingdandata.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-dingdandata.user.js) |
-| **扁鹊-1.4对账报表导出** | `1.6` | 2026-09-02 00:30 | SOA对账报表：支持自定义日期、自动分段、体检名单自动读取、金额差异核对与分段导出。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-duizhangbaobiao.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-duizhangbaobiao.user.js) |
-| **蝶美1.1-单位信息填充** | `7.7.24` | 2026-09-02 00:30 | 自动填充单位信息，支持地区、行业、经济类型、单位类型、社会信用代码、企业规模、职工人数、接害人数等字段。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-danweixinxi.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-danweixinxi.user.js) |
-| **蝶美1.2-套餐危害核对** | `4.2.15` | 2026-09-02 00:30 | 增强“套餐危害核对”功能，提供自动化核对、批量处理、用户自定义别名和忽略列表等功能。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/soaxg/soa-weihaihedui.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/soaxg/soa-weihaihedui.user.js) |
+| **前台-1.1批量预约工具** | `1.15` | 2026-09-02 00:39 | 批量预约单号；支持SPA常驻、14位预约单号智能提取、可调宽度窗口及“已到检”首次查询自动仅当日。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/qiantai/qiantai-piliangyuyue.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/qiantai/qiantai-piliangyuyue.user.js) |
+| **发票1.1全局页面** | `6.14` | 2026-09-02 00:39 | 优化SOA发票页面的表格布局、文案显示和复制功能，支持动态加载内容的处理。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/fapiao/fapiao-quanju.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/fapiao/fapiao-quanju.user.js) |
+| **发票1.2订单页面** | `1.6` | 2026-09-02 00:39 | SOA订单发票列表页面增强：列重排、宽度调整、文案替换、复制优化。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/fapiao/fapiao-dingdan.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/fapiao/fapiao-dingdan.user.js) |
+| **扁鹊-1.1首页模块排序** | `4.6` | 2026-09-02 00:39 | SOA首页模块排序，支持拖拽排序、保存顺序、恢复默认顺序、设置每行显示列数、设置模块宽度、设置列间距。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/bianque/soa-shouye.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/bianque/soa-shouye.user.js) |
+| **扁鹊-1.2订单智能审批** | `2.2` | 2026-09-02 00:39 | SOA智能审批：阶段识别、日期校验、内勤复核、合同智能补全、文件上传、发起落单及落单审核。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/bianque/soa-dingdanauto.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/bianque/soa-dingdanauto.user.js) |
+| **扁鹊-1.3体检数据查询** | `1.2` | 2026-09-02 00:39 | SOA体检数据：打开模块后自动读取落单数据、体检汇总及套餐卡/储值卡数量，并支持卡池新标签页自动查询。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/bianque/soa-dingdandata.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/bianque/soa-dingdandata.user.js) |
+| **扁鹊-1.4对账报表导出** | `1.6` | 2026-09-02 00:39 | SOA对账报表：支持自定义日期、自动分段、体检名单自动读取、金额差异核对与分段导出。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/bianque/soa-duizhangbaobiao.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/bianque/soa-duizhangbaobiao.user.js) |
+| **蝶美1.1-单位信息填充** | `7.7.24` | 2026-09-02 00:39 | 自动填充单位信息，支持地区、行业、经济类型、单位类型、社会信用代码、企业规模、职工人数、接害人数等字段。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/diemei/diemei-danweixinxi.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/diemei/diemei-danweixinxi.user.js) |
+| **蝶美1.2-套餐危害核对** | `4.2.15` | 2026-09-02 00:39 | 增强“套餐危害核对”功能，提供自动化核对、批量处理、用户自定义别名和忽略列表等功能。 | [⚡ 推荐安装](https://scripts.wanxinxin.dpdns.org/diemei/diemei-weihaihedui.user.js) · [GitHub 备用](https://raw.githubusercontent.com/xinxinenjoy/wanxin-userscripts/main/publish/diemei/diemei-weihaihedui.user.js) |
 
 ---
 
