@@ -10,8 +10,8 @@
 // @author       WanXin
 // @publishGroup hljdyxjb
 // @publishID    game-gowdxjt
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-gowdxjt.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/hljdyxjb/game-gowdxjt.user.js
+// @updateURL    https://scripts.wanxinxin.dpdns.org/hljdyxjb/game-gowdxjt.user.js
+// @downloadURL  https://scripts.wanxinxin.dpdns.org/hljdyxjb/game-gowdxjt.user.js
 // ==/UserScript==
 
 /*

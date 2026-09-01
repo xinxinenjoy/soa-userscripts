@@ -10,8 +10,8 @@
 // @author       WanXin
 // @publishGroup soaxg
 // @publishID    soa-shouyepaixu
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-shouyepaixu.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-shouyepaixu.user.js
+// @updateURL    https://scripts.wanxinxin.dpdns.org/soaxg/soa-shouyepaixu.user.js
+// @downloadURL  https://scripts.wanxinxin.dpdns.org/soaxg/soa-shouyepaixu.user.js
 // ==/UserScript==
 
 /*

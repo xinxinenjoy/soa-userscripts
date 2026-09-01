@@ -11,8 +11,8 @@
 // @author       WanXin
 // @publishGroup soaxg
 // @publishID    soa-qiantaipiliang
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-qiantaipiliang.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/soaxg/soa-qiantaipiliang.user.js
+// @updateURL    https://scripts.wanxinxin.dpdns.org/soaxg/soa-qiantaipiliang.user.js
+// @downloadURL  https://scripts.wanxinxin.dpdns.org/soaxg/soa-qiantaipiliang.user.js
 // ==/UserScript==
 
 /*
