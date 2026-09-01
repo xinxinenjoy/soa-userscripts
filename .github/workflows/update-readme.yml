@@ -487,6 +487,19 @@ jobs:
 
 
           # 5. Cloudflare Pages 首页
+          TAMPERMONKEY_OFFICIAL = "https://www.tampermonkey.net/?locale=zh"
+          TAMPERMONKEY_CHROME = (
+              "https://chromewebstore.google.com/detail/"
+              "tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo"
+          )
+          TAMPERMONKEY_EDGE = (
+              "https://microsoftedge.microsoft.com/addons/detail/"
+              "tampermonkey/iikmkjmpaadaobahmlepeloendndfphd"
+          )
+          TAMPERMONKEY_FIREFOX = (
+              "https://addons.mozilla.org/zh-CN/firefox/addon/tampermonkey/"
+          )
+
           buttons = [
               '<button class="filter active" data-group="all">全部</button>'
           ]
@@ -514,71 +527,92 @@ jobs:
                   ]).lower()
 
                   cards.append(
-                      f'''
-                      <article class="card"
+                      f"""
+                      <article class="script-card"
                                data-group="{h(item["display_group"])}"
                                data-search="{h(search_text)}">
-                        <div class="card-top">
-                          <div>
-                            <span class="category">{h(item["display_group"])}</span>
+                        <div class="script-card-head">
+                          <div class="script-title-wrap">
+                            <span class="script-category">{h(item["display_group"])}</span>
                             <h3>{h(item["name"])}</h3>
                           </div>
-                          <span class="version">v{h(item["version"])}</span>
+                          <span class="script-version">v{h(item["version"])}</span>
                         </div>
 
-                        <p class="description">
+                        <p class="script-description">
                           {h(item["description"]) or "暂无功能说明"}
                         </p>
 
-                        <div class="meta">
-                          <span>修改：{h(item["modified_at"])}</span>
+                        <div class="script-meta">
+                          <span>更新：{h(item["modified_at"])}</span>
                           <span>ID：{h(item["publish_id"])}</span>
                         </div>
 
-                        <div class="actions">
-                          <a class="install" href="{h(item["install_url"])}">立即安装</a>
-                          <a class="secondary"
+                        <div class="script-actions">
+                          <a class="button button-primary"
+                             href="{h(item["install_url"])}">
+                            立即安装
+                          </a>
+                          <a class="button button-secondary"
                              href="{h(item["github_source"])}"
                              target="_blank"
-                             rel="noopener noreferrer">查看源码</a>
+                             rel="noopener noreferrer">
+                            查看源码
+                          </a>
                         </div>
                       </article>
-                      '''
+                      """
                   )
 
-          html = f'''<!doctype html>
+          html = f"""<!doctype html>
           <html lang="zh-CN">
           <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
-            <meta name="description" content="WanXin Tampermonkey 用户脚本发布主页">
+            <meta name="description"
+                  content="WanXin Userscripts：Tampermonkey 用户脚本安装、更新与使用主页">
+            <meta name="color-scheme" content="light">
             <title>WanXin Userscripts</title>
 
             <style>
               :root {{
-                --bg: #f6f7fa;
+                --page: #f5f6f8;
                 --panel: #ffffff;
-                --text: #202532;
-                --muted: #737b8c;
-                --line: #e8eaf0;
+                --panel-soft: #fafafa;
+                --text: #20242d;
+                --muted: #727986;
+                --line: #e4e7ec;
                 --accent: #e5484d;
-                --accent-hover: #d53d42;
-                --soft: #fff0f0;
-                --shadow: 0 12px 34px rgba(25, 31, 45, .08);
-                --radius: 18px;
+                --accent-dark: #cf393f;
+                --accent-soft: #fff0f0;
+                --green: #37a856;
+                --green-dark: #2f934b;
+                --shadow: 0 14px 38px rgba(23, 28, 38, .08);
+                --radius-xl: 26px;
+                --radius-lg: 18px;
+                --radius-md: 13px;
               }}
 
-              * {{ box-sizing: border-box; }}
+              * {{
+                box-sizing: border-box;
+              }}
+
+              html {{
+                scroll-behavior: smooth;
+              }}
 
               body {{
                 margin: 0;
                 color: var(--text);
-                background: var(--bg);
+                background:
+                  radial-gradient(circle at 15% -10%, #ffffff 0, transparent 34rem),
+                  var(--page);
                 font-family:
                   "PingFang SC",
                   "Microsoft YaHei",
                   system-ui,
                   -apple-system,
+                  BlinkMacSystemFont,
                   "Segoe UI",
                   sans-serif;
               }}
@@ -588,67 +622,380 @@ jobs:
                 text-decoration: none;
               }}
 
+              button,
+              input {{
+                font: inherit;
+              }}
+
               .wrap {{
-                width: min(1160px, calc(100% - 32px));
+                width: min(1180px, calc(100% - 32px));
                 margin: 0 auto;
               }}
 
               .hero {{
-                padding: 48px 0 26px;
+                padding: 42px 0 20px;
               }}
 
-              .hero-box {{
-                padding: 36px;
-                border: 1px solid #f0e6e6;
-                border-radius: 26px;
+              .hero-panel {{
+                overflow: hidden;
+                position: relative;
+                padding: 42px;
+                border: 1px solid rgba(229, 72, 77, .10);
+                border-radius: var(--radius-xl);
                 background:
-                  linear-gradient(135deg, #fff 0%, #fff7f7 100%);
+                  linear-gradient(135deg, #ffffff 0%, #fff7f7 100%);
                 box-shadow: var(--shadow);
               }}
 
+              .hero-panel::after {{
+                content: "";
+                position: absolute;
+                right: -80px;
+                top: -120px;
+                width: 310px;
+                height: 310px;
+                border-radius: 50%;
+                background: rgba(229, 72, 77, .055);
+                pointer-events: none;
+              }}
+
+              .brand-row {{
+                display: flex;
+                align-items: center;
+                gap: 15px;
+              }}
+
+              .brand-mark {{
+                display: grid;
+                width: 52px;
+                height: 52px;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 4px;
+                align-items: center;
+                padding: 7px;
+                border-radius: 15px;
+                background: #222;
+                box-shadow: 0 8px 18px rgba(0,0,0,.14);
+              }}
+
+              .brand-mark span {{
+                display: block;
+                width: 100%;
+                aspect-ratio: 1;
+                border-radius: 50%;
+                background: #f2f2f2;
+              }}
+
               .eyebrow {{
-                display: inline-block;
-                padding: 6px 10px;
-                border-radius: 999px;
+                margin: 0 0 4px;
                 color: var(--accent);
-                background: var(--soft);
                 font-size: 13px;
-                font-weight: 700;
+                font-weight: 800;
+                letter-spacing: .04em;
+                text-transform: uppercase;
               }}
 
               h1 {{
-                margin: 14px 0 0;
-                font-size: clamp(34px, 6vw, 54px);
+                margin: 0;
+                font-size: clamp(32px, 6vw, 54px);
                 line-height: 1.08;
+                letter-spacing: -1.2px;
               }}
 
-              .subtitle {{
-                max-width: 760px;
-                margin: 16px 0 0;
+              .hero-copy {{
+                position: relative;
+                z-index: 1;
+                max-width: 820px;
+                margin: 20px 0 0;
                 color: var(--muted);
-                line-height: 1.8;
+                font-size: 16px;
+                line-height: 1.85;
               }}
 
-              .stats {{
+              .hero-actions {{
+                position: relative;
+                z-index: 1;
                 display: flex;
                 flex-wrap: wrap;
-                gap: 18px;
+                gap: 10px;
                 margin-top: 24px;
+              }}
+
+              .button {{
+                display: inline-flex;
+                min-height: 42px;
+                align-items: center;
+                justify-content: center;
+                padding: 0 16px;
+                border: 1px solid transparent;
+                border-radius: 12px;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: 750;
+                transition:
+                  transform .15s ease,
+                  background .15s ease,
+                  border-color .15s ease;
+              }}
+
+              .button:hover {{
+                transform: translateY(-1px);
+              }}
+
+              .button-primary {{
+                color: #fff;
+                background: var(--accent);
+              }}
+
+              .button-primary:hover {{
+                background: var(--accent-dark);
+              }}
+
+              .button-secondary {{
+                border-color: var(--line);
+                background: #fff;
+              }}
+
+              .button-secondary:hover {{
+                border-color: #d4d7de;
+                background: #fafafa;
+              }}
+
+              .hero-stats {{
+                position: relative;
+                z-index: 1;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-top: 25px;
+              }}
+
+              .stat-pill {{
+                padding: 8px 11px;
+                border: 1px solid rgba(229, 72, 77, .10);
+                border-radius: 999px;
+                color: #6f5960;
+                background: rgba(255,255,255,.75);
+                font-size: 13px;
+              }}
+
+              .stat-pill strong {{
+                color: var(--text);
+              }}
+
+              .section {{
+                padding: 18px 0;
+              }}
+
+              .section-head {{
+                display: flex;
+                gap: 18px;
+                align-items: flex-end;
+                justify-content: space-between;
+                margin-bottom: 16px;
+              }}
+
+              .section-title {{
+                margin: 0;
+                font-size: 25px;
+                line-height: 1.3;
+              }}
+
+              .section-desc {{
+                max-width: 720px;
+                margin: 6px 0 0;
                 color: var(--muted);
+                font-size: 14px;
+                line-height: 1.7;
+              }}
+
+              .steps {{
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 12px;
+                margin-top: 16px;
+              }}
+
+              .step {{
+                display: flex;
+                gap: 12px;
+                align-items: flex-start;
+                padding: 17px;
+                border: 1px solid var(--line);
+                border-radius: var(--radius-lg);
+                background: #fff;
+              }}
+
+              .step-number {{
+                display: grid;
+                flex: 0 0 auto;
+                width: 30px;
+                height: 30px;
+                place-items: center;
+                border-radius: 50%;
+                color: #fff;
+                background: var(--accent);
+                font-size: 13px;
+                font-weight: 800;
+              }}
+
+              .step strong {{
+                display: block;
+                margin-bottom: 4px;
                 font-size: 14px;
               }}
 
-              .stats strong {{
-                color: var(--text);
+              .step p {{
+                margin: 0;
+                color: var(--muted);
+                font-size: 13px;
+                line-height: 1.55;
+              }}
+
+              .tm-panel {{
+                padding: 22px;
+                border: 1px solid var(--line);
+                border-radius: var(--radius-xl);
+                background: #fff;
+                box-shadow: 0 8px 24px rgba(23, 28, 38, .045);
+              }}
+
+              .tm-grid {{
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 14px;
+              }}
+
+              .tm-card {{
+                position: relative;
+                display: flex;
+                min-height: 178px;
+                flex-direction: column;
+                padding: 20px;
+                border: 1px solid var(--line);
+                border-radius: var(--radius-lg);
+                background: var(--panel-soft);
+                transition:
+                  transform .16s ease,
+                  box-shadow .16s ease,
+                  border-color .16s ease;
+              }}
+
+              .tm-card:hover {{
+                transform: translateY(-2px);
+                border-color: #d7dbe2;
+                box-shadow: 0 12px 28px rgba(23, 28, 38, .07);
+              }}
+
+              .tm-card.recommended {{
+                border-color: rgba(55, 168, 86, .55);
+                box-shadow: 0 0 0 3px rgba(55, 168, 86, .07);
+              }}
+
+              .tm-card.recommended::after {{
+                content: "当前浏览器推荐";
+                position: absolute;
+                right: 14px;
+                top: 14px;
+                padding: 5px 8px;
+                border-radius: 999px;
+                color: #267f40;
+                background: #eaf8ee;
+                font-size: 11px;
+                font-weight: 800;
+              }}
+
+              .tm-card-top {{
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                padding-right: 78px;
+              }}
+
+              .tm-logo {{
+                display: grid;
+                flex: 0 0 auto;
+                width: 46px;
+                height: 46px;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 4px;
+                align-items: center;
+                padding: 6px;
+                border-radius: 12px;
+                background: #232323;
+              }}
+
+              .tm-logo span {{
+                display: block;
+                width: 100%;
+                aspect-ratio: 1;
+                border-radius: 50%;
+                background: #f3f3f3;
+              }}
+
+              .tm-name {{
+                margin: 0;
+                font-size: 17px;
+                line-height: 1.25;
+              }}
+
+              .tm-browser {{
+                margin-top: 3px;
+                color: var(--muted);
+                font-size: 12px;
+              }}
+
+              .tm-meta {{
+                margin: 14px 0 16px;
+                color: var(--muted);
+                font-size: 13px;
+              }}
+
+              .store-button {{
+                display: inline-flex;
+                width: 100%;
+                min-height: 42px;
+                align-items: center;
+                justify-content: center;
+                margin-top: auto;
+                border-radius: 11px;
+                color: #fff;
+                background: var(--green);
+                font-size: 14px;
+                font-weight: 800;
+              }}
+
+              .store-button:hover {{
+                background: var(--green-dark);
+              }}
+
+              .tm-note {{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px 14px;
+                align-items: center;
+                justify-content: space-between;
+                margin-top: 14px;
+                padding: 13px 15px;
+                border-radius: 12px;
+                color: var(--muted);
+                background: #f7f8fa;
+                font-size: 13px;
+                line-height: 1.6;
+              }}
+
+              .tm-note a {{
+                color: var(--accent);
+                font-weight: 700;
               }}
 
               .toolbar {{
                 position: sticky;
                 top: 0;
-                z-index: 10;
+                z-index: 20;
                 padding: 12px 0;
-                background: rgba(246, 247, 250, .9);
-                backdrop-filter: blur(14px);
+                background: rgba(245, 246, 248, .91);
+                backdrop-filter: blur(15px);
               }}
 
               .toolbar-inner {{
@@ -659,7 +1006,7 @@ jobs:
 
               .search {{
                 flex: 1;
-                min-width: 240px;
+                min-width: 260px;
                 height: 46px;
                 padding: 0 16px;
                 border: 1px solid var(--line);
@@ -670,7 +1017,7 @@ jobs:
               }}
 
               .search:focus {{
-                border-color: #ee9da0;
+                border-color: #ef9ca0;
                 box-shadow: 0 0 0 4px rgba(229, 72, 77, .08);
               }}
 
@@ -678,6 +1025,11 @@ jobs:
                 display: flex;
                 gap: 8px;
                 overflow-x: auto;
+                scrollbar-width: none;
+              }}
+
+              .filters::-webkit-scrollbar {{
+                display: none;
               }}
 
               .filter {{
@@ -688,7 +1040,6 @@ jobs:
                 background: #fff;
                 cursor: pointer;
                 white-space: nowrap;
-                font: inherit;
               }}
 
               .filter.active {{
@@ -697,123 +1048,105 @@ jobs:
                 background: var(--accent);
               }}
 
-              .content {{
-                padding: 16px 0 50px;
+              .scripts-content {{
+                padding: 8px 0 42px;
               }}
 
-              .grid {{
+              .script-grid {{
                 display: grid;
                 grid-template-columns: repeat(2, minmax(0, 1fr));
-                gap: 18px;
+                gap: 16px;
               }}
 
-              .card {{
+              .script-card {{
                 display: flex;
-                min-height: 250px;
+                min-height: 246px;
                 flex-direction: column;
-                padding: 24px;
+                padding: 23px;
                 border: 1px solid var(--line);
-                border-radius: var(--radius);
+                border-radius: var(--radius-lg);
                 background: var(--panel);
-                box-shadow: 0 8px 22px rgba(25, 31, 45, .04);
-                transition: .18s ease;
+                box-shadow: 0 8px 22px rgba(23, 28, 38, .035);
+                transition:
+                  transform .16s ease,
+                  box-shadow .16s ease;
               }}
 
-              .card:hover {{
+              .script-card:hover {{
                 transform: translateY(-2px);
                 box-shadow: var(--shadow);
               }}
 
-              .card.hidden {{
+              .script-card.hidden {{
                 display: none;
               }}
 
-              .card-top {{
+              .script-card-head {{
                 display: flex;
-                justify-content: space-between;
-                gap: 16px;
+                gap: 14px;
                 align-items: flex-start;
+                justify-content: space-between;
               }}
 
-              .category {{
+              .script-title-wrap {{
+                min-width: 0;
+              }}
+
+              .script-category {{
                 color: var(--accent);
                 font-size: 12px;
-                font-weight: 700;
+                font-weight: 800;
               }}
 
-              h3 {{
+              .script-card h3 {{
                 margin: 7px 0 0;
                 font-size: 20px;
                 line-height: 1.45;
               }}
 
-              .version {{
+              .script-version {{
                 flex: 0 0 auto;
                 padding: 6px 10px;
                 border-radius: 999px;
                 color: var(--accent);
-                background: var(--soft);
+                background: var(--accent-soft);
                 font-size: 12px;
-                font-weight: 700;
+                font-weight: 800;
               }}
 
-              .description {{
+              .script-description {{
                 margin: 15px 0 0;
                 color: var(--muted);
-                line-height: 1.75;
+                line-height: 1.72;
               }}
 
-              .meta {{
+              .script-meta {{
                 display: flex;
                 flex-wrap: wrap;
-                gap: 8px 16px;
+                gap: 8px 15px;
                 margin-top: auto;
                 padding-top: 18px;
-                color: #969dab;
+                color: #969ca9;
                 font-size: 12px;
               }}
 
-              .actions {{
+              .script-actions {{
                 display: flex;
                 gap: 10px;
-                margin-top: 18px;
-              }}
-
-              .actions a {{
-                display: inline-flex;
-                min-height: 42px;
-                align-items: center;
-                justify-content: center;
-                padding: 0 16px;
-                border-radius: 12px;
-                font-size: 14px;
-                font-weight: 700;
-              }}
-
-              .install {{
-                color: #fff;
-                background: var(--accent);
-              }}
-
-              .install:hover {{
-                background: var(--accent-hover);
-              }}
-
-              .secondary {{
-                border: 1px solid var(--line);
-                background: #fff;
+                margin-top: 17px;
               }}
 
               .guide {{
-                margin-bottom: 60px;
-                padding: 28px;
+                margin-bottom: 56px;
+                padding: 26px;
                 border: 1px solid var(--line);
-                border-radius: var(--radius);
+                border-radius: var(--radius-lg);
                 background: #fff;
               }}
 
               .guide h2 {{
                 margin: 0 0 12px;
+                font-size: 23px;
               }}
 
               details {{
@@ -827,7 +1160,7 @@ jobs:
 
               summary {{
                 cursor: pointer;
-                font-weight: 700;
+                font-weight: 750;
               }}
 
               details p,
@@ -838,25 +1171,46 @@ jobs:
 
               .empty {{
                 display: none;
-                padding: 50px 0;
+                padding: 52px 0;
                 text-align: center;
                 color: var(--muted);
               }}
 
               .footer {{
-                padding: 0 0 36px;
+                padding: 0 0 38px;
                 text-align: center;
-                color: #9aa0ad;
+                color: #999fab;
                 font-size: 13px;
+              }}
+
+              @media (max-width: 900px) {{
+                .tm-grid {{
+                  grid-template-columns: 1fr;
+                }}
+
+                .steps {{
+                  grid-template-columns: 1fr;
+                }}
               }}
 
               @media (max-width: 760px) {{
                 .hero {{
-                  padding-top: 26px;
+                  padding-top: 24px;
                 }}
 
-                .hero-box {{
-                  padding: 24px 20px;
+                .hero-panel {{
+                  padding: 27px 21px;
+                }}
+
+                .brand-mark {{
+                  width: 46px;
+                  height: 46px;
+                }}
+
+                .section-head {{
+                  align-items: flex-start;
+                  flex-direction: column;
+                  gap: 5px;
                 }}
 
                 .toolbar-inner {{
@@ -864,16 +1218,24 @@ jobs:
                 }}
 
                 .search {{
-                  width: 100%;
                   flex-basis: 100%;
+                  width: 100%;
                 }}
 
                 .filters {{
                   width: 100%;
                 }}
 
-                .grid {{
+                .script-grid {{
                   grid-template-columns: 1fr;
+                }}
+
+                .script-actions {{
+                  flex-direction: column;
+                }}
+
+                .script-actions .button {{
+                  width: 100%;
                 }}
               }}
             </style>
@@ -882,25 +1244,177 @@ jobs:
           <body>
             <header class="hero">
               <div class="wrap">
-                <div class="hero-box">
-                  <span class="eyebrow">Tampermonkey Userscripts</span>
-                  <h1>WanXin Userscripts</h1>
-                  <p class="subtitle">
-                    个人维护的用户脚本发布主页。Cloudflare Pages 提供固定安装与自动更新，
-                    GitHub 作为唯一开发源。
+                <div class="hero-panel">
+                  <div class="brand-row">
+                    <div class="brand-mark" aria-hidden="true">
+                      <span></span><span></span>
+                    </div>
+                    <div>
+                      <p class="eyebrow">Userscript Center</p>
+                      <h1>WanXin Userscripts</h1>
+                    </div>
+                  </div>
+
+                  <p class="hero-copy">
+                    一个用于集中发布和维护 Tampermonkey 用户脚本的轻量主页。
+                    先安装脚本管理器，再点击下方脚本的“立即安装”即可使用；
+                    已安装脚本会通过固定地址自动检查后续更新。
                   </p>
-                  <div class="stats">
-                    <span><strong>{len(items)}</strong> 个正式脚本</span>
-                    <span>最近修改 <strong>{h(latest_text)}</strong></span>
-                    <span>
-                      <a href="{h(GITHUB_REPO_URL)}"
-                         target="_blank"
-                         rel="noopener noreferrer">GitHub 仓库 ↗</a>
-                    </span>
+
+                  <div class="hero-actions">
+                    <a class="button button-primary" href="#tampermonkey">
+                      先安装 Tampermonkey
+                    </a>
+                    <a class="button button-secondary" href="#scripts">
+                      浏览脚本
+                    </a>
+                    <a class="button button-secondary"
+                       href="{h(GITHUB_REPO_URL)}"
+                       target="_blank"
+                       rel="noopener noreferrer">
+                      GitHub 源码
+                    </a>
+                  </div>
+
+                  <div class="hero-stats">
+                    <span class="stat-pill"><strong>{len(items)}</strong> 个正式脚本</span>
+                    <span class="stat-pill">最近更新 <strong>{h(latest_text)}</strong></span>
+                    <span class="stat-pill">支持 Tampermonkey 自动更新</span>
                   </div>
                 </div>
               </div>
             </header>
+
+            <section class="section">
+              <div class="wrap">
+                <div class="steps">
+                  <div class="step">
+                    <span class="step-number">1</span>
+                    <div>
+                      <strong>安装 Tampermonkey</strong>
+                      <p>按你的浏览器点击官方商店安装。</p>
+                    </div>
+                  </div>
+
+                  <div class="step">
+                    <span class="step-number">2</span>
+                    <div>
+                      <strong>选择需要的脚本</strong>
+                      <p>找到脚本后点击“立即安装”。</p>
+                    </div>
+                  </div>
+
+                  <div class="step">
+                    <span class="step-number">3</span>
+                    <div>
+                      <strong>后续自动更新</strong>
+                      <p>脚本通过固定更新地址获取新版。</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="section" id="tampermonkey">
+              <div class="wrap">
+                <div class="section-head">
+                  <div>
+                    <h2 class="section-title">安装 Tampermonkey</h2>
+                    <p class="section-desc">
+                      下面按钮直接前往对应浏览器的官方扩展商店。
+                      推荐安装正式版，不需要单独下载 CRX 或其他安装包。
+                    </p>
+                  </div>
+                </div>
+
+                <div class="tm-panel">
+                  <div class="tm-grid">
+                    <article class="tm-card" data-browser="chrome">
+                      <div class="tm-card-top">
+                        <div class="tm-logo" aria-hidden="true">
+                          <span></span><span></span>
+                        </div>
+                        <div>
+                          <h3 class="tm-name">Tampermonkey</h3>
+                          <div class="tm-browser">Chrome 120+</div>
+                        </div>
+                      </div>
+                      <div class="tm-meta">正式版 · 免费 · 多语言</div>
+                      <a class="store-button"
+                         href="{h(TAMPERMONKEY_CHROME)}"
+                         target="_blank"
+                         rel="noopener noreferrer">
+                        去 Chrome 商店
+                      </a>
+                    </article>
+
+                    <article class="tm-card" data-browser="edge">
+                      <div class="tm-card-top">
+                        <div class="tm-logo" aria-hidden="true">
+                          <span></span><span></span>
+                        </div>
+                        <div>
+                          <h3 class="tm-name">Tampermonkey</h3>
+                          <div class="tm-browser">Microsoft Edge 79+</div>
+                        </div>
+                      </div>
+                      <div class="tm-meta">正式版 · 免费 · 多语言</div>
+                      <a class="store-button"
+                         href="{h(TAMPERMONKEY_EDGE)}"
+                         target="_blank"
+                         rel="noopener noreferrer">
+                        去 Edge 商店
+                      </a>
+                    </article>
+
+                    <article class="tm-card" data-browser="firefox">
+                      <div class="tm-card-top">
+                        <div class="tm-logo" aria-hidden="true">
+                          <span></span><span></span>
+                        </div>
+                        <div>
+                          <h3 class="tm-name">Tampermonkey</h3>
+                          <div class="tm-browser">Firefox 78+</div>
+                        </div>
+                      </div>
+                      <div class="tm-meta">正式版 · 免费 · 多语言</div>
+                      <a class="store-button"
+                         href="{h(TAMPERMONKEY_FIREFOX)}"
+                         target="_blank"
+                         rel="noopener noreferrer">
+                        去 Firefox 商店
+                      </a>
+                    </article>
+                  </div>
+
+                  <div class="tm-note">
+                    <span>
+                      页面会根据当前浏览器自动标记推荐安装入口。
+                      扩展仍需在浏览器官方商店页面确认安装，这是浏览器的安全要求。
+                    </span>
+                    <a href="{h(TAMPERMONKEY_OFFICIAL)}"
+                       target="_blank"
+                       rel="noopener noreferrer">
+                      Tampermonkey 官方网站 ↗
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="section" id="scripts">
+              <div class="wrap">
+                <div class="section-head">
+                  <div>
+                    <h2 class="section-title">脚本列表</h2>
+                    <p class="section-desc">
+                      可按分类筛选或直接搜索名称、说明和脚本 ID。
+                      “立即安装”使用本站固定 Cloudflare 地址，后续自动更新地址保持一致。
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
 
             <div class="toolbar">
               <div class="wrap toolbar-inner">
@@ -917,9 +1431,9 @@ jobs:
               </div>
             </div>
 
-            <main class="content">
+            <main class="scripts-content">
               <div class="wrap">
-                <section class="grid">
+                <section class="script-grid">
                   {''.join(cards)}
                 </section>
                 <div id="empty" class="empty">没有找到匹配的脚本。</div>
@@ -927,24 +1441,24 @@ jobs:
             </main>
 
             <section class="wrap guide">
-              <h2>Tampermonkey 使用说明</h2>
+              <h2>使用与更新说明</h2>
 
               <details open>
                 <summary>如何安装脚本</summary>
                 <ol>
-                  <li>先安装 Tampermonkey。</li>
-                  <li>在上方找到需要的脚本，点击“立即安装”。</li>
-                  <li>在 Tampermonkey 安装页确认后点击“安装”。</li>
-                  <li>打开对应业务页面并刷新即可生效。</li>
+                  <li>先在上方安装与你浏览器对应的 Tampermonkey 正式版。</li>
+                  <li>返回本页，在脚本列表中点击“立即安装”。</li>
+                  <li>Tampermonkey 打开安装页面后，确认脚本名称并点击“安装”。</li>
+                  <li>打开脚本对应的网站并刷新页面即可使用。</li>
                 </ol>
               </details>
 
               <details>
-                <summary>如何检查更新</summary>
+                <summary>如何检查脚本更新</summary>
                 <p>
                   打开 Tampermonkey 管理面板，点击“检查用户脚本更新”。
-                  脚本通过固定 @updateURL 比较远程与本地 @version，
-                  有新版时再通过 @downloadURL 获取更新。
+                  脚本会通过固定的 @updateURL 比较远程和本地 @version；
+                  发现新版后通过 @downloadURL 获取更新。
                 </p>
               </details>
 
@@ -952,25 +1466,45 @@ jobs:
                 <summary>新版刚发布但暂时没有检测到</summary>
                 <p>
                   请先等待 GitHub Actions 与 Cloudflare Pages 部署完成。
-                  如需立即更新，可以重新点击本页“立即安装”覆盖更新。
+                  如果希望立即更新，也可以重新点击对应脚本的“立即安装”按钮覆盖安装。
                 </p>
               </details>
             </section>
 
             <footer class="footer">
               <div class="wrap">
-                页面与脚本清单由 GitHub Actions 自动维护
+                WanXin Userscripts · 页面与脚本清单由 GitHub Actions 自动维护
               </div>
             </footer>
 
             <script>
               (() => {{
                 const search = document.getElementById("search");
-                const cards = [...document.querySelectorAll(".card")];
+                const cards = [...document.querySelectorAll(".script-card")];
                 const filters = [...document.querySelectorAll(".filter")];
                 const empty = document.getElementById("empty");
+                const ua = navigator.userAgent;
 
                 let activeGroup = "all";
+                let browser = "";
+
+                if (ua.includes("Edg/")) {{
+                  browser = "edge";
+                }} else if (ua.includes("Firefox/")) {{
+                  browser = "firefox";
+                }} else if (ua.includes("Chrome/") || ua.includes("Chromium/")) {{
+                  browser = "chrome";
+                }}
+
+                if (browser) {{
+                  const recommended = document.querySelector(
+                    `.tm-card[data-browser="${{browser}}"]`
+                  );
+
+                  if (recommended) {{
+                    recommended.classList.add("recommended");
+                  }}
+                }}
 
                 function refresh() {{
                   const query = search.value.trim().toLowerCase();
@@ -1011,8 +1545,7 @@ jobs:
             </script>
           </body>
           </html>
-          '''
-
+          """
           INDEX_PATH.write_text(
               html,
               encoding="utf-8",
