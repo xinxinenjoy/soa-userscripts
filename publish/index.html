@@ -1,0 +1,726 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="WanXin Tampermonkey 用户脚本发布主页">
+  <title>WanXin Userscripts</title>
+
+  <style>
+    :root {
+      --bg: #f6f7fa;
+      --panel: #ffffff;
+      --text: #202532;
+      --muted: #737b8c;
+      --line: #e8eaf0;
+      --accent: #e5484d;
+      --accent-hover: #d53d42;
+      --soft: #fff0f0;
+      --shadow: 0 12px 34px rgba(25, 31, 45, .08);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--bg);
+      font-family:
+        "PingFang SC",
+        "Microsoft YaHei",
+        system-ui,
+        -apple-system,
+        "Segoe UI",
+        sans-serif;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .wrap {
+      width: min(1160px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    .hero {
+      padding: 48px 0 26px;
+    }
+
+    .hero-box {
+      padding: 36px;
+      border: 1px solid #f0e6e6;
+      border-radius: 26px;
+      background:
+        linear-gradient(135deg, #fff 0%, #fff7f7 100%);
+      box-shadow: var(--shadow);
+    }
+
+    .eyebrow {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      color: var(--accent);
+      background: var(--soft);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    h1 {
+      margin: 14px 0 0;
+      font-size: clamp(34px, 6vw, 54px);
+      line-height: 1.08;
+    }
+
+    .subtitle {
+      max-width: 760px;
+      margin: 16px 0 0;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+      margin-top: 24px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .stats strong {
+      color: var(--text);
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      padding: 12px 0;
+      background: rgba(246, 247, 250, .9);
+      backdrop-filter: blur(14px);
+    }
+
+    .toolbar-inner {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .search {
+      flex: 1;
+      min-width: 240px;
+      height: 46px;
+      padding: 0 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      outline: none;
+      background: #fff;
+      font-size: 15px;
+    }
+
+    .search:focus {
+      border-color: #ee9da0;
+      box-shadow: 0 0 0 4px rgba(229, 72, 77, .08);
+    }
+
+    .filters {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+    }
+
+    .filter {
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: #fff;
+      cursor: pointer;
+      white-space: nowrap;
+      font: inherit;
+    }
+
+    .filter.active {
+      color: #fff;
+      border-color: var(--accent);
+      background: var(--accent);
+    }
+
+    .content {
+      padding: 16px 0 50px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      display: flex;
+      min-height: 250px;
+      flex-direction: column;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: 0 8px 22px rgba(25, 31, 45, .04);
+      transition: .18s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow);
+    }
+
+    .card.hidden {
+      display: none;
+    }
+
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .category {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    h3 {
+      margin: 7px 0 0;
+      font-size: 20px;
+      line-height: 1.45;
+    }
+
+    .version {
+      flex: 0 0 auto;
+      padding: 6px 10px;
+      border-radius: 999px;
+      color: var(--accent);
+      background: var(--soft);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .description {
+      margin: 15px 0 0;
+      color: var(--muted);
+      line-height: 1.75;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      margin-top: auto;
+      padding-top: 18px;
+      color: #969dab;
+      font-size: 12px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .actions a {
+      display: inline-flex;
+      min-height: 42px;
+      align-items: center;
+      justify-content: center;
+      padding: 0 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .install {
+      color: #fff;
+      background: var(--accent);
+    }
+
+    .install:hover {
+      background: var(--accent-hover);
+    }
+
+    .secondary {
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .guide {
+      margin-bottom: 60px;
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+    }
+
+    .guide h2 {
+      margin: 0 0 12px;
+    }
+
+    details {
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    details:first-of-type {
+      border-top: 0;
+    }
+
+    summary {
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    details p,
+    details ol {
+      color: var(--muted);
+      line-height: 1.8;
+    }
+
+    .empty {
+      display: none;
+      padding: 50px 0;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .footer {
+      padding: 0 0 36px;
+      text-align: center;
+      color: #9aa0ad;
+      font-size: 13px;
+    }
+
+    @media (max-width: 760px) {
+      .hero {
+        padding-top: 26px;
+      }
+
+      .hero-box {
+        padding: 24px 20px;
+      }
+
+      .toolbar-inner {
+        flex-wrap: wrap;
+      }
+
+      .search {
+        width: 100%;
+        flex-basis: 100%;
+      }
+
+      .filters {
+        width: 100%;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <div class="hero-box">
+        <span class="eyebrow">Tampermonkey Userscripts</span>
+        <h1>WanXin Userscripts</h1>
+        <p class="subtitle">
+          个人维护的用户脚本发布主页。Cloudflare Pages 提供固定安装与自动更新，
+          GitHub 作为唯一开发源。
+        </p>
+        <div class="stats">
+          <span><strong>9</strong> 个正式脚本</span>
+          <span>最近修改 <strong>2026-09-01 09:12</strong></span>
+          <span>
+            <a href="https://github.com/xinxinenjoy/wanxin-userscripts"
+               target="_blank"
+               rel="noopener noreferrer">GitHub 仓库 ↗</a>
+          </span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="wrap toolbar-inner">
+      <input
+        id="search"
+        class="search"
+        type="search"
+        placeholder="搜索脚本名称、说明或 ID..."
+        autocomplete="off"
+      >
+      <div class="filters">
+        <button class="filter active" data-group="all">全部</button><button class="filter" data-group="SOA相关">SOA相关</button><button class="filter" data-group="红领巾的游戏脚本">红领巾的游戏脚本</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="content">
+    <div class="wrap">
+      <section class="grid">
+        
+            <article class="card"
+                     data-group="SOA相关"
+                     data-search="soa.1.1蝶美-单位信息填充 自动填充单位信息，支持地区、行业、经济类型、单位类型、社会信用代码、企业规模、职工人数、接害人数等字段。 soa相关 soa-danweixinxi">
+              <div class="card-top">
+                <div>
+                  <span class="category">SOA相关</span>
+                  <h3>SOA.1.1蝶美-单位信息填充</h3>
+                </div>
+                <span class="version">v7.7.24</span>
+              </div>
+
+              <p class="description">
+                自动填充单位信息，支持地区、行业、经济类型、单位类型、社会信用代码、企业规模、职工人数、接害人数等字段。
+              </p>
+
+              <div class="meta">
+                <span>修改：2026-09-01 09:12</span>
+                <span>ID：soa-danweixinxi</span>
+              </div>
+
+              <div class="actions">
+                <a class="install" href="https://scripts.wanxinxin.dpdns.org/soaxg/soa-danweixinxi.user.js">立即安装</a>
+                <a class="secondary"
+                   href="https://github.com/xinxinenjoy/wanxin-userscripts/blob/main/SOA%E7%9B%B8%E5%85%B3/SOA.1.1%E8%9D%B6%E7%BE%8E-%E5%8D%95%E4%BD%8D%E4%BF%A1%E6%81%AF%E5%A1%AB%E5%85%85.user.js"
+                   target="_blank"
+                   rel="noopener noreferrer">查看源码</a>
+              </div>
+            </article>
+            
+            <article class="card"
+                     data-group="SOA相关"
+                     data-search="soa.1.2蝶美-套餐危害核对 增强“套餐危害核对”功能，提供自动化核对、批量处理、用户自定义别名和忽略列表等功能。 soa相关 soa-weihaihedui">
+              <div class="card-top">
+                <div>
+                  <span class="category">SOA相关</span>
+                  <h3>SOA.1.2蝶美-套餐危害核对</h3>
+                </div>
+                <span class="version">v4.2.15</span>
+              </div>
+
+              <p class="description">
+                增强“套餐危害核对”功能，提供自动化核对、批量处理、用户自定义别名和忽略列表等功能。
+              </p>
+
+              <div class="meta">
+                <span>修改：2026-09-01 09:12</span>
+                <span>ID：soa-weihaihedui</span>
+              </div>
+
+              <div class="actions">
+                <a class="install" href="https://scripts.wanxinxin.dpdns.org/soaxg/soa-weihaihedui.user.js">立即安装</a>
+                <a class="secondary"
+                   href="https://github.com/xinxinenjoy/wanxin-userscripts/blob/main/SOA%E7%9B%B8%E5%85%B3/SOA.1.2%E8%9D%B6%E7%BE%8E-%E5%A5%97%E9%A4%90%E5%8D%B1%E5%AE%B3%E6%A0%B8%E5%AF%B9.user.js"
+                   target="_blank"
+                   rel="noopener noreferrer">查看源码</a>
+              </div>
+            </article>
+            
+            <article class="card"
+                     data-group="SOA相关"
+                     data-search="soa.2.1全局发票页面 优化soa发票页面的表格布局、文案显示和复制功能，支持动态加载内容的处理。 soa相关 soa-quanjufapiao">
+              <div class="card-top">
+                <div>
+                  <span class="category">SOA相关</span>
+                  <h3>SOA.2.1全局发票页面</h3>
+                </div>
+                <span class="version">v6.14</span>
+              </div>
+
+              <p class="description">
+                优化SOA发票页面的表格布局、文案显示和复制功能，支持动态加载内容的处理。
+              </p>
+
+              <div class="meta">
+                <span>修改：2026-09-01 09:12</span>
+                <span>ID：soa-quanjufapiao</span>
+              </div>
+
+              <div class="actions">
+                <a class="install" href="https://scripts.wanxinxin.dpdns.org/soaxg/soa-quanjufapiao.user.js">立即安装</a>
+                <a class="secondary"
+                   href="https://github.com/xinxinenjoy/wanxin-userscripts/blob/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.1%E5%85%A8%E5%B1%80%E5%8F%91%E7%A5%A8%E9%A1%B5%E9%9D%A2.user.js"
+                   target="_blank"
+                   rel="noopener noreferrer">查看源码</a>
+              </div>
+            </article>
+            
+            <article class="card"
+                     data-group="SOA相关"
+                     data-search="soa.2.2订单发票页面 soa订单发票列表页面增强：列重排、宽度调整、文案替换、复制优化。 soa相关 soa-dingdanfapiao">
+              <div class="card-top">
+                <div>
+                  <span class="category">SOA相关</span>
+                  <h3>SOA.2.2订单发票页面</h3>
+                </div>
+                <span class="version">v1.6</span>
+              </div>
+
+              <p class="description">
+                SOA订单发票列表页面增强：列重排、宽度调整、文案替换、复制优化。
+              </p>
+
+              <div class="meta">
+                <span>修改：2026-09-01 09:12</span>
+                <span>ID：soa-dingdanfapiao</span>
+              </div>
+
+              <div class="actions">
+                <a class="install" href="https://scripts.wanxinxin.dpdns.org/soaxg/soa-dingdanfapiao.user.js">立即安装</a>
+                <a class="secondary"
+                   href="https://github.com/xinxinenjoy/wanxin-userscripts/blob/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.2%E8%AE%A2%E5%8D%95%E5%8F%91%E7%A5%A8%E9%A1%B5%E9%9D%A2.user.js"
+                   target="_blank"
+                   rel="noopener noreferrer">查看源码</a>
+              </div>
+            </article>
+            
+            <article class="card"
+                     data-group="SOA相关"
+                     data-search="soa.2.3首页排序模块 soa首页模块排序，支持拖拽排序、保存顺序、恢复默认顺序、设置每行显示列数、设置模块宽度、设置列间距。 soa相关 soa-shouyepaixu">
+              <div class="card-top">
+                <div>
+                  <span class="category">SOA相关</span>
+                  <h3>SOA.2.3首页排序模块</h3>
+                </div>
+                <span class="version">v4.6</span>
+              </div>
+
+              <p class="description">
+                SOA首页模块排序，支持拖拽排序、保存顺序、恢复默认顺序、设置每行显示列数、设置模块宽度、设置列间距。
+              </p>
+
+              <div class="meta">
+                <span>修改：2026-09-01 09:12</span>
+                <span>ID：soa-shouyepaixu</span>
+              </div>
+
+              <div class="actions">
+                <a class="install" href="https://scripts.wanxinxin.dpdns.org/soaxg/soa-shouyepaixu.user.js">立即安装</a>
+                <a class="secondary"
+                   href="https://github.com/xinxinenjoy/wanxin-userscripts/blob/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.3%E9%A6%96%E9%A1%B5%E6%8E%92%E5%BA%8F%E6%A8%A1%E5%9D%97.user.js"
+                   target="_blank"
+                   rel="noopener noreferrer">查看源码</a>
+              </div>
+            </article>
+            
+            <article class="card"
+                     data-group="SOA相关"
+                     data-search="soa.2.4前台批量模块 批量预约单号；支持spa常驻、14位预约单号智能提取、可调宽度窗口及“已到检”首次查询自动仅当日。 soa相关 soa-qiantaipiliang">
+              <div class="card-top">
+                <div>
+                  <span class="category">SOA相关</span>
+                  <h3>SOA.2.4前台批量模块</h3>
+                </div>
+                <span class="version">v1.15</span>
+              </div>
+
+              <p class="description">
+                批量预约单号；支持SPA常驻、14位预约单号智能提取、可调宽度窗口及“已到检”首次查询自动仅当日。
+              </p>
+
+              <div class="meta">
+                <span>修改：2026-09-01 09:12</span>
+                <span>ID：soa-qiantaipiliang</span>
+              </div>
+
+              <div class="actions">
+                <a class="install" href="https://scripts.wanxinxin.dpdns.org/soaxg/soa-qiantaipiliang.user.js">立即安装</a>
+                <a class="secondary"
+                   href="https://github.com/xinxinenjoy/wanxin-userscripts/blob/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.4%E5%89%8D%E5%8F%B0%E6%89%B9%E9%87%8F%E6%A8%A1%E5%9D%97.user.js"
+                   target="_blank"
+                   rel="noopener noreferrer">查看源码</a>
+              </div>
+            </article>
+            
+            <article class="card"
+                     data-group="SOA相关"
+                     data-search="soa.2.5订单流程自动化 soa订单流程自动化脚本，支持订单详情各阶段自动处理，包括审批备注填写、合同配置、体检时间修正等功能，提供数据汇总及操作面板。 soa相关 soa-dingdanauto">
+              <div class="card-top">
+                <div>
+                  <span class="category">SOA相关</span>
+                  <h3>SOA.2.5订单流程自动化</h3>
+                </div>
+                <span class="version">v1.31</span>
+              </div>
+
+              <p class="description">
+                SOA订单流程自动化脚本，支持订单详情各阶段自动处理，包括审批备注填写、合同配置、体检时间修正等功能，提供数据汇总及操作面板。
+              </p>
+
+              <div class="meta">
+                <span>修改：2026-09-01 09:12</span>
+                <span>ID：soa-dingdanauto</span>
+              </div>
+
+              <div class="actions">
+                <a class="install" href="https://scripts.wanxinxin.dpdns.org/soaxg/soa-dingdanauto.user.js">立即安装</a>
+                <a class="secondary"
+                   href="https://github.com/xinxinenjoy/wanxin-userscripts/blob/main/SOA%E7%9B%B8%E5%85%B3/SOA.2.5%E8%AE%A2%E5%8D%95%E6%B5%81%E7%A8%8B%E8%87%AA%E5%8A%A8%E5%8C%96.user.js"
+                   target="_blank"
+                   rel="noopener noreferrer">查看源码</a>
+              </div>
+            </article>
+            
+            <article class="card"
+                     data-group="红领巾的游戏脚本"
+                     data-search="curseforge增强 增强curseforge网站的中文显示，翻译部分英文为中文，支持动态加载内容的翻译。 红领巾的游戏脚本 game-curseforge">
+              <div class="card-top">
+                <div>
+                  <span class="category">红领巾的游戏脚本</span>
+                  <h3>CurseForge增强</h3>
+                </div>
+                <span class="version">v4.2</span>
+              </div>
+
+              <p class="description">
+                增强CurseForge网站的中文显示，翻译部分英文为中文，支持动态加载内容的翻译。
+              </p>
+
+              <div class="meta">
+                <span>修改：2026-09-01 09:12</span>
+                <span>ID：game-curseforge</span>
+              </div>
+
+              <div class="actions">
+                <a class="install" href="https://scripts.wanxinxin.dpdns.org/hljdyxjb/game-curseforge.user.js">立即安装</a>
+                <a class="secondary"
+                   href="https://github.com/xinxinenjoy/wanxin-userscripts/blob/main/%E7%BA%A2%E9%A2%86%E5%B7%BE%E7%9A%84%E6%B8%B8%E6%88%8F%E8%84%9A%E6%9C%AC/CurseForge%E5%A2%9E%E5%BC%BA.user.js"
+                   target="_blank"
+                   rel="noopener noreferrer">查看源码</a>
+              </div>
+            </article>
+            
+            <article class="card"
+                     data-group="红领巾的游戏脚本"
+                     data-search="gow底下尖塔 gow底下尖塔火把管理与节点同步工具 红领巾的游戏脚本 game-gowdxjt">
+              <div class="card-top">
+                <div>
+                  <span class="category">红领巾的游戏脚本</span>
+                  <h3>GOW底下尖塔</h3>
+                </div>
+                <span class="version">v4.2.27</span>
+              </div>
+
+              <p class="description">
+                GOW底下尖塔火把管理与节点同步工具
+              </p>
+
+              <div class="meta">
+                <span>修改：2026-09-01 09:12</span>
+                <span>ID：game-gowdxjt</span>
+              </div>
+
+              <div class="actions">
+                <a class="install" href="https://scripts.wanxinxin.dpdns.org/hljdyxjb/game-gowdxjt.user.js">立即安装</a>
+                <a class="secondary"
+                   href="https://github.com/xinxinenjoy/wanxin-userscripts/blob/main/%E7%BA%A2%E9%A2%86%E5%B7%BE%E7%9A%84%E6%B8%B8%E6%88%8F%E8%84%9A%E6%9C%AC/GOW%E5%BA%95%E4%B8%8B%E5%B0%96%E5%A1%94.user.js"
+                   target="_blank"
+                   rel="noopener noreferrer">查看源码</a>
+              </div>
+            </article>
+            
+      </section>
+      <div id="empty" class="empty">没有找到匹配的脚本。</div>
+    </div>
+  </main>
+
+  <section class="wrap guide">
+    <h2>Tampermonkey 使用说明</h2>
+
+    <details open>
+      <summary>如何安装脚本</summary>
+      <ol>
+        <li>先安装 Tampermonkey。</li>
+        <li>在上方找到需要的脚本，点击“立即安装”。</li>
+        <li>在 Tampermonkey 安装页确认后点击“安装”。</li>
+        <li>打开对应业务页面并刷新即可生效。</li>
+      </ol>
+    </details>
+
+    <details>
+      <summary>如何检查更新</summary>
+      <p>
+        打开 Tampermonkey 管理面板，点击“检查用户脚本更新”。
+        脚本通过固定 @updateURL 比较远程与本地 @version，
+        有新版时再通过 @downloadURL 获取更新。
+      </p>
+    </details>
+
+    <details>
+      <summary>新版刚发布但暂时没有检测到</summary>
+      <p>
+        请先等待 GitHub Actions 与 Cloudflare Pages 部署完成。
+        如需立即更新，可以重新点击本页“立即安装”覆盖更新。
+      </p>
+    </details>
+  </section>
+
+  <footer class="footer">
+    <div class="wrap">
+      页面与脚本清单由 GitHub Actions 自动维护
+    </div>
+  </footer>
+
+  <script>
+    (() => {
+      const search = document.getElementById("search");
+      const cards = [...document.querySelectorAll(".card")];
+      const filters = [...document.querySelectorAll(".filter")];
+      const empty = document.getElementById("empty");
+
+      let activeGroup = "all";
+
+      function refresh() {
+        const query = search.value.trim().toLowerCase();
+        let visible = 0;
+
+        cards.forEach(card => {
+          const groupMatch =
+            activeGroup === "all" ||
+            card.dataset.group === activeGroup;
+
+          const textMatch =
+            !query ||
+            card.dataset.search.includes(query);
+
+          const show = groupMatch && textMatch;
+
+          card.classList.toggle("hidden", !show);
+
+          if (show) {
+            visible += 1;
+          }
+        });
+
+        empty.style.display = visible ? "none" : "block";
+      }
+
+      filters.forEach(button => {
+        button.addEventListener("click", () => {
+          filters.forEach(item => item.classList.remove("active"));
+          button.classList.add("active");
+          activeGroup = button.dataset.group;
+          refresh();
+        });
+      });
+
+      search.addEventListener("input", refresh);
+    })();
+  </script>
+</body>
+</html>

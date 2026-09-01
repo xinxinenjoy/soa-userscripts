@@ -4,9 +4,11 @@
 
 **个人维护的 Tampermonkey 用户脚本集合**
 
-以 GitHub 作为开发源，Cloudflare Pages 提供稳定安装与自动更新地址，GitCode 保留国内展示镜像。
+🌐 **脚本主页：[https://scripts.wanxinxin.dpdns.org](https://scripts.wanxinxin.dpdns.org)**
 
-当前正式发布 **9** 个脚本 · 每条记录显示源脚本最近修改时间
+GitHub 作为唯一开发源，Cloudflare Pages 提供展示、安装与自动更新。
+
+当前正式发布 **9** 个脚本 · 最近修改 **2026-09-01 09:12**
 
 </div>
 
@@ -21,21 +23,19 @@
 | Chrome | [Chrome Web Store](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo) |
 | Edge | [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd) |
 | Firefox | [Firefox Add-ons](https://addons.mozilla.org/zh-CN/firefox/addon/tampermonkey/) |
-| 其他浏览器 / 官方说明 | [Tampermonkey 官网](https://www.tampermonkey.net/) |
+| 官方网站 | [Tampermonkey](https://www.tampermonkey.net/) |
 
-> 安装扩展后，如果浏览器或 Tampermonkey 提示需要开启“用户脚本”相关权限，请按扩展页面提示启用。
+### 2. 安装脚本
 
-### 2. 安装需要的脚本
+推荐进入上方 **脚本主页**，找到需要的脚本后点击 **立即安装**。
 
-在下方脚本列表中点击 **「推荐安装」**。浏览器会打开 Tampermonkey 安装页面，确认脚本名称和权限后点击 **安装** 即可。
+> 安装和自动更新统一使用 `https://scripts.wanxinxin.dpdns.org`，GitHub Raw 仅作为备用。
 
-> 推荐安装地址使用自有域名 `scripts.wanxinxin.dpdns.org`，由 Cloudflare Pages 提供分发；GitHub Raw 仅作为备用安装源。
+### 3. 检查更新
 
-### 3. 使用与更新
+打开 **Tampermonkey → 管理面板 → 检查用户脚本更新**。
 
-脚本安装完成后，打开对应业务页面并刷新即可生效。脚本通过 `@version` 判断新版，通过固定的 `@updateURL` / `@downloadURL` 自动更新。
-
-需要主动检查时，可打开：**Tampermonkey → 管理面板 → 检查用户脚本更新**。刚发布新版时，请先等待 GitHub Actions 与 Cloudflare Pages 部署完成；如需立即覆盖更新，也可以重新点击本 README 中的推荐安装链接。
+脚本通过元数据中的 `@version` 判断新版，并通过固定的 `@updateURL` / `@downloadURL` 自动更新。
 
 ---
 
@@ -62,70 +62,65 @@
 
 ---
 
-## 🧩 Tampermonkey 使用教程
+## 🧩 Tampermonkey 使用说明
 
 <details>
-<summary><strong>如何启用、停用或删除脚本</strong></summary>
+<summary><strong>如何安装脚本</strong></summary>
 
-1. 点击浏览器工具栏中的 Tampermonkey 图标。
-2. 进入 **管理面板**。
-3. 使用脚本右侧开关可以临时启用 / 停用。
-4. 点击脚本名称可以查看或编辑脚本。
-5. 不再需要时，可在脚本详情页删除。
+1. 安装 Tampermonkey。
+2. 打开脚本主页。
+3. 点击对应脚本的 **立即安装**。
+4. 在 Tampermonkey 安装页面确认后点击 **安装**。
 
 </details>
 
 <details>
 <summary><strong>如何手动检查更新</strong></summary>
 
-1. 打开 Tampermonkey **管理面板**。
-2. 选择 **检查用户脚本更新**。
-3. Tampermonkey 会读取脚本的 `@updateURL`，比较本地与远程 `@version`。
-4. 远程版本更高时，再通过 `@downloadURL` 获取并安装完整脚本。
+打开 Tampermonkey 管理面板，点击 **检查用户脚本更新**。
 
-> 脚本窗口标题、更新记录和 `console.log` 中写的版本号不会参与 Tampermonkey 更新判断，真正用于比较的是元数据中的 `@version`。
+Tampermonkey 会读取 `@updateURL`，比较远程与本地 `@version`；远程版本更高时，通过 `@downloadURL` 获取新版。
 
 </details>
 
 <details>
-<summary><strong>刚发布新版但检查不到怎么办</strong></summary>
+<summary><strong>新版刚发布但暂时没有检测到</strong></summary>
 
-先确认 README 中显示的版本已经更新，并确认 Cloudflare Pages 最新部署已经完成。如果 Tampermonkey 仍提示无新版，可以稍后再次检查。
+请先等待 GitHub Actions 与 Cloudflare Pages 部署完成，再重新检查。
 
-如果需要立即更新，重新点击该脚本的 **推荐安装** 链接，Tampermonkey 会识别为同一脚本并进入覆盖更新流程。
+如果需要立即更新，也可以重新点击脚本主页中的 **立即安装** 覆盖更新。
 
 </details>
 
 ---
 
-## 🔄 发布与更新机制
+## 🔄 发布架构
 
 ```text
-本地修改源脚本
-      ↓
+本地修改
+   ↓
 GitHub main
-      ↓
+   ↓
 Build Userscripts
-      ↓
-生成固定 publish/ 发布文件
-      ↓
+   ↓
+publish/
+   ↓
 Update Userscripts README
-      ↓
-Cloudflare Pages 固定域名分发
-      ↓
-Tampermonkey 安装 / 自动更新
+   ├─ README.md
+   └─ publish/index.html
+          ↓
+Cloudflare Pages
+   ├─ 展示主页
+   ├─ 脚本安装
+   └─ Tampermonkey 自动更新
 
-同时：README + publish/ → GitCode 国内展示镜像
+同时：README + publish/ → GitCode 备用镜像
 ```
-
-每个脚本使用固定的 `@publishGroup + @publishID` 生成永久安装地址，因此源文件改名或移动目录后，已经安装的脚本仍可继续更新。
-
-Cloudflare Pages 自定义域名负责脚本安装与自动更新；GitCode 仅作为国内浏览和展示镜像。正式开发与版本维护始终以 GitHub `main` 为准。
 
 ---
 
 <div align="center">
 
-README 与脚本列表由 GitHub Actions 自动维护。
+README 与脚本主页由 GitHub Actions 自动维护。
 
 </div>
