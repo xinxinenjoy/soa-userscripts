@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         SOA.2.5订单流程自动化
+// @name         SOA.3.1订单智能审批
 // @namespace    https://tampermonkey.net/
-// @version      1.32
-// @description  SOA订单流程自动化：内勤复核、合同补充、发起落单、落单审核、落单完成及数据提取；支持文件绑定、异常等待、流程状态判定及卡池数量查询。
+// @version      2.2
+// @description  SOA智能审批：阶段识别、日期校验、内勤复核、合同智能补全、文件上传、发起落单及落单审核。
 
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
@@ -10,28 +10,36 @@
 // @author       WanXin
 // @publishGroup soaxg
 // @publishID    soa-dingdanauto
-// @updateURL    https://scripts.wanxinxin.dpdns.org/soaxg/soa-dingdanauto.user.js
-// @downloadURL  https://scripts.wanxinxin.dpdns.org/soaxg/soa-dingdanauto.user.js
+// @updateURL    https://scripts.wanxinxin.dpdns.org/publish/soaxg/soa-dingdanauto.user.js
+// @downloadURL  https://scripts.wanxinxin.dpdns.org/publish/soaxg/soa-dingdanauto.user.js
 // ==/UserScript==
 
 /*
- * SOA.2.5订单流程自动化
+ * SOA.3.1智能审批
  *
  * 功能：
- * - 覆盖订单详情各业务页签，识别流程阶段并执行已支持的自动处理。
- * - 支持审批备注、签单主体、合同/授权书共用文件配置。
- * - 支持体检时间异常检测与报价确认阶段时间修正。
- * - 提供按需落单数据、体检汇总/卡池数据及网页提示记录。
- * - 面板支持显示开关、拖动、折叠、位置记忆和流程停止。
+ * - 识别订单流程阶段并执行已支持的自动处理。
+ * - 支持审批备注、体检时间校验与报价确认阶段时间修正。
+ * - 支持合同智能补全、合同/授权书共用文件绑定及按需上传。
+ * - 支持内勤复核、合同补充、发起落单、落单审核及流程停止。
+ * - 面板支持显示开关、拖动、折叠、位置记忆和网页提示记录。
  *
  * 更新记录
  *
- * v1.32  -  2026-9-1
- * - 合同阶段改为逐项判断：已有签单主体、日期、名单时限均保留，仅补充空字段。
- * - 已存在合同文件/授权书时跳过上传；全部完整时直接进入下一步，避免重复保存和上传。
+ * v2.2  -  2026-9-1
+ * - 内置公共“红领巾的工具箱”框体样式，单独启用本模块时也可正常显示。
+ * - 工具箱边框改用伪元素向外绘制，不改变按钮原有布局高度；增加淡色背景并放大工具箱标识。
  *
- * v1.31  -  2026-9-1
- * - 卡池正数支持新标签页自动查询，0值不可交互。
+ * v2.1  -  2026-9-1
+ * - 模块正式更名为SOA.3.1智能审批，审批、合同及落单流程逻辑保持不变。
+ * - 顶部入口改为“启动智能审批 / 关闭智能审批”，并固定为工具组第1位。
+ *
+ * v2.0  -  2026-9-1
+ * - 重构：移出落单数据、体检数据、卡类查询及卡池跳转，仅保留订单流程自动化核心。
+ * - 保留：v1.32合同字段/文件逐项判断逻辑，避免覆盖已有数据和重复上传。
+ *
+ * v1.32  -  2026-9-1
+ * - 合同阶段改为逐项判断，仅补充空字段并跳过已有上传文件。
  *
  * v1.0  -  2026-8-30
  * - 首个 Tampermonkey 正式版。
@@ -52,11 +60,6 @@
   const ORDER_ROUTE_PREFIX =
     "#/order/";
 
-  const CARD_GROUP_ROUTE =
-    "#/card/group";
-
-  const CARD_GROUP_PENDING_KEY =
-    "__soa_order_flow_card_group_pending_v131";
 
   const isTargetRoute =
     () => {
@@ -105,23 +108,6 @@
     STALL_NOTICE_INTERVAL:
       12000,
 
-    PROCESS_LOG_API:
-      "/soa/api/v1/order/processlogs",
-
-    PACKAGE_CARD_POOL_API:
-      "/soa-card/api/v1/card/business/pool/display",
-
-    STORED_VALUE_CARD_POOL_API:
-      "/soa-card/api/v1/bqcard/page/pool",
-
-    EXTRACT_ORDER_NAME_SELECTOR:
-      "#register > div",
-    EXTRACT_ORDER_CODE_SELECTOR:
-      "#register > div:nth-of-type(2) > div:nth-of-type(8) > div:nth-of-type(2) > div > div",
-    EXTRACT_OPPORTUNITY_CODE_SELECTOR:
-      "#register > div:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(2) > div > div",
-    EXTRACT_SALESMAN_SELECTOR:
-      "#register > div:nth-of-type(2) > div > div:nth-of-type(2) > div > div > span",
 
     REGISTER_BEGIN_DATE_SELECTOR:
       "#register_begin_date",
@@ -131,18 +117,6 @@
     REGISTER_EDIT_BUTTON_SELECTOR:
       "#root > div > div > div > div > div:nth-of-type(2) > div > div:nth-of-type(2) > button:nth-of-type(3)",
 
-    PHYSICAL_TOTAL_PEOPLE_SELECTOR:
-      "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(2) > div > div > div > div > div > div > table > tbody > tr:nth-of-type(5) > td:nth-of-type(3) > div",
-    PHYSICAL_CHECKED_PEOPLE_SELECTOR:
-      "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(2) > div > div > div > div > div > div > table > tbody > tr:nth-of-type(5) > td:nth-of-type(6)",
-    PHYSICAL_UNCHECKED_PEOPLE_SELECTOR:
-      "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(2) > div > div > div > div > div > div > table > tbody > tr:nth-of-type(5) > td:nth-of-type(7)",
-    PHYSICAL_CHECKED_AMOUNT_SELECTOR:
-      "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(4) > div > div > div > div > div > div > table > tbody > tr:nth-of-type(5) > td:nth-of-type(3)",
-    PHYSICAL_ACCOUNT_AMOUNT_SELECTOR:
-      "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(4) > div > div > div > div > div > div > table > tbody > tr:nth-of-type(5) > td:nth-of-type(4)",
-    PHYSICAL_SELF_PAY_SELECTOR:
-      "#root > div > div > div > div > section > section:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(4) > div > div > div > div > div > div > table > tbody > tr:nth-of-type(5) > td:nth-of-type(5)"
   };
 
   const DEFAULTS = {
@@ -164,6 +138,9 @@
     HANDLE_KEY:
       "sharedContractFile"
   };
+
+  const TOOLBOX_STYLE_ID =
+    "__soa_honglingjin_toolbox_style_v10";
 
   const UI = {
     PANEL_ID:
@@ -194,25 +171,6 @@
       "__soa_flow_review_remark_text_v07",
     ORDER_REMARK_KEY:
       "__soa_flow_order_remark_text_v07",
-    EXTRACT_OPTIONS_ID:
-      "__soa_flow_extract_options_v09",
-    EXTRACT_PREVIEW_ID:
-      "__soa_flow_extract_preview_v09",
-
-    DATA_PANEL_ID:
-      "__soa_flow_data_panel_v116",
-    DATA_PANEL_TITLE_ID:
-      "__soa_flow_data_panel_title_v116",
-    LANDING_DATA_BUTTON_ID:
-      "__soa_flow_landing_data_button_v116",
-    PHYSICAL_DATA_BUTTON_ID:
-      "__soa_flow_physical_data_button_v116",
-    PHYSICAL_DATA_GRID_ID:
-      "__soa_flow_physical_data_grid_v116",
-
-    CARD_POOL_DATA_GRID_ID:
-      "__soa_flow_card_pool_data_grid_v126",
-
     HELP_BUTTON_ID:
       "__soa_flow_help_button_v14",
     HELP_PANEL_ID:
@@ -274,8 +232,6 @@
 
   let routeObserver = null;
 
-  let cardGroupPendingRunning =
-    false;
   let uiEnsureScheduled = false;
   let boundFileInitialized = false;
 
@@ -289,26 +245,9 @@
 
   let lastDisplayedFlowStage = "";
 
-  let activeDataPanelMode = "";
-  let lastDataPanelOrderCode = "";
 
   let panelStatusHideTimer = null;
 
-  const CARD_POOL_CACHE_MS =
-    15000;
-
-  let physicalDataQueryRunning =
-    false;
-
-  let cardPoolQueryCache = {
-    orderCode: "",
-    cardCorpCode: "",
-    timestamp: 0,
-    data: null
-  };
-
-  const cardCorpCodeMemory =
-    new Map();
 
   function hidePanelStatus() {
     const status =
@@ -4428,126 +4367,6 @@
     );
   }
 
-  function getExtractOrderName() {
-    const direct =
-      document.querySelector(
-        CONFIG.EXTRACT_ORDER_NAME_SELECTOR
-      );
-
-    if (!direct) {
-      return "";
-    }
-
-    const titledLabel =
-      direct.querySelector(
-        "label[title]"
-      );
-
-    const title =
-      cleanCellText(
-        titledLabel?.getAttribute(
-          "title"
-        )
-      );
-
-    if (title) {
-      return title;
-    }
-
-    return cleanCellText(
-      direct.innerText ||
-      direct.textContent
-    );
-  }
-
-  function getExtractOrderCode() {
-    return (
-      queryText(
-        CONFIG.EXTRACT_ORDER_CODE_SELECTOR
-      ) ||
-      getFormItemTextByFor(
-        "register_main_order_code"
-      )
-    );
-  }
-
-  function getExtractOpportunityCode() {
-    const raw =
-      (
-        queryText(
-          CONFIG.EXTRACT_OPPORTUNITY_CODE_SELECTOR
-        ) ||
-        getFormItemTextByFor(
-          "register_opportunity_id"
-        )
-      )
-        .replace(
-          /^'+/,
-          ""
-        )
-        .trim();
-
-    return raw
-      ? `'${raw}`
-      : "";
-  }
-
-  function getExtractSalesmanName() {
-    const raw =
-      (
-        queryText(
-          CONFIG.EXTRACT_SALESMAN_SELECTOR
-        ) ||
-        getFormItemTextByFor(
-          "register_salesman"
-        )
-      );
-
-    return cleanCellText(
-      raw
-        .split(
-          /[（(]/
-        )[0]
-    );
-  }
-
-  function extractDateTimeFromText(
-    value
-  ) {
-    const text =
-      cleanCellText(
-        value
-      );
-
-    if (!text) {
-      return "";
-    }
-
-    const patterns = [
-      /\d{4}-\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?/,
-      /\d{4}\/\d{1,2}\/\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?/,
-      /\d{4}年\d{1,2}月\d{1,2}日\s*\d{1,2}:\d{2}(?::\d{2})?/,
-      /\d{4}-\d{1,2}-\d{1,2}/,
-      /\d{4}\/\d{1,2}\/\d{1,2}/,
-      /\d{4}年\d{1,2}月\d{1,2}日/
-    ];
-
-    for (
-      const pattern of patterns
-    ) {
-      const match =
-        text.match(pattern);
-
-      if (match) {
-        return cleanCellText(
-          match[0]
-        );
-      }
-    }
-
-    return "";
-  }
-
   function addYearsClamped(
     date,
     years
@@ -4624,2240 +4443,6 @@
       urlMatch?.[1] ||
       ""
     );
-  }
-
-  async function fetchProcessLogs() {
-    const orderCode =
-      getCurrentOrderCode();
-
-    if (!orderCode) {
-      throw new Error(
-        "未识别到当前订单编号，无法读取流程日志"
-      );
-    }
-
-    const response =
-      await fetch(
-        CONFIG.PROCESS_LOG_API,
-        {
-          method:
-            "POST",
-          headers: {
-            "accept":
-              "application/json, text/plain, */*",
-            "content-type":
-              "application/json;charset=UTF-8",
-            "mnclientid":
-              "MN_SOA3"
-          },
-          body:
-            JSON.stringify({
-              order_code:
-                orderCode,
-              type:
-                "ALL"
-            }),
-          credentials:
-            "include"
-        }
-      );
-
-    if (!response.ok) {
-      throw new Error(
-        `流程日志接口请求失败：HTTP ${response.status}`
-      );
-    }
-
-    const payload =
-      await response.json();
-
-    return {
-      orderCode,
-      payload
-    };
-  }
-
-  function collectObjects(
-    value,
-    output = []
-  ) {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      return output;
-    }
-
-    if (
-      Array.isArray(value)
-    ) {
-      value.forEach(item => {
-        collectObjects(
-          item,
-          output
-        );
-      });
-
-      return output;
-    }
-
-    if (
-      typeof value ===
-      "object"
-    ) {
-      output.push(value);
-
-      Object.values(
-        value
-      ).forEach(child => {
-        if (
-          child &&
-          typeof child ===
-            "object"
-        ) {
-          collectObjects(
-            child,
-            output
-          );
-        }
-      });
-    }
-
-    return output;
-  }
-
-  function getPrimitiveEntries(
-    object
-  ) {
-    return Object.entries(
-      object || {}
-    )
-      .filter(([, value]) => {
-        return (
-          typeof value ===
-            "string" ||
-          typeof value ===
-            "number"
-        );
-      })
-      .map(([key, value]) => ({
-        key,
-        value:
-          String(value)
-      }));
-  }
-
-  function normalizeTransitionText(
-    value
-  ) {
-    return cleanCellText(
-      value
-    )
-      .replace(
-        /\s*-\s*>\s*/g,
-        " -> "
-      )
-      .replace(
-        /\s*→\s*/g,
-        " -> "
-      );
-  }
-
-  function objectIsLandingRecord(
-    object
-  ) {
-    const entries =
-      getPrimitiveEntries(
-        object
-      );
-
-    for (const entry of entries) {
-      const value =
-        normalizeTransitionText(
-          entry.value
-        );
-
-      if (
-        value ===
-          "已落单" ||
-        /->\s*已落单$/.test(
-          value
-        )
-      ) {
-        return true;
-      }
-    }
-
-    /*
-     * 兼容接口将“目标状态”和“来源状态”拆字段返回。
-     */
-    for (const entry of entries) {
-      const key =
-        entry.key
-          .toLowerCase();
-
-      const value =
-        cleanCellText(
-          entry.value
-        );
-
-      if (
-        /(to|target|next|after|status|state)/.test(
-          key
-        ) &&
-        value ===
-          "已落单"
-      ) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  function getObjectDateTime(
-    object
-  ) {
-    const entries =
-      getPrimitiveEntries(
-        object
-      );
-
-    const candidates = [];
-
-    entries.forEach(
-      ({ key, value }, index) => {
-        const time =
-          extractDateTimeFromText(
-            value
-          );
-
-        if (!time) {
-          return;
-        }
-
-        const normalizedKey =
-          key.toLowerCase();
-
-        let priority = 50;
-
-        if (
-          /create.*time|created.*time/.test(
-            normalizedKey
-          )
-        ) {
-          priority = 1;
-        } else if (
-          /operate.*time|operation.*time/.test(
-            normalizedKey
-          )
-        ) {
-          priority = 2;
-        } else if (
-          /process.*time|handle.*time/.test(
-            normalizedKey
-          )
-        ) {
-          priority = 3;
-        } else if (
-          /time|date/.test(
-            normalizedKey
-          )
-        ) {
-          priority = 10;
-        }
-
-        candidates.push({
-          time,
-          priority,
-          index
-        });
-      }
-    );
-
-    candidates.sort(
-      (a, b) =>
-        a.priority -
-          b.priority ||
-        a.index -
-          b.index
-    );
-
-    return (
-      candidates[0]?.time ||
-      ""
-    );
-  }
-
-  function dateTimeToNumber(
-    value
-  ) {
-    const text =
-      String(
-        value || ""
-      )
-        .replace(
-          /年|月/g,
-          "-"
-        )
-        .replace(
-          /日/g,
-          ""
-        )
-        .replace(
-          /\//g,
-          "-"
-        )
-        .trim();
-
-    const match =
-      text.match(
-        /(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/
-      );
-
-    if (!match) {
-      return Number.NaN;
-    }
-
-    return new Date(
-      Number(match[1]),
-      Number(match[2]) - 1,
-      Number(match[3]),
-      Number(match[4] || 0),
-      Number(match[5] || 0),
-      Number(match[6] || 0)
-    ).getTime();
-  }
-
-  function parseLandingRecordsFromProcessLogs(
-    payload
-  ) {
-    const objects =
-      collectObjects(
-        payload
-      );
-
-    const matched = [];
-
-    objects.forEach(
-      (object, index) => {
-        if (
-          !objectIsLandingRecord(
-            object
-          )
-        ) {
-          return;
-        }
-
-        const time =
-          getObjectDateTime(
-            object
-          );
-
-        if (!time) {
-          return;
-        }
-
-        matched.push({
-          index,
-          time,
-          object
-        });
-      }
-    );
-
-    /*
-     * 嵌套 JSON 可能让同一条记录被重复扫到，
-     * 这里按时间去重。
-     */
-    const unique =
-      new Map();
-
-    matched.forEach(record => {
-      if (
-        !unique.has(
-          record.time
-        )
-      ) {
-        unique.set(
-          record.time,
-          record
-        );
-      }
-    });
-
-    const records =
-      Array.from(
-        unique.values()
-      );
-
-    records.sort(
-      (a, b) => {
-        const at =
-          dateTimeToNumber(
-            a.time
-          );
-
-        const bt =
-          dateTimeToNumber(
-            b.time
-          );
-
-        if (
-          Number.isFinite(at) &&
-          Number.isFinite(bt)
-        ) {
-          return at - bt;
-        }
-
-        return (
-          a.index -
-          b.index
-        );
-      }
-    );
-
-    return records;
-  }
-
-  function buildLandingTimeOptions(
-    records
-  ) {
-    if (
-      !Array.isArray(records) ||
-      !records.length
-    ) {
-      return [];
-    }
-
-    const first =
-      records[0];
-
-    const last =
-      records[
-        records.length - 1
-      ];
-
-    const options = [
-      {
-        type: "first",
-        label: "首次落单",
-        time: first.time
-      }
-    ];
-
-    if (
-      records.length > 1
-    ) {
-      const modifiedCount =
-        records.length - 1;
-
-      options.push({
-        type: "modified",
-        label:
-          `修改${modifiedCount}次`,
-        time: last.time,
-        count:
-          modifiedCount
-      });
-    }
-
-    return options;
-  }
-
-  let cachedLandingTimeOptions = [];
-
-  async function refreshLandingTimeOptions() {
-    cachedLandingTimeOptions = [];
-
-    const stage =
-      getCurrentFlowStage();
-
-    if (
-      stage !==
-      "已落单"
-    ) {
-      renderLandingExtractOptions(
-        []
-      );
-
-      return [];
-    }
-
-    const result =
-      await fetchProcessLogs();
-
-    const records =
-      parseLandingRecordsFromProcessLogs(
-        result.payload
-      );
-
-    if (!records.length) {
-      console.warn(
-        "[SOA流程自动化] processlogs 未识别到已落单记录，原始响应：",
-        result.payload
-      );
-
-      renderLandingExtractOptions(
-        []
-      );
-
-      return [];
-    }
-
-    console.log(
-      "[SOA流程自动化] processlogs 已识别落单记录：",
-      records.map(record => ({
-        time:
-          record.time,
-        object:
-          record.object
-      }))
-    );
-
-    const options =
-      buildLandingTimeOptions(
-        records
-      );
-
-    cachedLandingTimeOptions =
-      options;
-
-    renderLandingExtractOptions(
-      options
-    );
-
-    return options;
-  }
-
-  function getLandingTimeOptions() {
-    return [
-      ...cachedLandingTimeOptions
-    ];
-  }
-
-  function buildSpreadsheetLine(
-    landingTime
-  ) {
-    const values = [
-      getExtractOrderName(),
-      getExtractOrderCode(),
-      getExtractOpportunityCode(),
-      getExtractSalesmanName(),
-      landingTime
-    ].map(
-      cleanCellText
-    );
-
-    const missing = [];
-
-    if (!values[0]) {
-      missing.push(
-        "订单名称"
-      );
-    }
-
-    if (!values[1]) {
-      missing.push(
-        "订单编号"
-      );
-    }
-
-    if (!values[2]) {
-      missing.push(
-        "商机代码"
-      );
-    }
-
-    if (!values[3]) {
-      missing.push(
-        "健管顾问姓名"
-      );
-    }
-
-    if (!values[4]) {
-      missing.push(
-        "落单时间"
-      );
-    }
-
-    if (missing.length) {
-      throw new Error(
-        "提取数据不完整：" +
-        missing.join("、")
-      );
-    }
-
-    return values.join(
-      "\t"
-    );
-  }
-
-  async function copyTextToClipboard(
-    text
-  ) {
-    if (
-      navigator.clipboard &&
-      window.isSecureContext
-    ) {
-      try {
-        await navigator.clipboard
-          .writeText(text);
-
-        return true;
-      } catch (_) {
-        // 继续走兼容方案。
-      }
-    }
-
-    const textarea =
-      document.createElement(
-        "textarea"
-      );
-
-    textarea.value =
-      text;
-
-    textarea.style.position =
-      "fixed";
-
-    textarea.style.left =
-      "-9999px";
-
-    textarea.style.top =
-      "-9999px";
-
-    document.body.appendChild(
-      textarea
-    );
-
-    textarea.focus();
-    textarea.select();
-
-    const ok =
-      document.execCommand(
-        "copy"
-      );
-
-    textarea.remove();
-
-    if (!ok) {
-      throw new Error(
-        "浏览器未允许自动复制，请从下方预览框手动复制"
-      );
-    }
-
-    return true;
-  }
-
-  function showExtractPreview(
-    text
-  ) {
-    const preview =
-      document.getElementById(
-        UI.EXTRACT_PREVIEW_ID
-      );
-
-    if (!preview) {
-      return;
-    }
-
-    preview.style.display =
-      "block";
-
-    preview.textContent =
-      text;
-  }
-
-  async function copyLandingOption(
-    option
-  ) {
-    const line =
-      buildSpreadsheetLine(
-        option.time
-      );
-
-    showExtractPreview(
-      line
-    );
-
-    await copyTextToClipboard(
-      line
-    );
-
-    updatePanelStatus(
-      `✓ 已复制“${option.label}”数据，可直接粘贴到表格。`,
-      "success"
-    );
-
-    log(
-      `已复制${option.label}数据：${line}`
-    );
-  }
-
-  function renderLandingExtractOptions(
-    suppliedOptions = null
-  ) {
-    const container =
-      document.getElementById(
-        UI.EXTRACT_OPTIONS_ID
-      );
-
-    if (!container) {
-      return [];
-    }
-
-    container.innerHTML =
-      "";
-
-    container.style.display =
-      "none";
-
-    const options =
-      Array.isArray(
-        suppliedOptions
-      )
-        ? suppliedOptions
-        : getLandingTimeOptions();
-
-    if (!options.length) {
-      return options;
-    }
-
-    container.style.display =
-      "grid";
-
-    container.style.gridTemplateColumns =
-      options.length > 1
-        ? "1fr 1fr"
-        : "1fr";
-
-    container.style.gap =
-      "8px";
-
-    container.style.marginTop =
-      "0";
-
-    options.forEach(option => {
-      const button =
-        document.createElement(
-          "button"
-        );
-
-      button.type =
-        "button";
-
-      button.textContent =
-        `${option.label}｜${option.time}`;
-
-      button.style.cssText = [
-        "min-height:34px",
-        "padding:5px 7px",
-        "border:1px solid #1677ff",
-        "border-radius:6px",
-        "background:#fff",
-        "color:#1677ff",
-        "cursor:pointer",
-        "font-size:12px",
-        "line-height:1.35"
-      ].join(";");
-
-      button.addEventListener(
-        "click",
-        () => {
-          copyLandingOption(
-            option
-          ).catch(error => {
-            warn(
-              error?.message ||
-              String(error)
-            );
-          });
-        }
-      );
-
-      container.appendChild(
-        button
-      );
-    });
-
-    return options;
-  }
-
-
-  function getVisibleTables() {
-    return Array.from(
-      document.querySelectorAll(
-        "table"
-      )
-    ).filter(isVisible);
-  }
-
-  function getTableHeaderTexts(
-    table
-  ) {
-    if (!table) {
-      return [];
-    }
-
-    const headerRow =
-      Array.from(
-        table.querySelectorAll(
-          "thead tr"
-        )
-      ).reverse()[0];
-
-    if (!headerRow) {
-      return [];
-    }
-
-    return Array.from(
-      headerRow.querySelectorAll(
-        "th"
-      )
-    ).map(cell =>
-      compactText(
-        cell.textContent
-      )
-    );
-  }
-
-  function findTableByHeaders(
-    requiredHeaders
-  ) {
-    return (
-      getVisibleTables()
-        .find(table => {
-          const headers =
-            getTableHeaderTexts(
-              table
-            );
-
-          return requiredHeaders
-            .every(required =>
-              headers.includes(
-                compactText(required)
-              )
-            );
-        }) ||
-      null
-    );
-  }
-
-  function findSummaryRow(
-    table
-  ) {
-    if (!table) {
-      return null;
-    }
-
-    const rows =
-      Array.from(
-        table.querySelectorAll(
-          "tbody tr"
-        )
-      ).filter(isVisible);
-
-    return (
-      rows.find(row => {
-        return Array.from(
-          row.querySelectorAll(
-            "td"
-          )
-        ).some(cell =>
-          compactText(
-            cell.textContent
-          ) === "合计"
-        );
-      }) ||
-      rows[
-        rows.length - 1
-      ] ||
-      null
-    );
-  }
-
-  function getSummaryCellByHeader(
-    table,
-    row,
-    headerCandidates
-  ) {
-    if (
-      !table ||
-      !row
-    ) {
-      return "";
-    }
-
-    const headers =
-      getTableHeaderTexts(
-        table
-      );
-
-    const normalizedCandidates =
-      headerCandidates.map(
-        compactText
-      );
-
-    const index =
-      headers.findIndex(header =>
-        normalizedCandidates
-          .includes(header)
-      );
-
-    if (index < 0) {
-      return "";
-    }
-
-    const cells =
-      Array.from(
-        row.querySelectorAll(
-          "td"
-        )
-      );
-
-    return cleanCellText(
-      cells[index]
-        ?.innerText ||
-      cells[index]
-        ?.textContent ||
-      ""
-    );
-  }
-
-  function queryPhysicalFallback(
-    selector
-  ) {
-    return cleanCellText(
-      document.querySelector(
-        selector
-      )?.innerText ||
-      document.querySelector(
-        selector
-      )?.textContent ||
-      ""
-    );
-  }
-
-  function extractPhysicalExamSummary() {
-    const peopleTable =
-      findTableByHeaders([
-        "人数",
-        "已检人数",
-        "未检人数"
-      ]);
-
-    const amountTable =
-      findTableByHeaders([
-        "已检总额",
-        "挂账金额",
-        "自费支付"
-      ]) ||
-      findTableByHeaders([
-        "到检总额",
-        "挂账金额",
-        "自费金额"
-      ]);
-
-    const peopleRow =
-      findSummaryRow(
-        peopleTable
-      );
-
-    const amountRow =
-      findSummaryRow(
-        amountTable
-      );
-
-    const result = {
-      totalPeople:
-        getSummaryCellByHeader(
-          peopleTable,
-          peopleRow,
-          ["人数"]
-        ) ||
-        queryPhysicalFallback(
-          CONFIG.PHYSICAL_TOTAL_PEOPLE_SELECTOR
-        ),
-
-      checkedPeople:
-        getSummaryCellByHeader(
-          peopleTable,
-          peopleRow,
-          ["已检人数"]
-        ) ||
-        queryPhysicalFallback(
-          CONFIG.PHYSICAL_CHECKED_PEOPLE_SELECTOR
-        ),
-
-      uncheckedPeople:
-        getSummaryCellByHeader(
-          peopleTable,
-          peopleRow,
-          ["未检人数"]
-        ) ||
-        queryPhysicalFallback(
-          CONFIG.PHYSICAL_UNCHECKED_PEOPLE_SELECTOR
-        ),
-
-      checkedAmount:
-        getSummaryCellByHeader(
-          amountTable,
-          amountRow,
-          [
-            "已检总额",
-            "到检总额"
-          ]
-        ) ||
-        queryPhysicalFallback(
-          CONFIG.PHYSICAL_CHECKED_AMOUNT_SELECTOR
-        ),
-
-      accountAmount:
-        getSummaryCellByHeader(
-          amountTable,
-          amountRow,
-          ["挂账金额"]
-        ) ||
-        queryPhysicalFallback(
-          CONFIG.PHYSICAL_ACCOUNT_AMOUNT_SELECTOR
-        ),
-
-      selfPayAmount:
-        getSummaryCellByHeader(
-          amountTable,
-          amountRow,
-          [
-            "自费支付",
-            "自费金额"
-          ]
-        ) ||
-        queryPhysicalFallback(
-          CONFIG.PHYSICAL_SELF_PAY_SELECTOR
-        )
-    };
-
-    const missing = [];
-
-    [
-      ["总人数", "totalPeople"],
-      ["已检人数", "checkedPeople"],
-      ["未检人数", "uncheckedPeople"],
-      ["到检总额", "checkedAmount"],
-      ["挂账金额", "accountAmount"],
-      ["自费金额", "selfPayAmount"]
-    ].forEach(
-      ([label, key]) => {
-        if (!result[key]) {
-          missing.push(label);
-        }
-      }
-    );
-
-    if (missing.length) {
-      throw new Error(
-        "体检名单数据读取不完整：" +
-        missing.join("、")
-      );
-    }
-
-    return result;
-  }
-
-  function tryExtractPhysicalExamSummary() {
-    try {
-      return extractPhysicalExamSummary();
-    } catch (_) {
-      return null;
-    }
-  }
-
-  async function ensurePhysicalExamSummaryAvailable(
-    token = null
-  ) {
-    /*
-     * 第一优先级：直接读取当前 DOM。
-     * 如果用户此前访问过体检名单、真实汇总数据仍保留在隐藏 DOM 中，
-     * 则无需切换页签。
-     */
-    const existing =
-      tryExtractPhysicalExamSummary();
-
-    if (existing) {
-      return {
-        data:
-          existing,
-        navigated:
-          false
-      };
-    }
-
-    /*
-     * 当前页面只有体检名单的空壳 / placeholder 时，
-     * 说明真实汇总尚未加载，此时再自动切换到体检名单。
-     */
-    const tab =
-      await waitForReactiveCondition(
-        () =>
-          findTabByText(
-            "体检名单"
-          ) ||
-          null,
-        {
-          label:
-            "体检名单页签",
-          token,
-          blockerCheck:
-            () =>
-              getVisibleErrorFeedback()
-        }
-      );
-
-    updatePanelStatus(
-      "当前页尚未加载体检汇总，正在切换到体检名单读取..."
-    );
-
-    tab.click();
-
-    const data =
-      await waitForReactiveCondition(
-        () =>
-          tryExtractPhysicalExamSummary() ||
-          null,
-        {
-          label:
-            "体检名单汇总数据",
-          token,
-          blockerCheck:
-            () =>
-              getVisibleErrorFeedback()
-        }
-      );
-
-    return {
-      data,
-      navigated:
-        true
-    };
-  }
-
-  function renderPhysicalExamSummary(
-    data
-  ) {
-    const grid =
-      document.getElementById(
-        UI.PHYSICAL_DATA_GRID_ID
-      );
-
-    if (!grid) {
-      return;
-    }
-
-    const items = [
-      ["总人数", data.totalPeople],
-      ["已检人数", data.checkedPeople],
-      ["未检人数", data.uncheckedPeople],
-      ["到检总额", data.checkedAmount],
-      ["挂账金额", data.accountAmount],
-      ["自费金额", data.selfPayAmount]
-    ];
-
-    grid.innerHTML =
-      items
-        .map(
-          ([label, value]) => `
-            <div style="
-              min-width:0;
-              padding:6px 4px;
-              border:1px solid #f0f0f0;
-              border-radius:5px;
-              background:#fafafa;
-              text-align:center;
-              user-select:text;
-            ">
-              <div style="
-                margin-bottom:2px;
-                color:#999;
-                font-size:10px;
-                line-height:1.2;
-              ">${label}</div>
-              <div style="
-                overflow:hidden;
-                text-overflow:ellipsis;
-                white-space:nowrap;
-                color:#262626;
-                font-size:13px;
-                font-weight:700;
-                line-height:1.3;
-              " title="${value}">${value}</div>
-            </div>
-          `
-        )
-        .join("");
-
-    grid.style.display =
-      "grid";
-  }
-
-  function getCurrentCardCorpCode() {
-    const raw =
-      (
-        queryText(
-          CONFIG.EXTRACT_OPPORTUNITY_CODE_SELECTOR
-        ) ||
-        getFormItemTextByFor(
-          "register_opportunity_id"
-        )
-      )
-        .replace(
-          /^'+/,
-          ""
-        )
-        .trim();
-
-    const match =
-      raw.match(
-        /\d{8,}/
-      );
-
-    const current =
-      match?.[0] ||
-      "";
-
-    const orderCode =
-      getCurrentOrderCode();
-
-    if (
-      current &&
-      orderCode
-    ) {
-      cardCorpCodeMemory.set(
-        orderCode,
-        current
-      );
-    }
-
-    if (current) {
-      return current;
-    }
-
-    if (
-      orderCode &&
-      cardCorpCodeMemory.has(
-        orderCode
-      )
-    ) {
-      return (
-        cardCorpCodeMemory.get(
-          orderCode
-        ) ||
-        ""
-      );
-    }
-
-    return "";
-  }
-
-  function getCardPoolBackendError(
-    payload
-  ) {
-    if (
-      !payload ||
-      typeof payload !==
-        "object"
-    ) {
-      return "";
-    }
-
-    const resultCode =
-      cleanText(
-        payload.result_code
-      ).toUpperCase();
-
-    const errorCode =
-      cleanText(
-        payload.error_code
-      );
-
-    const errorDesc =
-      cleanText(
-        payload.error_desc
-      );
-
-    const message =
-      cleanText(
-        payload.msg
-      );
-
-    if (
-      resultCode === "FAIL" ||
-      errorCode ||
-      errorDesc
-    ) {
-      return (
-        errorDesc ||
-        message ||
-        errorCode ||
-        "接口返回失败"
-      );
-    }
-
-    return "";
-  }
-
-  function extractCardPoolTotalNum(
-    payload
-  ) {
-    const value =
-      Number(
-        payload?.data?.total_num
-      );
-
-    return Number.isFinite(
-      value
-    )
-      ? value
-      : null;
-  }
-
-  async function fetchCardPoolTotalNum(
-    api,
-    cardCorpCode
-  ) {
-    const response =
-      await fetch(
-        api,
-        {
-          method:
-            "POST",
-          headers: {
-            "accept":
-              "application/json, text/plain, */*",
-            "content-type":
-              "application/json;charset=UTF-8",
-            "mnclientid":
-              "MN_SOA3"
-          },
-          body:
-            JSON.stringify({
-              region_code:
-                "XX",
-              page_index:
-                1,
-              page_size:
-                20,
-              cardCorpCode
-            }),
-          credentials:
-            "include"
-        }
-      );
-
-    if (!response.ok) {
-      throw new Error(
-        `HTTP ${response.status}`
-      );
-    }
-
-    const payload =
-      await response.json();
-
-    const backendError =
-      getCardPoolBackendError(
-        payload
-      );
-
-    if (backendError) {
-      throw new Error(
-        backendError
-      );
-    }
-
-    const totalNum =
-      extractCardPoolTotalNum(
-        payload
-      );
-
-    if (
-      totalNum === null
-    ) {
-      console.warn(
-        "[SOA流程自动化] 卡池接口未返回 data.total_num：",
-        {
-          api,
-          payload
-        }
-      );
-
-      throw new Error(
-        "接口成功，但未返回 total_num"
-      );
-    }
-
-    return totalNum;
-  }
-
-  async function safeFetchCardPoolTotal(
-    api,
-    cardCorpCode
-  ) {
-    try {
-      return {
-        ok:
-          true,
-        totalNum:
-          await fetchCardPoolTotalNum(
-            api,
-            cardCorpCode
-          )
-      };
-    } catch (error) {
-      return {
-        ok:
-          false,
-        error:
-          error?.message ||
-          String(error)
-      };
-    }
-  }
-
-  async function fetchBothCardPoolTotals(
-    cardCorpCode
-  ) {
-    const packageCard =
-      await safeFetchCardPoolTotal(
-        CONFIG.PACKAGE_CARD_POOL_API,
-        cardCorpCode
-      );
-
-    await sleep(
-      150
-    );
-
-    const storedValueCard =
-      await safeFetchCardPoolTotal(
-        CONFIG.STORED_VALUE_CARD_POOL_API,
-        cardCorpCode
-      );
-
-    return {
-      packageCard,
-      storedValueCard
-    };
-  }
-
-  function savePendingCardGroupQuery(
-    cardType,
-    cardCorpCode
-  ) {
-    const type =
-      cardType ===
-      "storage"
-        ? "storage"
-        : "general";
-
-    const code =
-      cleanText(
-        cardCorpCode
-      );
-
-    if (!code) {
-      throw new Error(
-        "单位代码为空，无法打开卡池"
-      );
-    }
-
-    localStorage.setItem(
-      CARD_GROUP_PENDING_KEY,
-      JSON.stringify({
-        cardType:
-          type,
-        cardCorpCode:
-          code,
-        createdAt:
-          Date.now()
-      })
-    );
-  }
-
-  function readPendingCardGroupQuery() {
-    const raw =
-      localStorage.getItem(
-        CARD_GROUP_PENDING_KEY
-      );
-
-    if (!raw) {
-      return null;
-    }
-
-    try {
-      const data =
-        JSON.parse(
-          raw
-        );
-
-      if (
-        !data ||
-        !data.cardCorpCode ||
-        ![
-          "general",
-          "storage"
-        ].includes(
-          data.cardType
-        )
-      ) {
-        return null;
-      }
-
-      /*
-       * 超过 2 分钟的任务视为过期，
-       * 防止用户很久之后重新进入卡池页时误自动查询。
-       */
-      if (
-        Number.isFinite(
-          Number(
-            data.createdAt
-          )
-        ) &&
-        Date.now() -
-          Number(
-            data.createdAt
-          ) >
-          120000
-      ) {
-        localStorage.removeItem(
-          CARD_GROUP_PENDING_KEY
-        );
-
-        return null;
-      }
-
-      return data;
-    } catch {
-      localStorage.removeItem(
-        CARD_GROUP_PENDING_KEY
-      );
-
-      return null;
-    }
-  }
-
-  function clearPendingCardGroupQuery() {
-    localStorage.removeItem(
-      CARD_GROUP_PENDING_KEY
-    );
-  }
-
-  function openCardGroupForQuery(
-    cardType,
-    cardCorpCode
-  ) {
-    savePendingCardGroupQuery(
-      cardType,
-      cardCorpCode
-    );
-
-    const url =
-      `${location.origin}/${CARD_GROUP_ROUTE}`;
-
-    const newTab =
-      window.open(
-        url,
-        "_blank"
-      );
-
-    if (!newTab) {
-      clearPendingCardGroupQuery();
-
-      throw new Error(
-        "浏览器阻止了新标签页，请允许当前网站打开弹出窗口"
-      );
-    }
-  }
-
-  function waitForCardGroupElement(
-    finder,
-    {
-      timeout =
-        12000,
-      interval =
-        100,
-      label =
-        "页面元素"
-    } = {}
-  ) {
-    return new Promise(
-      (
-        resolve,
-        reject
-      ) => {
-        const start =
-          Date.now();
-
-        const check =
-          () => {
-            let value = null;
-
-            try {
-              value =
-                typeof finder ===
-                  "function"
-                  ? finder()
-                  : document.querySelector(
-                      finder
-                    );
-            } catch (_) {
-              value = null;
-            }
-
-            if (value) {
-              resolve(
-                value
-              );
-              return;
-            }
-
-            if (
-              Date.now() -
-                start >=
-              timeout
-            ) {
-              reject(
-                new Error(
-                  `等待${label}超时`
-                )
-              );
-
-              return;
-            }
-
-            setTimeout(
-              check,
-              interval
-            );
-          };
-
-        check();
-      }
-    );
-  }
-
-  function isElementVisible(
-    element
-  ) {
-    if (!element) {
-      return false;
-    }
-
-    const style =
-      getComputedStyle(
-        element
-      );
-
-    if (
-      style.display === "none" ||
-      style.visibility === "hidden"
-    ) {
-      return false;
-    }
-
-    const rect =
-      element.getBoundingClientRect();
-
-    return (
-      rect.width > 0 &&
-      rect.height > 0
-    );
-  }
-
-  function isCardGroupTabActive(
-    tab
-  ) {
-    if (!tab) {
-      return false;
-    }
-
-    return (
-      tab.getAttribute(
-        "aria-selected"
-      ) === "true" ||
-      tab.classList.contains(
-        "ant-tabs-tab-active"
-      ) ||
-      tab.parentElement
-        ?.classList
-        ?.contains(
-          "ant-tabs-tab-active"
-        )
-    );
-  }
-
-  function getCardGroupTab(
-    cardType
-  ) {
-    const suffix =
-      cardType ===
-      "storage"
-        ? "storageCard"
-        : "generalCard";
-
-    return (
-      document.getElementById(
-        `rc-tabs-0-tab-${suffix}`
-      ) ||
-      document.querySelector(
-        `[id$="-tab-${suffix}"]`
-      )
-    );
-  }
-
-  function getCardGroupPanel(
-    cardType
-  ) {
-    const suffix =
-      cardType ===
-      "storage"
-        ? "storageCard"
-        : "generalCard";
-
-    return (
-      document.getElementById(
-        `rc-tabs-0-panel-${suffix}`
-      ) ||
-      document.querySelector(
-        `[id$="-panel-${suffix}"]`
-      )
-    );
-  }
-
-  function findCardGroupQueryButton(
-    cardType
-  ) {
-    const suffix =
-      cardType ===
-      "storage"
-        ? "storageCard"
-        : "generalCard";
-
-    /*
-     * 第一优先级：用户提供的精确 DOM 路径。
-     * storageCard 按同样结构自动替换 panel id。
-     */
-    const exact =
-      document.querySelector(
-        `#rc-tabs-0-panel-${suffix} > div > div > div > form > div > div:nth-of-type(9) > div > div:nth-of-type(2) > div > div > div > div > div > div > button`
-      );
-
-    if (exact) {
-      return exact;
-    }
-
-    const panel =
-      getCardGroupPanel(
-        cardType
-      );
-
-    if (!panel) {
-      return null;
-    }
-
-    const buttons =
-      Array.from(
-        panel.querySelectorAll(
-          "form button"
-        )
-      );
-
-    return (
-      buttons.find(
-        button =>
-          /查询|搜索/.test(
-            cleanText(
-              button.textContent
-            )
-          )
-      ) ||
-      null
-    );
-  }
-
-  async function processPendingCardGroupQuery() {
-    if (
-      cardGroupPendingRunning ||
-      !location.hash.startsWith(
-        CARD_GROUP_ROUTE
-      )
-    ) {
-      return;
-    }
-
-    const pending =
-      readPendingCardGroupQuery();
-
-    if (!pending) {
-      return;
-    }
-
-    cardGroupPendingRunning =
-      true;
-
-    try {
-      const tab =
-        await waitForCardGroupElement(
-          () =>
-            getCardGroupTab(
-              pending.cardType
-            ),
-          {
-            timeout:
-              15000,
-            label:
-              pending.cardType ===
-                "storage"
-                ? "储值卡页签"
-                : "套餐卡页签"
-          }
-        );
-
-      if (
-        !isCardGroupTabActive(
-          tab
-        )
-      ) {
-        tab.click();
-      }
-
-      /*
-       * 等待目标页签真正激活。
-       * 不能只在 click 后马上继续，否则 Ant Tabs 的内容还未挂载完成。
-       */
-      await waitForCardGroupElement(
-        () =>
-          isCardGroupTabActive(
-            getCardGroupTab(
-              pending.cardType
-            )
-          )
-            ? true
-            : null,
-        {
-          timeout:
-            8000,
-          label:
-            "卡池页签激活"
-        }
-      );
-
-      /*
-       * 再等待目标 panel 可见。
-       */
-      const panel =
-        await waitForCardGroupElement(
-          () => {
-            const current =
-              getCardGroupPanel(
-                pending.cardType
-              );
-
-            return (
-              current &&
-              isElementVisible(
-                current
-              )
-            )
-              ? current
-              : null;
-          },
-          {
-            timeout:
-              10000,
-            label:
-              "卡池查询区域"
-          }
-        );
-
-      const input =
-        await waitForCardGroupElement(
-          () => {
-            const scoped =
-              panel.querySelector(
-                "#cardCorpCode, input[id='cardCorpCode']"
-              );
-
-            const fallback =
-              document.querySelector(
-                "#cardCorpCode"
-              );
-
-            const candidate =
-              scoped ||
-              fallback;
-
-            return (
-              candidate &&
-              !candidate.disabled &&
-              isElementVisible(
-                candidate
-              )
-            )
-              ? candidate
-              : null;
-          },
-          {
-            timeout:
-              10000,
-            label:
-              "单位代码输入框"
-          }
-        );
-
-      input.focus();
-
-      setNativeInputValue(
-        input,
-        pending.cardCorpCode
-      );
-
-      /*
-       * 补齐框架常见受控输入事件，
-       * 确保 React/Ant Design 的表单状态同步。
-       */
-      input.dispatchEvent(
-        new Event(
-          "input",
-          {
-            bubbles:
-              true
-          }
-        )
-      );
-
-      input.dispatchEvent(
-        new Event(
-          "change",
-          {
-            bubbles:
-              true
-          }
-        )
-      );
-
-      /*
-       * 等待页面确认输入值已经写入。
-       */
-      await waitForCardGroupElement(
-        () =>
-          cleanText(
-            input.value
-          ) ===
-          pending.cardCorpCode
-            ? true
-            : null,
-        {
-          timeout:
-            5000,
-          interval:
-            80,
-          label:
-            "单位代码写入"
-        }
-      );
-
-      input.blur();
-
-      /*
-       * 给 Ant Form 留出状态提交时间。
-       * v1.30 的问题主要就是此处操作过快。
-       */
-      await sleep(
-        650
-      );
-
-      let queryButton =
-        findCardGroupQueryButton(
-          pending.cardType
-        );
-
-      if (
-        !queryButton ||
-        queryButton.disabled ||
-        !isElementVisible(
-          queryButton
-        )
-      ) {
-        queryButton =
-          await waitForCardGroupElement(
-            () => {
-              const button =
-                findCardGroupQueryButton(
-                  pending.cardType
-                );
-
-              return (
-                button &&
-                !button.disabled &&
-                isElementVisible(
-                  button
-                )
-              )
-                ? button
-                : null;
-            },
-            {
-              timeout:
-                8000,
-              interval:
-                120,
-              label:
-                "卡池查询按钮"
-            }
-          );
-      }
-
-      /*
-       * 优先真实点击查询按钮。
-       */
-      queryButton.focus();
-
-      await sleep(
-        180
-      );
-
-      queryButton.click();
-
-      /*
-       * 点击后不立即清任务，稍等一下，
-       * 避免页面状态尚未接收点击。
-       */
-      await sleep(
-        500
-      );
-
-      clearPendingCardGroupQuery();
-
-      console.log(
-        "[SOA流程自动化] 已打开新标签页并查询卡池：",
-        {
-          cardType:
-            pending.cardType,
-          cardCorpCode:
-            pending.cardCorpCode
-        }
-      );
-    } catch (error) {
-      console.warn(
-        "[SOA流程自动化] 卡池自动查询失败：",
-        error
-      );
-
-      /*
-       * 失败时保留任务一小段时间，便于路由重新触发时再试；
-       * 任务本身仍有2分钟过期保护。
-       */
-      throw error;
-    } finally {
-      cardGroupPendingRunning =
-        false;
-    }
-  }
-
-  function renderCardPoolSummary(
-    data,
-    cardCorpCode
-  ) {
-    const grid =
-      document.getElementById(
-        UI.CARD_POOL_DATA_GRID_ID
-      );
-
-    if (!grid) {
-      return;
-    }
-
-    const items = [
-      [
-        "套餐卡",
-        data.packageCard
-      ],
-      [
-        "储值卡",
-        data.storedValueCard
-      ]
-    ];
-
-    grid.innerHTML =
-      items
-        .map(
-          ([label, result]) => {
-            const success =
-              Boolean(
-                result?.ok
-              );
-
-            const numericValue =
-              success
-                ? Number(
-                    result.totalNum
-                  )
-                : null;
-
-            const clickable =
-              success &&
-              Number.isFinite(
-                numericValue
-              ) &&
-              numericValue > 0;
-
-            const value =
-              success
-                ? result.totalNum
-                : (
-                    result?.error ||
-                    "查询失败"
-                  );
-
-            const safeValue =
-              cleanCellText(
-                value
-              )
-                .replace(
-                  /&/g,
-                  "&amp;"
-                )
-                .replace(
-                  /</g,
-                  "&lt;"
-                )
-                .replace(
-                  />/g,
-                  "&gt;"
-                )
-                .replace(
-                  /"/g,
-                  "&quot;"
-                );
-
-            const cardType =
-              label ===
-              "储值卡"
-                ? "storage"
-                : "general";
-
-            const clickAttrs =
-              clickable
-                ? `data-soa-card-type="${cardType}" data-soa-card-code="${cardCorpCode}"`
-                : "";
-
-            return `
-              <div style="
-                min-width:0;
-                padding:8px 6px;
-                border:1px solid ${
-                  success
-                    ? "#d9f7be"
-                    : "#ffccc7"
-                };
-                border-radius:5px;
-                background:${
-                  success
-                    ? "#f6ffed"
-                    : "#fff2f0"
-                };
-                text-align:center;
-              ">
-                <div style="
-                  margin-bottom:3px;
-                  color:#999;
-                  font-size:10px;
-                  line-height:1.2;
-                ">${label}</div>
-
-                <div
-                  ${clickAttrs}
-                  style="
-                    overflow:hidden;
-                    text-overflow:ellipsis;
-                    white-space:nowrap;
-                    color:${
-                      !success
-                        ? "#cf1322"
-                        : clickable
-                          ? "#389e0d"
-                          : "#222"
-                    };
-                    font-size:${
-                      success
-                        ? "16px"
-                        : "10px"
-                    };
-                    font-weight:700;
-                    line-height:1.35;
-                    cursor:${
-                      clickable
-                        ? "pointer"
-                        : "default"
-                    };
-                    text-decoration:${
-                      clickable
-                        ? "underline"
-                        : "none"
-                    };
-                    text-underline-offset:2px;
-                  "
-                  title="${
-                    clickable
-                      ? `点击新建标签页打开${label}卡池并查询单位代码 ${cardCorpCode}`
-                      : safeValue
-                  }"
-                >${safeValue}</div>
-              </div>
-            `;
-          }
-        )
-        .join("");
-
-    grid.style.display =
-      "grid";
-
-    grid.title =
-      `cardCorpCode：${cardCorpCode}`;
-
-    grid
-      .querySelectorAll(
-        "[data-soa-card-type][data-soa-card-code]"
-      )
-      .forEach(
-        element => {
-          element.addEventListener(
-            "click",
-            () => {
-              const cardType =
-                element.getAttribute(
-                  "data-soa-card-type"
-                );
-
-              const code =
-                element.getAttribute(
-                  "data-soa-card-code"
-                );
-
-              try {
-                openCardGroupForQuery(
-                  cardType,
-                  code
-                );
-              } catch (error) {
-                updatePanelStatus(
-                  error?.message ||
-                  String(error),
-                  "error"
-                );
-              }
-            }
-          );
-        }
-      );
   }
 
   function getCurrentFlowStage() {
@@ -7039,7 +4624,7 @@
         "default";
 
       button.title =
-        "当前订单流程已完成；如需查看数据，请使用下方落单数据或体检数据。";
+        "当前订单流程已完成，无需再次执行自动处理。";
 
       return;
     }
@@ -7155,7 +4740,7 @@
         size: "16px",
         weight: "700",
         hint:
-          "流程已完成，下方数据工具可按需使用。"
+          "流程已完成。"
       }
     };
 
@@ -7250,25 +4835,6 @@
         ? "600"
         : "400";
 
-    if (
-      stage !== "已落单"
-    ) {
-      cachedLandingTimeOptions = [];
-
-      const extractContainer =
-        document.getElementById(
-          UI.EXTRACT_OPTIONS_ID
-        );
-
-      if (extractContainer) {
-        extractContainer.innerHTML =
-          "";
-
-        extractContainer.style.display =
-          "none";
-      }
-    }
-
     const changed =
       stage !==
       lastDisplayedFlowStage;
@@ -7276,22 +4842,11 @@
     lastDisplayedFlowStage =
       stage;
 
-    if (changed) {
-      closeDataPanel();
-    }
-
-    updateDataActionButtons(
-      stage
-    );
-
     updateFlowRunButtonState(
       stage
     );
 
     /*
-     * 落单数据改为按需读取：
-     * 只有用户点击“落单数据”后才请求 processlogs。
-     *
      * 日期检测只在“实际阶段发生变化”时触发；
      * 另外还会在页面初始化、打开面板和执行订单时主动刷新。
      */
@@ -7302,555 +4857,6 @@
     }
 
     return stage;
-  }
-
-
-  function setDataButtonActive(
-    mode
-  ) {
-    const landing =
-      document.getElementById(
-        UI.LANDING_DATA_BUTTON_ID
-      );
-
-    const physical =
-      document.getElementById(
-        UI.PHYSICAL_DATA_BUTTON_ID
-      );
-
-    [
-      [landing, "landing"],
-      [physical, "physical"]
-    ].forEach(
-      ([button, buttonMode]) => {
-        if (!button) {
-          return;
-        }
-
-        const active =
-          mode === buttonMode;
-
-        button.style.background =
-          active
-            ? "#e6f4ff"
-            : "#fff";
-
-        button.style.borderColor =
-          active
-            ? "#1677ff"
-            : "#d9d9d9";
-
-        button.style.color =
-          active
-            ? "#1677ff"
-            : "#555";
-      }
-    );
-  }
-
-  function resetDataPanelContent() {
-    const landingOptions =
-      document.getElementById(
-        UI.EXTRACT_OPTIONS_ID
-      );
-
-    const physicalGrid =
-      document.getElementById(
-        UI.PHYSICAL_DATA_GRID_ID
-      );
-
-    const cardPoolGrid =
-      document.getElementById(
-        UI.CARD_POOL_DATA_GRID_ID
-      );
-
-    const preview =
-      document.getElementById(
-        UI.EXTRACT_PREVIEW_ID
-      );
-
-    if (landingOptions) {
-      landingOptions.innerHTML =
-        "";
-
-      landingOptions.style.display =
-        "none";
-    }
-
-    if (physicalGrid) {
-      physicalGrid.innerHTML =
-        "";
-
-      physicalGrid.style.display =
-        "none";
-    }
-
-    if (cardPoolGrid) {
-      cardPoolGrid.innerHTML =
-        "";
-
-      cardPoolGrid.style.display =
-        "none";
-
-      cardPoolGrid.title =
-        "";
-    }
-
-    if (preview) {
-      preview.style.display =
-        "none";
-
-      preview.textContent =
-        "";
-    }
-  }
-
-  function closeDataPanel() {
-    const panel =
-      document.getElementById(
-        UI.DATA_PANEL_ID
-      );
-
-    if (panel) {
-      panel.style.display =
-        "none";
-    }
-
-    activeDataPanelMode =
-      "";
-
-    setDataButtonActive(
-      ""
-    );
-
-    resetDataPanelContent();
-  }
-
-  function openDataPanelShell(
-    mode,
-    title
-  ) {
-    const panel =
-      document.getElementById(
-        UI.DATA_PANEL_ID
-      );
-
-    const titleElement =
-      document.getElementById(
-        UI.DATA_PANEL_TITLE_ID
-      );
-
-    if (
-      !panel ||
-      !titleElement
-    ) {
-      return false;
-    }
-
-    resetDataPanelContent();
-
-    activeDataPanelMode =
-      mode;
-
-    titleElement.textContent =
-      title;
-
-    panel.style.display =
-      "block";
-
-    setDataButtonActive(
-      mode
-    );
-
-    return true;
-  }
-
-  function syncDataOrderContext() {
-    const orderCode =
-      getCurrentOrderCode();
-
-    if (!orderCode) {
-      return;
-    }
-
-    if (
-      lastDataPanelOrderCode &&
-      lastDataPanelOrderCode !==
-        orderCode
-    ) {
-      cachedLandingTimeOptions = [];
-
-      cardPoolQueryCache = {
-        orderCode: "",
-        cardCorpCode: "",
-        timestamp: 0,
-        data: null
-      };
-
-      closeDataPanel();
-    }
-
-    lastDataPanelOrderCode =
-      orderCode;
-  }
-
-  async function toggleLandingDataPanel() {
-    syncDataOrderContext();
-
-    if (
-      activeDataPanelMode ===
-      "landing"
-    ) {
-      closeDataPanel();
-      return;
-    }
-
-    if (
-      getCurrentFlowStage() !==
-      "已落单"
-    ) {
-      updatePanelStatus(
-        "当前订单尚未进入“已落单”，暂无落单数据。",
-        "error"
-      );
-
-      return;
-    }
-
-    if (
-      !openDataPanelShell(
-        "landing",
-        "落单数据"
-      )
-    ) {
-      return;
-    }
-
-    const title =
-      document.getElementById(
-        UI.DATA_PANEL_TITLE_ID
-      );
-
-    if (title) {
-      title.textContent =
-        "落单数据 · 读取中...";
-    }
-
-    try {
-      const options =
-        await refreshLandingTimeOptions();
-
-      if (title) {
-        title.textContent =
-          options.length
-            ? "落单数据 · 点击复制"
-            : "落单数据 · 未识别到记录";
-      }
-    } catch (error) {
-      if (title) {
-        title.textContent =
-          "落单数据 · 读取失败";
-      }
-
-      throw error;
-    }
-  }
-
-  async function togglePhysicalDataPanel() {
-    syncDataOrderContext();
-
-    if (
-      activeDataPanelMode ===
-      "physical"
-    ) {
-      if (
-        physicalDataQueryRunning
-      ) {
-        updatePanelStatus(
-          "数据正在查询中，请稍候..."
-        );
-
-        return;
-      }
-
-      closeDataPanel();
-      return;
-    }
-
-    if (
-      physicalDataQueryRunning
-    ) {
-      updatePanelStatus(
-        "数据正在查询中，请稍候..."
-      );
-
-      return;
-    }
-
-    if (
-      !openDataPanelShell(
-        "physical",
-        "体检数据 · 读取中..."
-      )
-    ) {
-      return;
-    }
-
-    physicalDataQueryRunning =
-      true;
-
-    const button =
-      document.getElementById(
-        UI.PHYSICAL_DATA_BUTTON_ID
-      );
-
-    if (button) {
-      button.disabled =
-        true;
-
-      button.textContent =
-        "读取中...";
-    }
-
-    try {
-      /*
-       * 当前 DOM 有完整汇总则直接读取；
-       * 没有真实数据时才自动切换到体检名单。
-       */
-      const physicalResult =
-        await ensurePhysicalExamSummaryAvailable();
-
-      const physical =
-        physicalResult.data;
-
-      renderPhysicalExamSummary(
-        physical
-      );
-
-      const orderCode =
-        getCurrentOrderCode();
-
-      const cardCorpCode =
-        getCurrentCardCorpCode();
-
-      let cardPool =
-        null;
-
-      if (!cardCorpCode) {
-        renderCardPoolCodeUnavailable();
-      } else {
-        cardPool =
-          getCachedCardPoolData(
-            orderCode,
-            cardCorpCode
-          );
-
-        if (!cardPool) {
-          const grid =
-            document.getElementById(
-              UI.CARD_POOL_DATA_GRID_ID
-            );
-
-          if (grid) {
-            grid.innerHTML = `
-              <div style="
-                grid-column:1 / -1;
-                padding:8px;
-                border:1px solid #e5e7eb;
-                border-radius:5px;
-                background:#fafafa;
-                color:#999;
-                font-size:11px;
-                text-align:center;
-              ">
-                正在查询套餐卡、储值卡...
-              </div>
-            `;
-
-            grid.style.display =
-              "grid";
-          }
-
-          cardPool =
-            await fetchBothCardPoolTotals(
-              cardCorpCode
-            );
-
-          saveCachedCardPoolData(
-            orderCode,
-            cardCorpCode,
-            cardPool
-          );
-        }
-
-        renderCardPoolSummary(
-          cardPool,
-          cardCorpCode
-        );
-      }
-
-      const title =
-        document.getElementById(
-          UI.DATA_PANEL_TITLE_ID
-        );
-
-      if (title) {
-        title.textContent =
-          "体检数据 · 汇总";
-      }
-
-      const cardSuccessCount =
-        cardPool
-          ? [
-              cardPool.packageCard,
-              cardPool.storedValueCard
-            ].filter(
-              item =>
-                item?.ok
-            ).length
-          : 0;
-
-      if (
-        physical &&
-        cardSuccessCount === 2
-      ) {
-        updatePanelStatus(
-          physicalResult.navigated
-            ? "✓ 已切换体检名单并读取体检汇总及卡池数量。"
-            : "✓ 已直接读取当前页体检汇总及卡池数量。",
-          "success"
-        );
-      } else if (
-        physical ||
-        cardSuccessCount > 0
-      ) {
-        updatePanelStatus(
-          "数据已部分读取，请查看结果。"
-        );
-      } else {
-        updatePanelStatus(
-          "未读取到可用数据。",
-          "error"
-        );
-      }
-    } finally {
-      physicalDataQueryRunning =
-        false;
-
-      if (button) {
-        button.disabled =
-          false;
-
-        button.textContent =
-          "体检数据";
-      }
-    }
-  }
-
-  function getCachedCardPoolData(
-    orderCode,
-    cardCorpCode
-  ) {
-    if (
-      !orderCode ||
-      !cardCorpCode ||
-      cardPoolQueryCache.orderCode !==
-        orderCode ||
-      cardPoolQueryCache.cardCorpCode !==
-        cardCorpCode ||
-      !cardPoolQueryCache.data
-    ) {
-      return null;
-    }
-
-    if (
-      Date.now() -
-        cardPoolQueryCache.timestamp >
-      CARD_POOL_CACHE_MS
-    ) {
-      return null;
-    }
-
-    return cardPoolQueryCache.data;
-  }
-
-  function saveCachedCardPoolData(
-    orderCode,
-    cardCorpCode,
-    data
-  ) {
-    cardPoolQueryCache = {
-      orderCode,
-      cardCorpCode,
-      timestamp:
-        Date.now(),
-      data:
-        data || null
-    };
-  }
-
-  function renderCardPoolCodeUnavailable() {
-    const grid =
-      document.getElementById(
-        UI.CARD_POOL_DATA_GRID_ID
-      );
-
-    if (!grid) {
-      return;
-    }
-
-    grid.innerHTML = `
-      <div style="
-        grid-column:1 / -1;
-        padding:8px;
-        border:1px solid #ffccc7;
-        border-radius:5px;
-        background:#fff2f0;
-        color:#cf1322;
-        font-size:11px;
-        line-height:1.45;
-        text-align:center;
-      ">
-        当前页面未读取到商机代码，暂无法查询套餐卡、储值卡。
-      </div>
-    `;
-
-    grid.style.display =
-      "grid";
-  }
-
-  function updateDataActionButtons(
-    stage =
-      getCurrentFlowStage()
-  ) {
-    const landing =
-      document.getElementById(
-        UI.LANDING_DATA_BUTTON_ID
-      );
-
-    if (landing) {
-      const enabled =
-        stage ===
-        "已落单";
-
-      landing.disabled =
-        !enabled;
-
-      landing.style.opacity =
-        enabled
-          ? "1"
-          : "0.45";
-
-      landing.style.cursor =
-        enabled
-          ? "pointer"
-          : "not-allowed";
-
-      landing.title =
-        enabled
-          ? "点击读取当前订单落单数据"
-          : "订单进入已落单后可使用";
-    }
   }
 
 
@@ -8956,10 +5962,6 @@
             "success"
           );
 
-          updateDataActionButtons(
-            stage
-          );
-
           return;
         }
 
@@ -9677,7 +6679,7 @@
           min-width:0;
           font-size:15px;
         ">
-          SOA订单流程自动化 v1.32
+          智能审批 v2.2
         </strong>
 
         <button
@@ -9749,7 +6751,7 @@
 
           <div style="margin-bottom:3px;">
             <strong style="color:#444;">流程：</strong>
-            内勤复核及后续阶段可执行；合同阶段只补空字段并跳过已有文件；运行中可停止，已落单仅保留数据查询。
+            内勤复核及后续支持阶段可执行；合同阶段只补空字段并跳过已有文件；运行中可随时停止。
           </div>
 
           <div style="margin-bottom:3px;">
@@ -9757,10 +6759,6 @@
             报价确认起检测体检时间，异常日期单独标红；“修改时间”仅改为今天至3年后，不自动保存。
           </div>
 
-          <div style="margin-bottom:3px;">
-            <strong style="color:#444;">数据：</strong>
-            落单数据可复制；体检数据同时读取体检汇总、套餐卡和储值卡；卡数量大于0时可点击并在新标签页自动查询对应卡池。
-          </div>
 
           <div>
             <strong style="color:#444;">窗口：</strong>
@@ -10163,118 +7161,6 @@
             </button>
           </div>
 
-          <div style="
-            display:grid;
-            grid-template-columns:1fr 1fr;
-            gap:6px;
-            margin-top:7px;
-          ">
-            <button
-              id="${UI.LANDING_DATA_BUTTON_ID}"
-              type="button"
-              style="
-                height:30px;
-                padding:0 8px;
-                border:1px solid #d9d9d9;
-                border-radius:6px;
-                background:#fff;
-                color:#555;
-                font-size:11px;
-                font-weight:600;
-                cursor:pointer;
-              "
-            >
-              落单数据
-            </button>
-
-            <button
-              id="${UI.PHYSICAL_DATA_BUTTON_ID}"
-              type="button"
-              style="
-                height:30px;
-                padding:0 8px;
-                border:1px solid #d9d9d9;
-                border-radius:6px;
-                background:#fff;
-                color:#555;
-                font-size:11px;
-                font-weight:600;
-                cursor:pointer;
-              "
-              title="优先直接读取当前页体检汇总；尚未加载时自动切换体检名单，并同时查询套餐卡、储值卡"
-            >
-              体检数据
-            </button>
-
-          </div>
-
-          <div
-            id="${UI.DATA_PANEL_ID}"
-            style="
-              display:none;
-              margin-top:7px;
-              padding:7px;
-              border:1px solid #e5e7eb;
-              border-radius:6px;
-              background:#fff;
-            "
-          >
-            <div
-              id="${UI.DATA_PANEL_TITLE_ID}"
-              style="
-                margin-bottom:6px;
-                color:#555;
-                font-size:11px;
-                font-weight:600;
-                text-align:center;
-              "
-            ></div>
-
-            <div
-              id="${UI.EXTRACT_OPTIONS_ID}"
-              style="display:none;"
-            ></div>
-
-            <div
-              id="${UI.PHYSICAL_DATA_GRID_ID}"
-              style="
-                display:none;
-                grid-template-columns:repeat(3,1fr);
-                gap:5px;
-              "
-            ></div>
-
-            <div
-              id="${UI.CARD_POOL_DATA_GRID_ID}"
-              style="
-                display:none;
-                grid-template-columns:1fr 1fr;
-                gap:6px;
-                margin-top:6px;
-                padding-top:6px;
-                border-top:1px dashed #eee;
-              "
-            ></div>
-
-            <div
-              id="${UI.EXTRACT_PREVIEW_ID}"
-              style="
-                display:none;
-                margin-top:6px;
-                padding:6px 7px;
-                border:1px solid #d9f7be;
-                border-radius:5px;
-                background:#fcfff8;
-                color:#555;
-                font-size:10px;
-                line-height:1.4;
-                white-space:pre-wrap;
-                word-break:break-all;
-                user-select:text;
-              "
-              title="复制后的 Tab 分隔内容，可在这里查看"
-            ></div>
-          </div>
         </div>
 
         <div style="
@@ -10604,39 +7490,6 @@
         }
       );
 
-    document
-      .getElementById(
-        UI.LANDING_DATA_BUTTON_ID
-      )
-      ?.addEventListener(
-        "click",
-        () => {
-          toggleLandingDataPanel()
-            .catch(error => {
-              warn(
-                error?.message ||
-                String(error)
-              );
-            });
-        }
-      );
-
-    document
-      .getElementById(
-        UI.PHYSICAL_DATA_BUTTON_ID
-      )
-      ?.addEventListener(
-        "click",
-        () => {
-          togglePhysicalDataPanel()
-            .catch(error => {
-              warn(
-                error?.message ||
-                String(error)
-              );
-            });
-        }
-      );
 
     document
       .getElementById(
@@ -10754,11 +7607,7 @@
     updateSigningCompanyUi();
     renderWebNoticeHistory();
 
-    syncDataOrderContext();
     updateFlowStageDisplay();
-    updateDataActionButtons(
-      getCurrentFlowStage()
-    );
 
     updateFlowRunButtonState(
       getCurrentFlowStage()
@@ -10811,13 +7660,13 @@
 
     button.textContent =
       panelVisible
-        ? "智能审批：点击关闭"
-        : "智能审批：点击打开";
+        ? "关闭智能审批"
+        : "启动智能审批";
 
     button.title =
       panelVisible
-        ? "点击隐藏工具面板"
-        : "点击显示工具面板";
+        ? "关闭智能审批面板"
+        : "启动智能审批面板";
 
     button.style.background =
       "#1677ff";
@@ -10849,13 +7698,8 @@
 
     updateAutomationSwitch();
 
-    /*
-     * 打开工具面板时只刷新状态和日期。
-     * 落单数据 / 体检数据均由对应按钮按需触发。
-     */
+    /* 打开工具面板时刷新当前流程状态和日期。 */
     if (panelVisible) {
-      syncDataOrderContext();
-
       updateFlowStageDisplay();
       refreshExamDateInfo(
         getCurrentFlowStage()
@@ -10867,6 +7711,102 @@
     setPanelVisible(
       !panelVisible
     );
+  }
+
+  function ensureToolboxFrame(
+    group
+  ) {
+    if (!group) {
+      return;
+    }
+
+    /*
+     * 工具箱边框和底部文字通过伪元素向外绘制。
+     * 不增加group本身的上下padding/height，
+     * 因此按钮仍按原32px高度参与页面布局，
+     * 不会因为底部标识导致整组按钮向上偏移。
+     */
+    group.style.cssText = [
+      "display:inline-flex",
+      "position:relative",
+      "flex:0 0 auto",
+      "align-items:center",
+      "gap:6px",
+      "margin-left:10px",
+      "margin-right:7px",
+      "padding:0",
+      "border:0",
+      "background:transparent",
+      "box-sizing:border-box",
+      "vertical-align:middle",
+      "overflow:visible",
+      "isolation:isolate"
+    ].join(";");
+
+    let style =
+      document.getElementById(
+        TOOLBOX_STYLE_ID
+      );
+
+    if (!style) {
+      style =
+        document.createElement(
+          "style"
+        );
+
+      style.id =
+        TOOLBOX_STYLE_ID;
+
+      document.head.appendChild(
+        style
+      );
+    }
+
+    /*
+     * 每次覆盖当前生效样式。
+     * 即使页面里残留旧版本style，也以当前版本为准。
+     */
+    style.textContent = `
+      #__soa_tools_switch_group_v10 {
+        position: relative !important;
+        overflow: visible !important;
+      }
+
+      #__soa_tools_switch_group_v10::before {
+        content: "";
+        position: absolute;
+        left: -7px;
+        right: -7px;
+        top: -5px;
+        bottom: -16px;
+        border: 1px solid #bfd0e4;
+        border-radius: 8px;
+        background: rgba(240, 247, 255, 0.82);
+        box-sizing: border-box;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      #__soa_tools_switch_group_v10::after {
+        content: "红领巾的工具箱";
+        position: absolute;
+        right: -1px;
+        bottom: -13px;
+        color: #6f8299;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: .2px;
+        white-space: nowrap;
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      #__soa_tools_switch_group_v10 > button[data-soa-tool-order] {
+        position: relative;
+        z-index: 1;
+      }
+    `;
   }
 
   function ensureAutomationSwitch() {
@@ -10892,6 +7832,49 @@
       return null;
     }
 
+    const groupId =
+      "__soa_tools_switch_group_v10";
+
+    let group =
+      document.getElementById(
+        groupId
+      );
+
+    if (!group) {
+      group =
+        document.createElement(
+          "span"
+        );
+
+      group.id =
+        groupId;
+
+      group.style.cssText = [
+        "display:inline-flex",
+        "flex:0 0 auto",
+        "align-items:center",
+        "gap:6px",
+        "margin-left:10px"
+      ].join(";");
+
+      tabs.insertBefore(
+        group,
+        orderDesc
+      );
+    } else if (
+      group.parentElement !==
+        tabs
+    ) {
+      tabs.insertBefore(
+        group,
+        orderDesc
+      );
+    }
+
+    ensureToolboxFrame(
+      group
+    );
+
     let button =
       document.getElementById(
         UI.AUTO_SWITCH_ID
@@ -10909,13 +7892,15 @@
       button.type =
         "button";
 
+      button.dataset.soaToolOrder =
+        "1";
+
       button.style.cssText = [
         "display:inline-flex",
         "flex:0 0 auto",
         "align-items:center",
         "justify-content:center",
         "height:32px",
-        "margin-left:10px",
         "padding:0 12px",
         "border:1px solid #1677ff",
         "border-radius:6px",
@@ -10936,26 +7921,47 @@
           event.preventDefault();
           event.stopPropagation();
 
-          /*
-           * 页面蓝色按钮只控制工具 UI 的显示/隐藏。
-           * 不启动、不停止任何业务流程。
-           */
           togglePanelVisible();
         }
       );
     }
 
-    /*
-     * 永远放到订单信息 .order-desc 前面，也就是全部原有页签之后。
-     * 页面增加“修改记录”等额外页签时，不会再插入原有 tab 中间。
-     */
     if (
-      button.nextElementSibling !==
-      orderDesc
+      button.parentElement !==
+        group
     ) {
-      tabs.insertBefore(
-        button,
-        orderDesc
+      group.appendChild(
+        button
+      );
+    }
+
+    const currentToolButtons =
+      Array.from(
+        group.querySelectorAll(
+          "button[data-soa-tool-order]"
+        )
+      );
+
+    const sortedToolButtons =
+      [
+        ...currentToolButtons
+      ].sort(
+        (a, b) =>
+          Number(a.dataset.soaToolOrder || 999) -
+          Number(b.dataset.soaToolOrder || 999)
+      );
+
+    const toolOrderChanged =
+      currentToolButtons.some(
+        (item, index) =>
+          item !==
+          sortedToolButtons[index]
+      );
+
+    if (toolOrderChanged) {
+      sortedToolButtons.forEach(
+        item =>
+          group.appendChild(item)
       );
     }
 
@@ -10970,6 +7976,18 @@
         UI.AUTO_SWITCH_ID
       )
       ?.remove();
+
+    const group =
+      document.getElementById(
+        "__soa_tools_switch_group_v10"
+      );
+
+    if (
+      group &&
+      !group.children.length
+    ) {
+      group.remove();
+    }
   }
 
   function scheduleEnsureRouteUi() {
@@ -11032,7 +8050,6 @@
             return;
           }
 
-          syncDataOrderContext();
           updateFlowStageDisplay();
 
           scheduleEnsureRouteUi();
@@ -11073,25 +8090,6 @@
     lastWebNoticeOrderCode =
       "";
 
-    lastDataPanelOrderCode =
-      "";
-
-    activeDataPanelMode =
-      "";
-
-    cachedLandingTimeOptions = [];
-
-    physicalDataQueryRunning =
-      false;
-
-    cardPoolQueryCache = {
-      orderCode: "",
-      cardCorpCode: "",
-      timestamp: 0,
-      data: null
-    };
-
-    cardCorpCodeMemory.clear();
 
     resetWebNoticeHistory();
 
@@ -11110,24 +8108,6 @@
   }
 
   function routeCheck() {
-    if (
-      location.hash.startsWith(
-        CARD_GROUP_ROUTE
-      )
-    ) {
-      teardownRouteUi();
-
-      processPendingCardGroupQuery()
-        .catch(error => {
-          console.warn(
-            "[SOA流程自动化] 卡池自动查询失败：",
-            error
-          );
-        });
-
-      return;
-    }
-
     if (
       isTargetRoute()
     ) {
@@ -11235,6 +8215,6 @@
   routeCheck();
 
   console.log(
-    "[SOA流程自动化] v1.32 已加载"
+    "[SOA智能审批] v2.2 已加载"
   );
 })();
