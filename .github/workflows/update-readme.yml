@@ -1498,7 +1498,7 @@ jobs:
 
                 if (browser) {{
                   const recommended = document.querySelector(
-                    `.tm-card[data-browser="${{browser}}"]`
+                    '.tm-card[data-browser="' + browser + '"]'
                   );
 
                   if (recommended) {{
