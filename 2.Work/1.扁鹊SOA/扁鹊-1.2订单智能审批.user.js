@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         扁鹊-1.2订单智能审批
 // @namespace    https://tampermonkey.net/
-// @version      2.2
-// @description  SOA智能审批：阶段识别、日期校验、内勤复核、合同智能补全、文件上传、发起落单及落单审核。
+// @version      2.4
+// @description  SOA智能审批：合同严格验证、其他阶段轻量推进、文件上传、落单审核及完成后自动复制落单数据。
 
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
@@ -22,9 +22,23 @@
  * - 支持审批备注、体检时间校验与报价确认阶段时间修正。
  * - 支持合同智能补全、合同/授权书共用文件绑定及按需上传。
  * - 支持内勤复核、合同补充、发起落单、落单审核及流程停止。
+ * - 关键动作执行后动态验证页面真实状态；长时间未推进时显示当前卡点诊断。
+ * - 自动流程完成“已落单”后，自动复制订单名称、订单编号、商机代码、健管顾问、落单时间。
  * - 面板支持显示开关、拖动、折叠、位置记忆和网页提示记录。
  *
  * 更新记录
+ *
+ * v2.4  -  2026-9-2
+ * - 非合同阶段改为轻量推进验证：短暂阶段回显/倒退不再立即报错，只等待真正向后续阶段稳定推进。
+ * - 合同阶段继续保留字段、保存、上传及最终完整性严格复核。
+ * - 合同字段改为优先读取当前可见合同容器，避免不同合同类型存在重复ID时误判隐藏字段。
+ * - 智能审批窗口加宽并禁止阶段文字换行；右上角折叠按钮改为“×”直接关闭面板。
+ *
+ * v2.3  -  2026-9-2
+ * - 落单流程完成后自动读取本次最新落单记录，并将订单必备数据复制到剪贴板；其他时间不主动提取落单数据。
+ * - 合同字段、保存、上传及发起落单增加逐步验证；隐藏/非当前合同类型字段和上传模块不再参与完成度判断。
+ * - 合同保存按钮改为按当前可见合同表单上下文定位，兼容“合同保存 / 保存合同 / 保存”，未检测到点击响应时仅安全重试一次。
+ * - 所有关键等待增加动态卡点诊断和超时保护，阶段变化必须确认向前推进后才继续，减少页面延迟导致的莫名卡住。
  *
  * v2.2  -  2026-9-1
  * - 内置公共“红领巾的工具箱”框体样式，单独启用本模块时也可正常显示。
@@ -107,7 +121,34 @@
       400,
     STALL_NOTICE_INTERVAL:
       12000,
+    FLOW_WAIT_TIMEOUT:
+      60000,
+    STAGE_CHANGE_TIMEOUT:
+      90000,
+    LANDING_STAGE_TIMEOUT:
+      180000,
+    CONTRACT_SAVE_ACCEPT_TIMEOUT:
+      5000,
+    CONTRACT_SAVE_COMPLETE_TIMEOUT:
+      45000,
+    CONTRACT_FINAL_VERIFY_TIMEOUT:
+      15000,
+    LANDING_COPY_TIMEOUT:
+      30000,
+    LANDING_COPY_POLL_INTERVAL:
+      900,
 
+    PROCESS_LOG_API:
+      "/soa/api/v1/order/processlogs",
+
+    EXTRACT_ORDER_NAME_SELECTOR:
+      "#register > div",
+    EXTRACT_ORDER_CODE_SELECTOR:
+      "#register > div:nth-of-type(2) > div:nth-of-type(8) > div:nth-of-type(2) > div > div",
+    EXTRACT_OPPORTUNITY_CODE_SELECTOR:
+      "#register > div:nth-of-type(2) > div:nth-of-type(5) > div > div:nth-of-type(2) > div > div",
+    EXTRACT_SALESMAN_SELECTOR:
+      "#register > div:nth-of-type(2) > div > div:nth-of-type(2) > div > div > span",
 
     REGISTER_BEGIN_DATE_SELECTOR:
       "#register_begin_date",
@@ -807,6 +848,19 @@
     }
   }
 
+  class FlowWaitTimeoutError extends Error {
+    constructor(
+      message,
+      label = ""
+    ) {
+      super(message);
+      this.name =
+        "FlowWaitTimeoutError";
+      this.label =
+        label;
+    }
+  }
+
   function createFlowToken() {
     return {
       cancelled: false
@@ -1031,12 +1085,189 @@
     return "";
   }
 
+  function describeButtonState(
+    button
+  ) {
+    if (!button) {
+      return "未找到";
+    }
+
+    const text =
+      compactText(
+        button.textContent
+      ) || "无文字";
+
+    const states = [];
+
+    if (!isVisible(button)) {
+      states.push(
+        "不可见"
+      );
+    }
+
+    if (button.disabled) {
+      states.push(
+        "disabled"
+      );
+    }
+
+    if (
+      button.classList.contains(
+        "ant-btn-loading"
+      )
+    ) {
+      states.push(
+        "loading"
+      );
+    }
+
+    return `${text}(${states.join("/") || "可点击"})`;
+  }
+
+  function getContractDiagnosticSummary() {
+    if (!contractPageVisible()) {
+      return "合同页未显示";
+    }
+
+    const state =
+      getContractCompletionState();
+
+    const issues = [];
+
+    if (!state.companyValue) {
+      issues.push(
+        "签单主体为空"
+      );
+    }
+
+    if (!state.beginValue) {
+      issues.push(
+        "开始日期为空"
+      );
+    }
+
+    if (!state.endValue) {
+      issues.push(
+        "结束日期为空"
+      );
+    }
+
+    if (
+      state.inspectionApplicable &&
+      !state.inspectionValue
+    ) {
+      issues.push(
+        "名单时限为空"
+      );
+    }
+
+    if (
+      state.contractUpload.moduleExists &&
+      !state.contractUpload.hasFile
+    ) {
+      issues.push(
+        "合同文件未确认"
+      );
+    }
+
+    if (
+      state.authUpload.moduleExists &&
+      !state.authUpload.hasFile
+    ) {
+      issues.push(
+        "授权书未确认"
+      );
+    }
+
+    if (formLooksEditable()) {
+      issues.push(
+        "仍处编辑状态"
+      );
+    }
+
+    const saveButton =
+      getContractSaveButton();
+
+    return [
+      issues.length
+        ? `未完成：${issues.join("、")}`
+        : "字段/文件状态完整",
+      `保存按钮：${describeButtonState(saveButton)}`
+    ].join("；");
+  }
+
+  function getFlowWaitDiagnostic(
+    extra = ""
+  ) {
+    const parts = [];
+
+    const stage =
+      getCurrentFlowStage();
+
+    parts.push(
+      `当前阶段=${stage || "未识别"}`
+    );
+
+    const errorText =
+      getVisibleErrorFeedback();
+
+    if (errorText) {
+      parts.push(
+        `页面错误=${errorText}`
+      );
+    }
+
+    const approvalModal =
+      getVisibleApprovalModal();
+
+    if (approvalModal) {
+      const confirm =
+        findModalConfirmButton(
+          approvalModal
+        );
+
+      parts.push(
+        `审批弹窗=${describeButtonState(confirm)}`
+      );
+    }
+
+    const landingPopover =
+      getVisibleLandingPopconfirm();
+
+    if (landingPopover) {
+      parts.push(
+        `发起落单确认框=${describeButtonState(
+          findLandingPopoverConfirmButton(
+            landingPopover
+          )
+        )}`
+      );
+    }
+
+    if (contractPageVisible()) {
+      parts.push(
+        getContractDiagnosticSummary()
+      );
+    }
+
+    if (extra) {
+      parts.push(
+        extra
+      );
+    }
+
+    return parts.join("；");
+  }
+
   function waitForReactiveCondition(
     test,
     {
       label = "页面状态",
       token = null,
-      blockerCheck = null
+      blockerCheck = null,
+      diagnose = null,
+      timeout =
+        CONFIG.FLOW_WAIT_TIMEOUT
     } = {}
   ) {
     return new Promise(
@@ -1045,9 +1276,54 @@
         let observer = null;
         let pollTimer = null;
         let noticeTimer = null;
+        let timeoutTimer = null;
+        let lastWaitingMessage = "";
 
-        const waitingMessage =
-          `仍在等待：${label}。页面较慢时会继续等待，不会重复提交。`;
+        const startedAt =
+          Date.now();
+
+        const getDiagnosis =
+          () => {
+            if (!diagnose) {
+              return "";
+            }
+
+            try {
+              return cleanText(
+                diagnose() || ""
+              );
+            } catch (error) {
+              return `诊断读取失败：${error?.message || error}`;
+            }
+          };
+
+        const buildWaitingMessage =
+          () => {
+            const elapsed =
+              Math.max(
+                1,
+                Math.floor(
+                  (
+                    Date.now() -
+                    startedAt
+                  ) /
+                  1000
+                )
+              );
+
+            const diagnosis =
+              getDiagnosis();
+
+            return (
+              `仍在等待：${label}（${elapsed}秒）。` +
+              `不会重复提交。` +
+              (
+                diagnosis
+                  ? ` 当前检测：${diagnosis}`
+                  : ""
+              )
+            );
+          };
 
         const clearOwnWaitingStatus =
           () => {
@@ -1060,8 +1336,9 @@
               status &&
               status.style.display !==
                 "none" &&
+              lastWaitingMessage &&
               status.textContent ===
-                waitingMessage
+                lastWaitingMessage
             ) {
               hidePanelStatus();
             }
@@ -1082,10 +1359,17 @@
             }
 
             if (noticeTimer) {
-              clearTimeout(
+              clearInterval(
                 noticeTimer
               );
               noticeTimer = null;
+            }
+
+            if (timeoutTimer) {
+              clearTimeout(
+                timeoutTimer
+              );
+              timeoutTimer = null;
             }
           };
 
@@ -1169,8 +1453,7 @@
         );
 
         /*
-         * MutationObserver 是主触发方式；
-         * 轮询只用于 React/样式变化未产生合适 mutation 时的兜底。
+         * DOM mutation 是主触发；轮询只兜底 React 状态/样式未触发合适 mutation 的情况。
          */
         pollTimer =
           setInterval(
@@ -1179,11 +1462,11 @@
           );
 
         /*
-         * 等待提示只出现一次并保持稳定，不再周期性“显示 -> 自动隐藏 -> 再显示”。
-         * 条件满足或等待失败后，由本等待实例主动清除自己的提示。
+         * 长时间未推进时持续刷新同一条诊断提示，方便直接看到卡点；
+         * 这里只观察状态，不重复点击任何业务按钮。
          */
         noticeTimer =
-          setTimeout(
+          setInterval(
             () => {
               if (
                 token &&
@@ -1193,8 +1476,11 @@
                 return;
               }
 
+              lastWaitingMessage =
+                buildWaitingMessage();
+
               updatePanelStatus(
-                waitingMessage,
+                lastWaitingMessage,
                 "normal",
                 {
                   persistent: true
@@ -1203,6 +1489,34 @@
             },
             CONFIG.STALL_NOTICE_INTERVAL
           );
+
+        if (
+          Number.isFinite(
+            timeout
+          ) &&
+          timeout > 0
+        ) {
+          timeoutTimer =
+            setTimeout(
+              () => {
+                const diagnosis =
+                  getDiagnosis();
+
+                finishReject(
+                  new FlowWaitTimeoutError(
+                    `等待“${label}”超时` +
+                    (
+                      diagnosis
+                        ? `：${diagnosis}`
+                        : ""
+                    ),
+                    label
+                  )
+                );
+              },
+              timeout
+            );
+        }
 
         check();
       }
@@ -2418,26 +2732,88 @@
     );
   }
 
+  function isContractFieldApplicable(
+    element
+  ) {
+    if (!element) {
+      return false;
+    }
+
+    const item =
+      element.closest(
+        ".ant-form-item"
+      ) ||
+      element.closest(
+        ".ant-row"
+      ) ||
+      element.parentElement;
+
+    return Boolean(
+      item
+        ? isVisible(item)
+        : isVisible(element)
+    );
+  }
+
+  function getCurrentContractField(
+    selector
+  ) {
+    const container =
+      getContractContainer();
+
+    const candidates =
+      container
+        ? Array.from(
+            container.querySelectorAll(
+              selector
+            )
+          )
+        : Array.from(
+            document.querySelectorAll(
+              selector
+            )
+          );
+
+    return (
+      candidates.find(
+        element =>
+          isContractFieldApplicable(
+            element
+          )
+      ) ||
+      candidates[0] ||
+      null
+    );
+  }
+
   function formLooksEditable() {
     const company =
-      document.querySelector(
+      getCurrentContractField(
         CONFIG.CONTRACT_COMPANY_SELECTOR
       );
 
     const begin =
-      document.querySelector(
+      getCurrentContractField(
         CONFIG.CONTRACT_BEGIN_SELECTOR
       );
 
     const end =
-      document.querySelector(
+      getCurrentContractField(
         CONFIG.CONTRACT_END_SELECTOR
       );
 
+    if (
+      !company ||
+      !begin ||
+      !end ||
+      !isContractFieldApplicable(company) ||
+      !isContractFieldApplicable(begin) ||
+      !isContractFieldApplicable(end)
+    ) {
+      return false;
+    }
+
     return Boolean(
-      company &&
-      begin &&
-      end &&
       !company.disabled &&
       !begin.disabled &&
       !end.disabled &&
@@ -2488,7 +2864,12 @@
           token,
           blockerCheck:
             () =>
-              getVisibleErrorFeedback()
+              getVisibleErrorFeedback(),
+          diagnose:
+            () =>
+              getFlowWaitDiagnostic(
+                "正在等待当前合同类型对应的编辑按钮"
+              )
         }
       );
 
@@ -2508,7 +2889,12 @@
         token,
         blockerCheck:
           () =>
-            getVisibleErrorFeedback()
+            getVisibleErrorFeedback(),
+        diagnose:
+          () =>
+            getFlowWaitDiagnostic(
+              "已点击编辑，等待可见合同字段变为可编辑"
+            )
       }
     );
 
@@ -2597,7 +2983,7 @@
     token = null
   ) {
     const input =
-      document.querySelector(
+      getCurrentContractField(
         CONFIG.CONTRACT_COMPANY_SELECTOR
       );
 
@@ -2748,13 +3134,24 @@
     );
 
     const selected =
-      await waitFor(
+      await waitForReactiveCondition(
         () =>
           getSelectVisibleText(
             input
           ) || null,
-        2500,
-        80
+        {
+          label:
+            "己方签单主体选中结果",
+          token,
+          timeout:
+            8000,
+          blockerCheck:
+            () =>
+              getVisibleErrorFeedback(),
+          diagnose:
+            () =>
+              `当前显示=${getSelectVisibleText(input) || "空"}`
+        }
       );
 
     if (!selected) {
@@ -3037,14 +3434,16 @@
     }
   }
 
-  async function setContractDates() {
+  async function setContractDates(
+    token = null
+  ) {
     const begin =
-      document.querySelector(
+      getCurrentContractField(
         CONFIG.CONTRACT_BEGIN_SELECTOR
       );
 
     const end =
-      document.querySelector(
+      getCurrentContractField(
         CONFIG.CONTRACT_END_SELECTOR
       );
 
@@ -3138,9 +3537,11 @@
         );
       }
 
-      await sleep(
-        180
+      throwIfFlowCancelled(
+        token
       );
+
+      await nextPaint(2);
     } else {
       log(
         `✓ 合同开始日期已有值：${existingBegin}，保留。`
@@ -3182,6 +3583,10 @@
       );
     }
 
+    throwIfFlowCancelled(
+      token
+    );
+
     log(
       `✓ 合同日期：${begin.value} → ${end.value}`
     );
@@ -3191,17 +3596,36 @@
     };
   }
 
-  async function fillInspectionPeopleDay() {
+  async function fillInspectionPeopleDay(
+    token = null
+  ) {
     const input =
-      document.querySelector(
+      getCurrentContractField(
         CONFIG.INSPECTION_DAY_SELECTOR
       );
 
     if (!input) {
       log(
-        "4/5 当前不存在 #inspectionPeopleDay，跳过。"
+        "当前合同类型不存在提交名单时限，跳过。"
       );
-      return;
+      return {
+        skipped: true,
+        reason: "module-missing"
+      };
+    }
+
+    if (
+      !isContractFieldApplicable(
+        input
+      )
+    ) {
+      log(
+        "当前合同类型的提交名单时限字段未显示，跳过。"
+      );
+      return {
+        skipped: true,
+        reason: "not-applicable"
+      };
     }
 
     const existingValue =
@@ -3224,118 +3648,535 @@
       input.disabled ||
       input.readOnly
     ) {
-      warn(
-        "4/5 #inspectionPeopleDay 为空但当前不可编辑，跳过。"
+      throw new FlowBlockedError(
+        "提交名单时限为空，但当前可见字段不可编辑"
       );
-      return;
     }
 
-    setNativeInputValue(
-      input,
-      "1"
-    );
+    const stable =
+      await waitForStableControlledValue(
+        input,
+        "1",
+        token
+      );
+
+    if (!stable) {
+      throw new FlowBlockedError(
+        "提交名单时限写入后未稳定保持为1"
+      );
+    }
 
     input.focus();
     input.blur();
 
-    await sleep(150);
-
     log(
       `✓ 提交名单时限：${input.value}`
     );
+
+    return {
+      skipped: false,
+      value: input.value
+    };
   }
 
-  function getContractSaveButton() {
+  function getContractFormSnapshot() {
+    const company =
+      getCurrentContractField(
+        CONFIG.CONTRACT_COMPANY_SELECTOR
+      );
+
+    const begin =
+      getCurrentContractField(
+        CONFIG.CONTRACT_BEGIN_SELECTOR
+      );
+
+    const end =
+      getCurrentContractField(
+        CONFIG.CONTRACT_END_SELECTOR
+      );
+
+    const inspection =
+      getCurrentContractField(
+        CONFIG.INSPECTION_DAY_SELECTOR
+      );
+
+    const inspectionApplicable =
+      Boolean(
+        inspection &&
+        isContractFieldApplicable(
+          inspection
+        )
+      );
+
+    return {
+      companyValue:
+        getSelectVisibleText(
+          company
+        ) ||
+        cleanText(
+          company?.value
+        ),
+      beginValue:
+        cleanText(
+          begin?.value
+        ),
+      endValue:
+        cleanText(
+          end?.value
+        ),
+      inspectionValue:
+        cleanText(
+          inspection?.value
+        ),
+      inspectionApplicable
+    };
+  }
+
+  function getContractFormIssues(
+    snapshot =
+      getContractFormSnapshot()
+  ) {
+    const issues = [];
+
+    if (!snapshot.companyValue) {
+      issues.push(
+        "己方签单主体为空"
+      );
+    }
+
+    if (!snapshot.beginValue) {
+      issues.push(
+        "合同开始日期为空"
+      );
+    }
+
+    if (!snapshot.endValue) {
+      issues.push(
+        "合同结束日期为空"
+      );
+    }
+
+    if (
+      snapshot.inspectionApplicable &&
+      !snapshot.inspectionValue
+    ) {
+      issues.push(
+        "提交名单时限为空"
+      );
+    }
+
+    return issues;
+  }
+
+  function compareContractFormSnapshot(
+    expected,
+    actual
+  ) {
+    const mismatches = [];
+
+    [
+      [
+        "己方签单主体",
+        "companyValue"
+      ],
+      [
+        "合同开始日期",
+        "beginValue"
+      ],
+      [
+        "合同结束日期",
+        "endValue"
+      ]
+    ].forEach(
+      ([label, key]) => {
+        if (
+          expected?.[key] &&
+          expected[key] !==
+            actual?.[key]
+        ) {
+          mismatches.push(
+            `${label}：预期“${expected[key]}”，保存后“${actual?.[key] || "空"}”`
+          );
+        }
+      }
+    );
+
+    if (
+      expected?.inspectionApplicable &&
+      expected.inspectionValue &&
+      expected.inspectionValue !==
+        actual?.inspectionValue
+    ) {
+      mismatches.push(
+        `提交名单时限：预期“${expected.inspectionValue}”，保存后“${actual?.inspectionValue || "空"}”`
+      );
+    }
+
+    return mismatches;
+  }
+
+  function getContextualContractSaveButtons() {
     const container =
       getContractContainer();
 
     if (!container) {
-      return null;
+      return [];
     }
 
-    return (
-      Array.from(
-        container.querySelectorAll(
-          "button"
-        )
-      ).find(button => {
-        return (
-          isVisible(button) &&
+    const company =
+      getCurrentContractField(
+        CONFIG.CONTRACT_COMPANY_SELECTOR
+      );
+
+    const begin =
+      getCurrentContractField(
+        CONFIG.CONTRACT_BEGIN_SELECTOR
+      );
+
+    const end =
+      getCurrentContractField(
+        CONFIG.CONTRACT_END_SELECTOR
+      );
+
+    const isSaveText =
+      button =>
+        /^(合同保存|保存合同|保存)$/.test(
           compactText(
             button.textContent
-          ) === "合同保存"
+          )
         );
-      }) ||
-      null
+
+    let scope =
+      company?.parentElement ||
+      null;
+
+    while (
+      scope &&
+      container.contains(scope)
+    ) {
+      const containsFields =
+        Boolean(
+          begin &&
+          end &&
+          scope.contains(company) &&
+          scope.contains(begin) &&
+          scope.contains(end)
+        );
+
+      if (containsFields) {
+        const found =
+          Array.from(
+            scope.querySelectorAll(
+              "button"
+            )
+          ).filter(
+            button =>
+              isVisible(button) &&
+              isSaveText(button)
+          );
+
+        if (found.length) {
+          return found;
+        }
+      }
+
+      if (scope === container) {
+        break;
+      }
+
+      scope =
+        scope.parentElement;
+    }
+
+    return Array.from(
+      container.querySelectorAll(
+        "button"
+      )
+    ).filter(
+      button =>
+        isVisible(button) &&
+        isSaveText(button)
     );
   }
 
+  function getContractSaveButton() {
+    const candidates =
+      getContextualContractSaveButtons();
+
+    if (!candidates.length) {
+      return null;
+    }
+
+    return [
+      ...candidates
+    ].sort(
+      (a, b) => {
+        const score =
+          button => {
+            const text =
+              compactText(
+                button.textContent
+              );
+
+            let value = 0;
+
+            if (text === "合同保存") {
+              value += 100;
+            } else if (
+              text === "保存合同"
+            ) {
+              value += 90;
+            } else if (
+              text === "保存"
+            ) {
+              value += 70;
+            }
+
+            if (
+              button.classList.contains(
+                "ant-btn-primary"
+              )
+            ) {
+              value += 20;
+            }
+
+            if (!button.disabled) {
+              value += 10;
+            }
+
+            return value;
+          };
+
+        return score(b) -
+          score(a);
+      }
+    )[0];
+  }
+
   async function saveContractForm(
-    token = null
+    token = null,
+    expectedSnapshot = null
   ) {
-    const saveButton =
-      await waitForReactiveCondition(
-        () =>
-          getContractSaveButton() ||
-          (
-            !formLooksEditable()
-              ? true
-              : null
-          ),
-        {
-          label:
-            "合同保存按钮",
-          token,
-          blockerCheck:
-            () =>
-              getVisibleErrorFeedback()
-        }
+    const expected =
+      expectedSnapshot ||
+      getContractFormSnapshot();
+
+    const issues =
+      getContractFormIssues(
+        expected
       );
 
-    if (
-      saveButton === true
-    ) {
+    if (issues.length) {
+      throw new FlowBlockedError(
+        `合同保存前验证未通过：${issues.join("、")}`
+      );
+    }
+
+    if (!formLooksEditable()) {
+      const actual =
+        getContractFormSnapshot();
+
+      const mismatches =
+        compareContractFormSnapshot(
+          expected,
+          actual
+        );
+
+      if (mismatches.length) {
+        throw new FlowBlockedError(
+          `合同已退出编辑，但保存结果不一致：${mismatches.join("；")}`
+        );
+      }
+
       log(
-        "合同表单当前已经退出编辑状态，视为已保存。"
+        "合同表单当前已退出编辑状态，保存结果验证通过。"
       );
       return;
     }
 
-    log(
-      "合同补充：点击“合同保存”，等待页面确认保存完成..."
-    );
+    let saveAccepted = false;
 
-    saveButton.click();
+    for (
+      let attempt = 1;
+      attempt <= 2;
+      attempt++
+    ) {
+      throwIfFlowCancelled(
+        token
+      );
 
-    await waitForReactiveCondition(
-      () => {
-        const currentButton =
-          getContractSaveButton();
+      const saveButton =
+        await waitForReactiveCondition(
+          () => {
+            const button =
+              getContractSaveButton();
 
+            if (
+              button &&
+              !button.disabled &&
+              !button.classList.contains(
+                "ant-btn-loading"
+              )
+            ) {
+              return button;
+            }
+
+            return null;
+          },
+          {
+            label:
+              "当前合同类型对应的保存按钮",
+            token,
+            blockerCheck:
+              () =>
+                getVisibleErrorFeedback(),
+            diagnose:
+              () =>
+                getContractDiagnosticSummary(),
+            timeout:
+              CONFIG.CONTRACT_SAVE_COMPLETE_TIMEOUT
+          }
+        );
+
+      const buttonText =
+        compactText(
+          saveButton.textContent
+        );
+
+      log(
+        `合同补充：点击当前表单的“${buttonText}”${attempt > 1 ? "（安全重试）" : ""}...`
+      );
+
+      saveButton.click();
+
+      try {
+        await waitForReactiveCondition(
+          () => {
+            if (!formLooksEditable()) {
+              return "saved";
+            }
+
+            const current =
+              getContractSaveButton();
+
+            if (
+              !saveButton.isConnected ||
+              !isVisible(saveButton) ||
+              saveButton.disabled ||
+              saveButton.classList.contains(
+                "ant-btn-loading"
+              ) ||
+              (
+                current &&
+                current !== saveButton
+              )
+            ) {
+              return "accepted";
+            }
+
+            return null;
+          },
+          {
+            label:
+              "合同保存点击响应",
+            token,
+            blockerCheck:
+              () =>
+                getVisibleErrorFeedback(),
+            diagnose:
+              () =>
+                getContractDiagnosticSummary(),
+            timeout:
+              CONFIG.CONTRACT_SAVE_ACCEPT_TIMEOUT
+          }
+        );
+
+        saveAccepted = true;
+        break;
+      } catch (error) {
         if (
-          !currentButton ||
-          !isVisible(
-            currentButton
-          ) ||
-          !formLooksEditable()
+          error instanceof
+            FlowWaitTimeoutError &&
+          attempt === 1
         ) {
-          return true;
+          const current =
+            getContractSaveButton();
+
+          if (
+            current &&
+            isVisible(current) &&
+            !current.disabled &&
+            !current.classList.contains(
+              "ant-btn-loading"
+            ) &&
+            formLooksEditable()
+          ) {
+            log(
+              "未检测到第一次保存点击的任何页面响应，重新定位当前合同保存按钮并仅重试一次。"
+            );
+            continue;
+          }
         }
 
-        return null;
-      },
+        throw error;
+      }
+    }
+
+    if (!saveAccepted) {
+      throw new FlowBlockedError(
+        `合同保存未确认接受：${getContractDiagnosticSummary()}`
+      );
+    }
+
+    await waitForReactiveCondition(
+      () =>
+        !formLooksEditable() ||
+        null,
       {
         label:
-          "合同保存完成",
+          "合同保存完成并退出编辑状态",
         token,
         blockerCheck:
           () =>
-            getVisibleErrorFeedback()
+            getVisibleErrorFeedback(),
+        diagnose:
+          () =>
+            getContractDiagnosticSummary(),
+        timeout:
+          CONFIG.CONTRACT_SAVE_COMPLETE_TIMEOUT
       }
     );
 
+    await nextPaint(2);
+
+    const actual =
+      getContractFormSnapshot();
+
+    const mismatches =
+      compareContractFormSnapshot(
+        expected,
+        actual
+      );
+
+    if (mismatches.length) {
+      throw new FlowBlockedError(
+        `合同保存后复核失败：${mismatches.join("；")}`
+      );
+    }
+
+    const afterIssues =
+      getContractFormIssues(
+        actual
+      );
+
+    if (afterIssues.length) {
+      throw new FlowBlockedError(
+        `合同保存后仍有空字段：${afterIssues.join("、")}`
+      );
+    }
+
     log(
-      "✓ 合同保存动作已完成"
+      "✓ 合同保存完成，字段持久化复核通过"
     );
   }
 
@@ -3352,11 +4193,25 @@
   }
 
   function findUploader(kind) {
+    const container =
+      getContractContainer();
+
+    if (!container) {
+      return null;
+    }
+
+    /*
+     * 同一页面可能挂载多个合同类型的隐藏上传模块。
+     * 只处理当前可见合同容器内、当前真正显示的上传模块。
+     */
     const uploaders =
       Array.from(
-        document.querySelectorAll(
+        container.querySelectorAll(
           ".contractfiles-uploader"
         )
+      ).filter(
+        uploader =>
+          isVisible(uploader)
       );
 
     if (kind === "contract") {
@@ -3901,59 +4756,13 @@
   }
 
   function getContractCompletionState() {
-    const company =
-      document.querySelector(
-        CONFIG.CONTRACT_COMPANY_SELECTOR
-      );
-
-    const begin =
-      document.querySelector(
-        CONFIG.CONTRACT_BEGIN_SELECTOR
-      );
-
-    const end =
-      document.querySelector(
-        CONFIG.CONTRACT_END_SELECTOR
-      );
-
-    const inspection =
-      document.querySelector(
-        CONFIG.INSPECTION_DAY_SELECTOR
-      );
-
-    const companyValue =
-      getSelectVisibleText(
-        company
-      ) ||
-      cleanText(
-        company?.value
-      );
-
-    const beginValue =
-      cleanText(
-        begin?.value
-      );
-
-    const endValue =
-      cleanText(
-        end?.value
-      );
-
-    const inspectionValue =
-      cleanText(
-        inspection?.value
-      );
+    const snapshot =
+      getContractFormSnapshot();
 
     const formNeedsEdit =
-      Boolean(
-        !companyValue ||
-        !beginValue ||
-        !endValue ||
-        (
-          inspection &&
-          !inspectionValue
-        )
-      );
+      getContractFormIssues(
+        snapshot
+      ).length > 0;
 
     const contractUpload =
       getUploaderFileState(
@@ -3978,10 +4787,7 @@
       );
 
     return {
-      companyValue,
-      beginValue,
-      endValue,
-      inspectionValue,
+      ...snapshot,
       formNeedsEdit,
       contractUpload,
       authUpload,
@@ -3992,69 +4798,111 @@
     };
   }
 
+  function describeContractCompletionIssues(
+    state =
+      getContractCompletionState()
+  ) {
+    const issues =
+      getContractFormIssues(
+        state
+      );
+
+    if (
+      state.contractUpload.moduleExists &&
+      !state.contractUpload.hasFile
+    ) {
+      issues.push(
+        "合同文件未确认"
+      );
+    }
+
+    if (
+      state.authUpload.moduleExists &&
+      !state.authUpload.hasFile
+    ) {
+      issues.push(
+        "授权书未确认"
+      );
+    }
+
+    if (formLooksEditable()) {
+      issues.push(
+        "合同仍处编辑状态"
+      );
+    }
+
+    return issues;
+  }
+
   async function waitUploadVisible(
     kind,
     file,
     token = null
   ) {
-    const uploader =
-      findUploader(kind);
-
-    if (!uploader) {
-      return false;
-    }
-
     const fileName =
       cleanText(
         file.name
       );
 
-    const startedAt =
-      Date.now();
+    try {
+      await waitForReactiveCondition(
+        () => {
+          const uploader =
+            findUploader(kind);
 
-    while (
-      Date.now() -
-        startedAt <
-      CONFIG.UPLOAD_CONFIRM_TIMEOUT
-    ) {
-      throwIfFlowCancelled(
-        token
+          if (!uploader) {
+            return null;
+          }
+
+          const text =
+            cleanText(
+              uploader.textContent
+            );
+
+          if (
+            fileName &&
+            text.includes(
+              fileName
+            )
+          ) {
+            return true;
+          }
+
+          const state =
+            getUploaderFileState(
+              kind
+            );
+
+          return state.hasFile
+            ? true
+            : null;
+        },
+        {
+          label:
+            `${kind === "contract" ? "合同文件" : "授权书"}上传结果`,
+          token,
+          timeout:
+            CONFIG.UPLOAD_CONFIRM_TIMEOUT,
+          blockerCheck:
+            () =>
+              getVisibleErrorFeedback(),
+          diagnose:
+            () =>
+              getContractDiagnosticSummary()
+        }
       );
 
-      const text =
-        cleanText(
-          uploader.textContent
-        );
-
+      return true;
+    } catch (error) {
       if (
-        fileName &&
-        text.includes(
-          fileName
-        )
+        error instanceof
+          FlowWaitTimeoutError
       ) {
-        return true;
+        return false;
       }
 
-      const list =
-        uploader.querySelector(
-          ".contract-list"
-        );
-
-      if (
-        list &&
-        !compactText(
-          list.textContent
-        ).includes(
-          "暂无数据"
-        )
-      ) {
-        return true;
-      }
-
-      await sleep(200);
+      throw error;
     }
-
-    return false;
   }
 
   async function uploadOne(
@@ -4202,7 +5050,12 @@
           token,
           blockerCheck:
             () =>
-              getVisibleErrorFeedback()
+              getVisibleErrorFeedback(),
+          diagnose:
+            () =>
+              getFlowWaitDiagnostic(
+                "等待合同页签可操作"
+              )
         }
       );
 
@@ -4222,7 +5075,12 @@
         token,
         blockerCheck:
           () =>
-            getVisibleErrorFeedback()
+            getVisibleErrorFeedback(),
+        diagnose:
+          () =>
+            getFlowWaitDiagnostic(
+              "已点击合同页签，等待当前合同类型内容显示"
+            )
       }
     );
 
@@ -4443,6 +5301,762 @@
       urlMatch?.[1] ||
       ""
     );
+  }
+
+  function getExtractOrderName() {
+    const direct =
+      document.querySelector(
+        CONFIG.EXTRACT_ORDER_NAME_SELECTOR
+      );
+
+    if (!direct) {
+      return "";
+    }
+
+    const titledLabel =
+      direct.querySelector(
+        "label[title]"
+      );
+
+    const title =
+      cleanCellText(
+        titledLabel?.getAttribute(
+          "title"
+        )
+      );
+
+    if (title) {
+      return title;
+    }
+
+    return cleanCellText(
+      direct.innerText ||
+      direct.textContent
+    );
+  }
+
+  function getExtractOrderCode() {
+    return (
+      queryText(
+        CONFIG.EXTRACT_ORDER_CODE_SELECTOR
+      ) ||
+      getFormItemTextByFor(
+        "register_main_order_code"
+      ) ||
+      getCurrentOrderCode()
+    );
+  }
+
+  function getExtractOpportunityCode() {
+    const raw =
+      (
+        queryText(
+          CONFIG.EXTRACT_OPPORTUNITY_CODE_SELECTOR
+        ) ||
+        getFormItemTextByFor(
+          "register_opportunity_id"
+        )
+      )
+        .replace(
+          /^'+/,
+          ""
+        )
+        .trim();
+
+    return raw
+      ? `'${raw}`
+      : "";
+  }
+
+  function getExtractSalesmanName() {
+    const raw =
+      (
+        queryText(
+          CONFIG.EXTRACT_SALESMAN_SELECTOR
+        ) ||
+        getFormItemTextByFor(
+          "register_salesman"
+        )
+      );
+
+    return cleanCellText(
+      raw
+        .split(
+          /[（(]/
+        )[0]
+    );
+  }
+
+  function extractDateTimeFromText(
+    value
+  ) {
+    const text =
+      cleanCellText(
+        value
+      );
+
+    if (!text) {
+      return "";
+    }
+
+    const patterns = [
+      /\d{4}-\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?/,
+      /\d{4}\/\d{1,2}\/\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?/,
+      /\d{4}年\d{1,2}月\d{1,2}日\s*\d{1,2}:\d{2}(?::\d{2})?/,
+      /\d{4}-\d{1,2}-\d{1,2}/,
+      /\d{4}\/\d{1,2}\/\d{1,2}/,
+      /\d{4}年\d{1,2}月\d{1,2}日/
+    ];
+
+    for (
+      const pattern of patterns
+    ) {
+      const match =
+        text.match(pattern);
+
+      if (match) {
+        return cleanCellText(
+          match[0]
+        );
+      }
+    }
+
+    return "";
+  }
+
+  async function fetchProcessLogs() {
+    const orderCode =
+      getCurrentOrderCode();
+
+    if (!orderCode) {
+      throw new Error(
+        "未识别到当前订单编号，无法读取落单日志"
+      );
+    }
+
+    const response =
+      await fetch(
+        CONFIG.PROCESS_LOG_API,
+        {
+          method:
+            "POST",
+          headers: {
+            "accept":
+              "application/json, text/plain, */*",
+            "content-type":
+              "application/json;charset=UTF-8",
+            "mnclientid":
+              "MN_SOA3"
+          },
+          body:
+            JSON.stringify({
+              order_code:
+                orderCode,
+              type:
+                "ALL"
+            }),
+          credentials:
+            "include"
+        }
+      );
+
+    if (!response.ok) {
+      throw new Error(
+        `落单日志接口请求失败：HTTP ${response.status}`
+      );
+    }
+
+    return {
+      orderCode,
+      payload:
+        await response.json()
+    };
+  }
+
+  function collectObjects(
+    value,
+    output = []
+  ) {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      return output;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach(item => {
+        collectObjects(
+          item,
+          output
+        );
+      });
+
+      return output;
+    }
+
+    if (
+      typeof value ===
+      "object"
+    ) {
+      output.push(value);
+
+      Object.values(
+        value
+      ).forEach(child => {
+        if (
+          child &&
+          typeof child ===
+            "object"
+        ) {
+          collectObjects(
+            child,
+            output
+          );
+        }
+      });
+    }
+
+    return output;
+  }
+
+  function getPrimitiveEntries(
+    object
+  ) {
+    return Object.entries(
+      object || {}
+    )
+      .filter(([, value]) => {
+        return (
+          typeof value ===
+            "string" ||
+          typeof value ===
+            "number"
+        );
+      })
+      .map(([key, value]) => ({
+        key,
+        value:
+          String(value)
+      }));
+  }
+
+  function normalizeTransitionText(
+    value
+  ) {
+    return cleanCellText(
+      value
+    )
+      .replace(
+        /\s*-\s*>\s*/g,
+        " -> "
+      )
+      .replace(
+        /\s*→\s*/g,
+        " -> "
+      );
+  }
+
+  function objectIsLandingRecord(
+    object
+  ) {
+    const entries =
+      getPrimitiveEntries(
+        object
+      );
+
+    for (const entry of entries) {
+      const value =
+        normalizeTransitionText(
+          entry.value
+        );
+
+      if (
+        value ===
+          "已落单" ||
+        /->\s*已落单$/.test(
+          value
+        )
+      ) {
+        return true;
+      }
+    }
+
+    for (const entry of entries) {
+      const key =
+        entry.key
+          .toLowerCase();
+
+      const value =
+        cleanCellText(
+          entry.value
+        );
+
+      if (
+        /(to|target|next|after|status|state)/.test(
+          key
+        ) &&
+        value ===
+          "已落单"
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function getObjectDateTime(
+    object
+  ) {
+    const entries =
+      getPrimitiveEntries(
+        object
+      );
+
+    const candidates = [];
+
+    entries.forEach(
+      ({ key, value }, index) => {
+        const time =
+          extractDateTimeFromText(
+            value
+          );
+
+        if (!time) {
+          return;
+        }
+
+        const normalizedKey =
+          key.toLowerCase();
+
+        let priority = 50;
+
+        if (
+          /create.*time|created.*time/.test(
+            normalizedKey
+          )
+        ) {
+          priority = 1;
+        } else if (
+          /operate.*time|operation.*time/.test(
+            normalizedKey
+          )
+        ) {
+          priority = 2;
+        } else if (
+          /process.*time|handle.*time/.test(
+            normalizedKey
+          )
+        ) {
+          priority = 3;
+        } else if (
+          /time|date/.test(
+            normalizedKey
+          )
+        ) {
+          priority = 10;
+        }
+
+        candidates.push({
+          time,
+          priority,
+          index
+        });
+      }
+    );
+
+    candidates.sort(
+      (a, b) =>
+        a.priority -
+          b.priority ||
+        a.index -
+          b.index
+    );
+
+    return (
+      candidates[0]?.time ||
+      ""
+    );
+  }
+
+  function dateTimeToNumber(
+    value
+  ) {
+    const text =
+      String(
+        value || ""
+      )
+        .replace(
+          /年|月/g,
+          "-"
+        )
+        .replace(
+          /日/g,
+          ""
+        )
+        .replace(
+          /\//g,
+          "-"
+        )
+        .trim();
+
+    const match =
+      text.match(
+        /(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/
+      );
+
+    if (!match) {
+      return Number.NaN;
+    }
+
+    return new Date(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4] || 0),
+      Number(match[5] || 0),
+      Number(match[6] || 0)
+    ).getTime();
+  }
+
+  function parseLandingRecordsFromProcessLogs(
+    payload
+  ) {
+    const objects =
+      collectObjects(
+        payload
+      );
+
+    const matched = [];
+
+    objects.forEach(
+      (object, index) => {
+        if (
+          !objectIsLandingRecord(
+            object
+          )
+        ) {
+          return;
+        }
+
+        const time =
+          getObjectDateTime(
+            object
+          );
+
+        if (!time) {
+          return;
+        }
+
+        matched.push({
+          index,
+          time,
+          object
+        });
+      }
+    );
+
+    const unique =
+      new Map();
+
+    matched.forEach(record => {
+      if (
+        !unique.has(
+          record.time
+        )
+      ) {
+        unique.set(
+          record.time,
+          record
+        );
+      }
+    });
+
+    const records =
+      Array.from(
+        unique.values()
+      );
+
+    records.sort(
+      (a, b) => {
+        const at =
+          dateTimeToNumber(
+            a.time
+          );
+
+        const bt =
+          dateTimeToNumber(
+            b.time
+          );
+
+        if (
+          Number.isFinite(at) &&
+          Number.isFinite(bt)
+        ) {
+          return at - bt;
+        }
+
+        return a.index -
+          b.index;
+      }
+    );
+
+    return records;
+  }
+
+  function buildSpreadsheetLine(
+    landingTime
+  ) {
+    const values = [
+      getExtractOrderName(),
+      getExtractOrderCode(),
+      getExtractOpportunityCode(),
+      getExtractSalesmanName(),
+      landingTime
+    ].map(
+      cleanCellText
+    );
+
+    const missing = [];
+
+    [
+      "订单名称",
+      "订单编号",
+      "商机代码",
+      "健管顾问姓名",
+      "落单时间"
+    ].forEach(
+      (label, index) => {
+        if (!values[index]) {
+          missing.push(label);
+        }
+      }
+    );
+
+    if (missing.length) {
+      throw new Error(
+        `落单数据提取不完整：${missing.join("、")}`
+      );
+    }
+
+    return values.join(
+      "\t"
+    );
+  }
+
+  async function copyTextToClipboard(
+    text
+  ) {
+    if (
+      navigator.clipboard &&
+      window.isSecureContext
+    ) {
+      try {
+        await navigator.clipboard
+          .writeText(text);
+
+        return true;
+      } catch (_) {
+        // 继续使用兼容复制。
+      }
+    }
+
+    const textarea =
+      document.createElement(
+        "textarea"
+      );
+
+    textarea.value =
+      text;
+
+    textarea.style.position =
+      "fixed";
+    textarea.style.left =
+      "-9999px";
+    textarea.style.top =
+      "-9999px";
+
+    document.body.appendChild(
+      textarea
+    );
+
+    textarea.focus();
+    textarea.select();
+
+    const ok =
+      document.execCommand(
+        "copy"
+      );
+
+    textarea.remove();
+
+    if (!ok) {
+      throw new Error(
+        "浏览器未允许自动复制，可打开“体检数据”模块手动复制"
+      );
+    }
+
+    return true;
+  }
+
+  async function waitForLatestLandingRecordAfterFlow(
+    flowStartedAt,
+    token = null
+  ) {
+    const startedAt =
+      Date.now();
+
+    let lastError = null;
+    let lastSeen = null;
+    let interval =
+      CONFIG.LANDING_COPY_POLL_INTERVAL;
+
+    while (
+      Date.now() -
+        startedAt <
+      CONFIG.LANDING_COPY_TIMEOUT
+    ) {
+      throwIfFlowCancelled(
+        token
+      );
+
+      try {
+        const result =
+          await fetchProcessLogs();
+
+        const records =
+          parseLandingRecordsFromProcessLogs(
+            result.payload
+          );
+
+        if (records.length) {
+          const latest =
+            records[
+              records.length - 1
+            ];
+
+          lastSeen = {
+            latest,
+            records,
+            orderCode:
+              result.orderCode
+          };
+
+          const latestAt =
+            dateTimeToNumber(
+              latest.time
+            );
+
+          /*
+           * 只接受本次自动流程启动后附近产生的最新落单记录，
+           * 避免修改订单时误复制历史落单时间。
+           */
+          if (
+            !Number.isFinite(
+              latestAt
+            ) ||
+            latestAt >=
+              flowStartedAt -
+                120000
+          ) {
+            return lastSeen;
+          }
+        }
+      } catch (error) {
+        lastError =
+          error;
+      }
+
+      updatePanelStatus(
+        lastSeen
+          ? `订单已落单，等待本次最新落单日志刷新；当前最新记录：${lastSeen.latest.time}`
+          : "订单已落单，正在等待落单日志生成后自动复制数据...",
+        "normal",
+        {
+          persistent: true
+        }
+      );
+
+      await sleep(
+        interval
+      );
+
+      interval =
+        Math.min(
+          1600,
+          interval + 150
+        );
+    }
+
+    if (lastError) {
+      throw new Error(
+        `订单已完成，但读取最新落单日志失败：${lastError?.message || lastError}`
+      );
+    }
+
+    if (lastSeen) {
+      throw new Error(
+        `订单已完成，但30秒内未确认本次最新落单记录；当前日志最新时间为 ${lastSeen.latest.time}`
+      );
+    }
+
+    throw new Error(
+      "订单已完成，但30秒内未读取到落单记录"
+    );
+  }
+
+  async function copyLandingDataAfterFlow(
+    {
+      flowStartedAt,
+      token = null
+    }
+  ) {
+    const result =
+      await waitForLatestLandingRecordAfterFlow(
+        flowStartedAt,
+        token
+      );
+
+    const latest =
+      result.latest;
+
+    const modifiedCount =
+      Math.max(
+        0,
+        result.records.length - 1
+      );
+
+    const label =
+      modifiedCount > 0
+        ? `修改${modifiedCount}次`
+        : "首次落单";
+
+    const line =
+      buildSpreadsheetLine(
+        latest.time
+      );
+
+    await copyTextToClipboard(
+      line
+    );
+
+    console.log(
+      "[SOA智能审批] 落单完成自动复制：",
+      {
+        label,
+        landingTime:
+          latest.time,
+        line
+      }
+    );
+
+    return {
+      label,
+      landingTime:
+        latest.time,
+      line
+    };
   }
 
   function getCurrentFlowStage() {
@@ -5411,33 +7025,190 @@
     return buttons[0] || null;
   }
 
+  const FLOW_STAGE_SEQUENCE = [
+    "制单",
+    "报价单设计",
+    "授权审批",
+    "报价确认",
+    "内勤复核",
+    "合同补充",
+    "落单审核",
+    "落单中",
+    "已落单"
+  ];
+
+  function isForwardStageTransition(
+    oldStage,
+    newStage
+  ) {
+    if (
+      !oldStage ||
+      !newStage ||
+      oldStage === newStage
+    ) {
+      return false;
+    }
+
+    const oldIndex =
+      FLOW_STAGE_SEQUENCE.indexOf(
+        oldStage
+      );
+
+    const newIndex =
+      FLOW_STAGE_SEQUENCE.indexOf(
+        newStage
+      );
+
+    if (
+      oldIndex < 0 ||
+      newIndex < 0
+    ) {
+      return false;
+    }
+
+    return newIndex >
+      oldIndex;
+  }
+
   async function waitForStageChange(
     oldStage,
-    token = null
+    token = null,
+    {
+      strict =
+        oldStage ===
+          "合同补充"
+    } = {}
   ) {
-    return await waitForReactiveCondition(
-      () => {
-        const stage =
-          getCurrentFlowStage();
+    const timeout =
+      oldStage ===
+        "落单中"
+        ? CONFIG.LANDING_STAGE_TIMEOUT
+        : CONFIG.STAGE_CHANGE_TIMEOUT;
 
-        if (
-          stage &&
-          stage !== oldStage
-        ) {
-          return stage;
+    let transientStage =
+      "";
+
+    let transientSince =
+      0;
+
+    const nextStage =
+      await waitForReactiveCondition(
+        () => {
+          const stage =
+            getCurrentFlowStage();
+
+          if (
+            !stage ||
+            stage === oldStage
+          ) {
+            transientStage =
+              "";
+
+            transientSince =
+              0;
+
+            return null;
+          }
+
+          /*
+           * 只把“明确向后的有效阶段”当作真正推进。
+           *
+           * SOA页面在保存/审批后会出现 React 重绘：
+           * 顶部步骤可能短暂回显上一个阶段，甚至出现旧步骤高亮。
+           * v2.3 会立即把这种瞬时回显判为异常；v2.4 改为继续观察。
+           */
+          if (
+            isForwardStageTransition(
+              oldStage,
+              stage
+            )
+          ) {
+            return stage;
+          }
+
+          if (
+            transientStage !==
+              stage
+          ) {
+            transientStage =
+              stage;
+
+            transientSince =
+              Date.now();
+          }
+
+          /*
+           * 合同阶段仍然“严格”：
+           * - 必须等到真正向后续阶段；
+           * - 但也不因为一次瞬时旧阶段回显就立刻停止。
+           *
+           * 非合同阶段采用同样的容错等待，只是诊断提示更轻。
+           */
+          return null;
+        },
+        {
+          label:
+            strict
+              ? `合同流程从“${oldStage}”进入下一阶段`
+              : `“${oldStage}”处理完成并进入下一阶段`,
+          token,
+          timeout,
+          blockerCheck:
+            () =>
+              getVisibleErrorFeedback(),
+          diagnose:
+            () => {
+              const current =
+                getCurrentFlowStage();
+
+              const transientText =
+                transientStage
+                  ? (
+                      `；页面曾短暂显示“${transientStage}”` +
+                      (
+                        transientSince
+                          ? `（${Math.max(
+                              1,
+                              Math.floor(
+                                (
+                                  Date.now() -
+                                  transientSince
+                                ) /
+                                1000
+                              )
+                            )}秒）`
+                          : ""
+                      )
+                    )
+                  : "";
+
+              if (strict) {
+                return (
+                  getFlowWaitDiagnostic(
+                    `等待合同阶段真正推进${transientText}`
+                  )
+                );
+              }
+
+              return (
+                `当前阶段=${current || "未识别"}${transientText}`
+              );
+            }
         }
+      );
 
-        return null;
-      },
-      {
-        label:
-          `流程从“${oldStage}”进入下一阶段`,
-        token,
-        blockerCheck:
-          () =>
-            getVisibleErrorFeedback()
-      }
+    /*
+     * 阶段文字已经变化后，再等待两次浏览器绘制。
+     * 不是固定毫秒等待，只是给 React 一次完成新阶段UI挂载的机会；
+     * 后续具体按钮仍由动态DOM条件等待。
+     */
+    await nextPaint(2);
+
+    throwIfFlowCancelled(
+      token
     );
+
+    return nextStage;
   }
 
   async function fillAndConfirmApproval(
@@ -5480,7 +7251,12 @@
             token,
             blockerCheck:
               () =>
-                getVisibleErrorFeedback()
+                getVisibleErrorFeedback(),
+            diagnose:
+              () =>
+                getFlowWaitDiagnostic(
+                  `等待“${stage}”可执行按钮`
+                )
           }
         );
 
@@ -5510,7 +7286,11 @@
 
             if (
               currentStage &&
-              currentStage !== stage
+              currentStage !== stage &&
+              isForwardStageTransition(
+                stage,
+                currentStage
+              )
             ) {
               return {
                 type:
@@ -5520,6 +7300,10 @@
               };
             }
 
+            /*
+             * 非向前的阶段变化可能只是页面重绘造成的短暂旧状态，
+             * 不在这里提前判错，继续等待审批弹窗或真实向前推进。
+             */
             return null;
           },
           {
@@ -5528,7 +7312,12 @@
             token,
             blockerCheck:
               () =>
-                getVisibleErrorFeedback()
+                getVisibleErrorFeedback(),
+            diagnose:
+              () =>
+                getFlowWaitDiagnostic(
+                  `已点击“${stage}”操作，等待审批弹窗或阶段直接推进`
+                )
           }
         );
 
@@ -5539,6 +7328,7 @@
         log(
           `“${stage}”已直接推进到“${outcome.stage}”。`
         );
+
         return outcome.stage;
       }
 
@@ -5591,7 +7381,12 @@
           token,
           blockerCheck:
             () =>
-              getVisibleErrorFeedback()
+              getVisibleErrorFeedback(),
+          diagnose:
+            () =>
+              getFlowWaitDiagnostic(
+                `等待“${stage}”备注和确认按钮就绪`
+              )
         }
       );
 
@@ -5642,7 +7437,12 @@
           token,
           blockerCheck:
             () =>
-              getVisibleErrorFeedback()
+              getVisibleErrorFeedback(),
+          diagnose:
+            () =>
+              getFlowWaitDiagnostic(
+                `备注已写入，等待“${stage}”确认按钮可提交`
+              )
         }
       );
 
@@ -5659,7 +7459,10 @@
     const nextStage =
       await waitForStageChange(
         stage,
-        token
+        token,
+        {
+          strict: false
+        }
       );
 
     log(
@@ -5684,6 +7487,35 @@
       );
     }
 
+    await waitForReactiveCondition(
+      () => {
+        const state =
+          getContractCompletionState();
+
+        if (
+          state.complete &&
+          !formLooksEditable()
+        ) {
+          return state;
+        }
+
+        return null;
+      },
+      {
+        label:
+          "发起落单前合同资料最终校验",
+        token,
+        timeout:
+          CONFIG.CONTRACT_FINAL_VERIFY_TIMEOUT,
+        blockerCheck:
+          () =>
+            getVisibleErrorFeedback(),
+        diagnose:
+          () =>
+            getContractDiagnosticSummary()
+      }
+    );
+
     let popconfirm =
       getVisibleLandingPopconfirm();
 
@@ -5702,7 +7534,12 @@
             token,
             blockerCheck:
               () =>
-                getVisibleErrorFeedback()
+                getVisibleErrorFeedback(),
+            diagnose:
+              () =>
+                getFlowWaitDiagnostic(
+                  "合同已验证完成，等待发起落单按钮"
+                )
           }
         );
 
@@ -5723,7 +7560,12 @@
             token,
             blockerCheck:
               () =>
-                getVisibleErrorFeedback()
+                getVisibleErrorFeedback(),
+            diagnose:
+              () =>
+                getFlowWaitDiagnostic(
+                  "已点击发起落单，等待确认框"
+                )
           }
         );
     }
@@ -5754,7 +7596,12 @@
           token,
           blockerCheck:
             () =>
-              getVisibleErrorFeedback()
+              getVisibleErrorFeedback(),
+          diagnose:
+            () =>
+              getFlowWaitDiagnostic(
+                "确认框已显示，等待确定按钮可提交"
+              )
         }
       );
 
@@ -5767,7 +7614,10 @@
     const nextStage =
       await waitForStageChange(
         "合同补充",
-        token
+        token,
+        {
+          strict: true
+        }
       );
 
     log(
@@ -5795,6 +7645,12 @@
       token;
 
     processRunning = true;
+
+    const flowStartedAt =
+      Date.now();
+
+    let landingDataCopied =
+      false;
 
     updateFlowRunButtonState(
       getCurrentFlowStage()
@@ -5837,7 +7693,12 @@
                 token,
                 blockerCheck:
                   () =>
-                    getVisibleErrorFeedback()
+                    getVisibleErrorFeedback(),
+                diagnose:
+                  () =>
+                    getFlowWaitDiagnostic(
+                      "等待页面流程步骤加载"
+                    )
               }
             );
         }
@@ -5947,7 +7808,10 @@
 
           await waitForStageChange(
             "落单中",
-            token
+            token,
+            {
+              strict: false
+            }
           );
 
           continue;
@@ -5957,10 +7821,39 @@
           stage ===
           "已落单"
         ) {
-          updatePanelStatus(
-            "✓ 当前订单流程已完成。",
-            "success"
-          );
+          if (!landingDataCopied) {
+            try {
+              const copied =
+                await copyLandingDataAfterFlow({
+                  flowStartedAt,
+                  token
+                });
+
+              landingDataCopied =
+                true;
+
+              updatePanelStatus(
+                `✓ 订单流程已完成；“${copied.label}”落单数据已自动复制，可直接粘贴到表格。`,
+                "success",
+                {
+                  persistent: true
+                }
+              );
+            } catch (error) {
+              console.error(
+                "[SOA智能审批] 落单完成后自动复制失败：",
+                error
+              );
+
+              updatePanelStatus(
+                `✓ 订单流程已完成，但自动复制落单数据失败：${error?.message || error}。可打开“体检数据”模块手动复制。`,
+                "error",
+                {
+                  persistent: true
+                }
+              );
+            }
+          }
 
           return;
         }
@@ -6022,10 +7915,11 @@
       getContractCompletionState();
 
     if (
-      initialState.complete
+      initialState.complete &&
+      !formLooksEditable()
     ) {
       log(
-        "✓ 合同字段及现有上传文件已完整，跳过合同编辑、保存和重复上传。"
+        "✓ 合同字段及当前合同类型的上传文件已完整，验证通过并跳过重复处理。"
       );
 
       updatePanelStatus(
@@ -6043,119 +7937,125 @@
       initialState.formNeedsEdit
     ) {
       log(
-        "合同补充：检测到空字段，仅补充缺失内容..."
+        "合同补充：检测到当前可见合同字段缺失，仅补充缺失内容..."
       );
 
       await enterEditMode(
         token
       );
 
-      const beforeCompany =
-        getSelectVisibleText(
-          document.querySelector(
-            CONFIG.CONTRACT_COMPANY_SELECTOR
-          )
-        ) ||
-        cleanText(
-          document.querySelector(
-            CONFIG.CONTRACT_COMPANY_SELECTOR
-          )?.value
-        );
-
-      const beforeBegin =
-        cleanText(
-          document.querySelector(
-            CONFIG.CONTRACT_BEGIN_SELECTOR
-          )?.value
-        );
-
-      const beforeEnd =
-        cleanText(
-          document.querySelector(
-            CONFIG.CONTRACT_END_SELECTOR
-          )?.value
-        );
-
-      const beforeInspection =
-        cleanText(
-          document.querySelector(
-            CONFIG.INSPECTION_DAY_SELECTOR
-          )?.value
-        );
+      const before =
+        getContractFormSnapshot();
 
       await selectConfiguredContractCompany(
         token
       );
 
-      await setContractDates();
+      await setContractDates(
+        token
+      );
 
-      await fillInspectionPeopleDay();
+      await fillInspectionPeopleDay(
+        token
+      );
 
-      const afterCompany =
-        getSelectVisibleText(
-          document.querySelector(
-            CONFIG.CONTRACT_COMPANY_SELECTOR
-          )
-        ) ||
-        cleanText(
-          document.querySelector(
-            CONFIG.CONTRACT_COMPANY_SELECTOR
-          )?.value
+      const after =
+        getContractFormSnapshot();
+
+      const afterIssues =
+        getContractFormIssues(
+          after
         );
 
-      const afterBegin =
-        cleanText(
-          document.querySelector(
-            CONFIG.CONTRACT_BEGIN_SELECTOR
-          )?.value
+      if (afterIssues.length) {
+        throw new FlowBlockedError(
+          `合同字段填写后复核未通过：${afterIssues.join("、")}`
         );
-
-      const afterEnd =
-        cleanText(
-          document.querySelector(
-            CONFIG.CONTRACT_END_SELECTOR
-          )?.value
-        );
-
-      const afterInspection =
-        cleanText(
-          document.querySelector(
-            CONFIG.INSPECTION_DAY_SELECTOR
-          )?.value
-        );
+      }
 
       formChanged =
         (
-          beforeCompany !==
-          afterCompany
+          before.companyValue !==
+          after.companyValue
         ) ||
         (
-          beforeBegin !==
-          afterBegin
+          before.beginValue !==
+          after.beginValue
         ) ||
         (
-          beforeEnd !==
-          afterEnd
+          before.endValue !==
+          after.endValue
         ) ||
         (
-          beforeInspection !==
-          afterInspection
+          before.inspectionValue !==
+          after.inspectionValue
         );
 
       if (formChanged) {
         await saveContractForm(
-          token
+          token,
+          after
+        );
+      } else if (
+        formLooksEditable()
+      ) {
+        /*
+         * 页面虽然判定无需改值，但如果当前已经进入编辑态，仍必须退出编辑并确认保存状态，
+         * 否则后续“发起落单”可能被页面阻止。
+         */
+        await saveContractForm(
+          token,
+          after
         );
       } else {
         log(
-          "✓ 合同字段无需修改，跳过合同保存。"
+          "✓ 合同字段无需修改，且当前不在编辑状态。"
         );
       }
     } else {
-      log(
-        "✓ 合同字段均已有值，跳过编辑和保存。"
-      );
+      if (formLooksEditable()) {
+        log(
+          "合同字段均已有值，但页面当前仍处编辑状态；执行当前合同表单保存并验证退出编辑。"
+        );
+
+        await saveContractForm(
+          token,
+          getContractFormSnapshot()
+        );
+      } else {
+        log(
+          "✓ 当前可见合同字段均已有值，且不在编辑状态，跳过字段编辑。"
+        );
+      }
     }
+
+    /*
+     * 保存后等待字段状态稳定，防止 React 重绘/接口延迟导致刚保存的值短暂回退。
+     */
+    await waitForReactiveCondition(
+      () => {
+        const state =
+          getContractCompletionState();
+
+        return !state.formNeedsEdit &&
+          !formLooksEditable()
+          ? state
+          : null;
+      },
+      {
+        label:
+          "合同字段保存后的稳定状态",
+        token,
+        timeout:
+          CONFIG.CONTRACT_FINAL_VERIFY_TIMEOUT,
+        blockerCheck:
+          () =>
+            getVisibleErrorFeedback(),
+        diagnose:
+          () =>
+            getContractDiagnosticSummary()
+      }
+    );
 
     const uploadState =
       getContractCompletionState();
@@ -6170,11 +8070,11 @@
         await getBoundFileForRun();
 
       log(
-        `合同补充：仅为缺失上传项使用已选择文件 ${sharedFile.name}`
+        `合同补充：仅为当前可见且缺失的上传项使用已选择文件 ${sharedFile.name}`
       );
     } else {
       log(
-        "✓ 合同文件/授权书已存在或对应模块不存在，不读取绑定文件。"
+        "✓ 当前合同类型的合同文件/授权书已存在或模块不适用，不读取绑定文件。"
       );
     }
 
@@ -6214,20 +8114,48 @@
       ).length;
 
     const finalState =
-      getContractCompletionState();
+      await waitForReactiveCondition(
+        () => {
+          const state =
+            getContractCompletionState();
+
+          return state.complete &&
+            !formLooksEditable()
+            ? state
+            : null;
+        },
+        {
+          label:
+            "合同资料最终完整性验证",
+          token,
+          timeout:
+            CONFIG.CONTRACT_FINAL_VERIFY_TIMEOUT,
+          blockerCheck:
+            () =>
+              getVisibleErrorFeedback(),
+          diagnose:
+            () =>
+              getContractDiagnosticSummary()
+        }
+      );
+
+    const finalIssues =
+      describeContractCompletionIssues(
+        finalState
+      );
+
+    if (finalIssues.length) {
+      throw new FlowBlockedError(
+        `合同资料最终验证未通过：${finalIssues.join("、")}`
+      );
+    }
 
     updatePanelStatus(
-      finalState.complete
-        ? (
-            uploadedCount > 0 ||
-            formChanged
-              ? `✓ 合同补充完成：新增上传 ${uploadedCount} 项，已有文件跳过 ${existingCount} 项。`
-              : "✓ 合同资料已完整，无需重复处理。"
-          )
-        : "合同补充已按现有状态处理，请检查仍未完成的项目。",
-      finalState.complete
-        ? "success"
-        : "normal"
+      uploadedCount > 0 ||
+      formChanged
+        ? `✓ 合同验证通过：新增上传 ${uploadedCount} 项，已有文件跳过 ${existingCount} 项。`
+        : "✓ 合同资料验证通过，无需重复处理。",
+      "success"
     );
   }
 
@@ -6679,7 +8607,7 @@
           min-width:0;
           font-size:15px;
         ">
-          智能审批 v2.2
+          智能审批 v2.4
         </strong>
 
         <button
@@ -6717,8 +8645,8 @@
             cursor:pointer;
             font-weight:600;
           "
-          title="折叠"
-        >−</button>
+          title="关闭"
+        >×</button>
       </div>
 
       <div id="${UI.PANEL_BODY_ID}">
@@ -6751,7 +8679,7 @@
 
           <div style="margin-bottom:3px;">
             <strong style="color:#444;">流程：</strong>
-            内勤复核及后续支持阶段可执行；合同阶段只补空字段并跳过已有文件；运行中可随时停止。
+            内勤复核及后续支持阶段可执行；合同阶段严格复核，其余阶段动态等待页面推进；已落单后自动复制落单数据。
           </div>
 
           <div style="margin-bottom:3px;">
@@ -6762,7 +8690,7 @@
 
           <div>
             <strong style="color:#444;">窗口：</strong>
-            拖动标题栏移动，右上角“−”折叠；提示最多5条可清空，文件权限失效时再重新授权。
+            拖动标题栏移动，右上角“×”关闭；提示最多5条可清空，文件权限失效时再重新授权。
           </div>
         </div>
 
@@ -7057,10 +8985,12 @@
             <strong
               id="${UI.FLOW_STAGE_VALUE_ID}"
               style="
+                flex:0 0 auto;
                 min-width:0;
                 color:#595959;
                 font-size:14px;
                 font-weight:600;
+                white-space:nowrap;
               "
             >
               识别中
@@ -7075,7 +9005,7 @@
                 align-items:center;
                 gap:3px;
                 color:#262626;
-                font-size:11px;
+                font-size:10.5px;
                 white-space:nowrap;
               "
               title="体检时间"
@@ -7293,7 +9223,10 @@
         "click",
         event => {
           event.stopPropagation();
-          togglePanelCollapsed();
+
+          setPanelVisible(
+            false
+          );
         }
       );
 
@@ -7409,9 +9342,25 @@
         }
       );
 
-    setPanelCollapsed(
-      getPanelCollapsed()
-    );
+    /*
+     * v2.4 取消折叠功能。
+     * 清理旧版本可能遗留的折叠状态，面板打开时始终完整显示。
+     */
+    try {
+      localStorage.removeItem(
+        UI.PANEL_COLLAPSED_KEY
+      );
+    } catch (_) {}
+
+    const panelBody =
+      document.getElementById(
+        UI.PANEL_BODY_ID
+      );
+
+    if (panelBody) {
+      panelBody.style.display =
+        "block";
+    }
 
     const reviewRemarkInput =
       document.getElementById(
@@ -8215,6 +10164,6 @@
   routeCheck();
 
   console.log(
-    "[SOA智能审批] v2.2 已加载"
+    "[SOA智能审批] v2.4 已加载"
   );
 })();
