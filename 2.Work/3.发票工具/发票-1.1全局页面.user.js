@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         发票1.1全局页面
+// @name         发票-1.1全局页面
 // @namespace    https://tampermonkey.net/
 // @version      6.14
 // @description  优化SOA发票页面的表格布局、文案显示和复制功能，支持动态加载内容的处理。
