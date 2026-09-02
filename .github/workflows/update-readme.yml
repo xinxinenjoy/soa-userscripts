@@ -360,10 +360,10 @@ jobs:
               '',
               '| 浏览器 | 安装入口 |',
               '|---|---|',
-              '| Chrome | [Chrome Web Store](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo) |',
-              '| Edge | [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd) |',
-              '| Firefox | [Firefox Add-ons](https://addons.mozilla.org/zh-CN/firefox/addon/tampermonkey/) |',
-              '| 官方网站 | [Tampermonkey](https://www.tampermonkey.net/) |',
+              '| Chrome | [Crx搜搜 · Chrome版](https://www.crxsoso.com/webstore/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo) |',
+              '| Edge | [Crx搜搜 · Edge版](https://www.crxsoso.com/addon/detail/iikmkjmpaadaobahmlepeloendndfphd) |',
+              '| Firefox | [Crx搜搜 · Firefox版](https://www.crxsoso.com/firefox/detail/tampermonkey) |',
+              '| 扩展聚合站 | [Crx搜搜](https://www.crxsoso.com/) |',
               '',
               '### 2. 安装脚本',
               '',
@@ -495,17 +495,17 @@ jobs:
 
 
           # 5. Cloudflare Pages 首页
-          TAMPERMONKEY_OFFICIAL = "https://www.tampermonkey.net/?locale=zh"
+          TAMPERMONKEY_STORE = "https://www.crxsoso.com/"
           TAMPERMONKEY_CHROME = (
-              "https://chromewebstore.google.com/detail/"
-              "tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo"
+              "https://www.crxsoso.com/webstore/detail/"
+              "dhdgffkkebhmkfjojejmpbldmpobfkfo"
           )
           TAMPERMONKEY_EDGE = (
-              "https://microsoftedge.microsoft.com/addons/detail/"
-              "tampermonkey/iikmkjmpaadaobahmlepeloendndfphd"
+              "https://www.crxsoso.com/addon/detail/"
+              "iikmkjmpaadaobahmlepeloendndfphd"
           )
           TAMPERMONKEY_FIREFOX = (
-              "https://addons.mozilla.org/zh-CN/firefox/addon/tampermonkey/"
+              "https://www.crxsoso.com/firefox/detail/tampermonkey"
           )
 
           SITE_ICON = (
@@ -1496,7 +1496,7 @@ jobs:
                     <span class="step-number">1</span>
                     <div>
                       <strong>安装 Tampermonkey</strong>
-                      <p>按你的浏览器点击官方商店安装。</p>
+                      <p>按你的浏览器点击 Crx搜搜 安装入口。</p>
                     </div>
                   </div>
 
@@ -1525,8 +1525,8 @@ jobs:
                   <div>
                     <h2 class="section-title">安装 Tampermonkey</h2>
                     <p class="section-desc">
-                      下面按钮直接前往对应浏览器的官方扩展商店。
-                      推荐安装正式版，不需要单独下载 CRX 或其他安装包。
+                      下面按钮直接前往 Crx搜搜 对应浏览器的 Tampermonkey 页面。
+                      国内网络访问更方便，可按页面提示选择在线安装或离线安装包。
                     </p>
                   </div>
                 </div>
@@ -1543,12 +1543,12 @@ jobs:
                           <div class="tm-browser">Chrome 120+</div>
                         </div>
                       </div>
-                      <div class="tm-meta">正式版 · 免费 · 多语言</div>
+                      <div class="tm-meta">Crx搜搜 · 正式版 · 多语言</div>
                       <a class="store-button"
                          href="{h(TAMPERMONKEY_CHROME)}"
                          target="_blank"
                          rel="noopener noreferrer">
-                        去 Chrome 商店
+                        Crx搜搜安装
                       </a>
                     </article>
 
@@ -1559,15 +1559,15 @@ jobs:
                         </div>
                         <div>
                           <h3 class="tm-name">Tampermonkey</h3>
-                          <div class="tm-browser">Microsoft Edge 79+</div>
+                          <div class="tm-browser">Microsoft Edge 120+</div>
                         </div>
                       </div>
-                      <div class="tm-meta">正式版 · 免费 · 多语言</div>
+                      <div class="tm-meta">Crx搜搜 · 正式版 · 多语言</div>
                       <a class="store-button"
                          href="{h(TAMPERMONKEY_EDGE)}"
                          target="_blank"
                          rel="noopener noreferrer">
-                        去 Edge 商店
+                        Crx搜搜安装
                       </a>
                     </article>
 
@@ -1581,12 +1581,12 @@ jobs:
                           <div class="tm-browser">Firefox 78+</div>
                         </div>
                       </div>
-                      <div class="tm-meta">正式版 · 免费 · 多语言</div>
+                      <div class="tm-meta">Crx搜搜 · 正式版 · 多语言</div>
                       <a class="store-button"
                          href="{h(TAMPERMONKEY_FIREFOX)}"
                          target="_blank"
                          rel="noopener noreferrer">
-                        去 Firefox 商店
+                        Crx搜搜安装
                       </a>
                     </article>
                   </div>
@@ -1594,12 +1594,13 @@ jobs:
                   <div class="tm-note">
                     <span>
                       页面会根据当前浏览器自动标记推荐安装入口。
-                      扩展仍需在浏览器官方商店页面确认安装，这是浏览器的安全要求。
+                      Crx搜搜聚合 Chrome、Edge、Firefox 扩展资源，并提供在线安装与离线安装方式；
+                      实际安装步骤请以 Crx搜搜页面提示为准。
                     </span>
-                    <a href="{h(TAMPERMONKEY_OFFICIAL)}"
+                    <a href="{h(TAMPERMONKEY_STORE)}"
                        target="_blank"
                        rel="noopener noreferrer">
-                      Tampermonkey 官方网站 ↗
+                      打开 Crx搜搜 ↗
                     </a>
                   </div>
                 </div>
