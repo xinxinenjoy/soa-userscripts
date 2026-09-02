@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         发票1.2订单页面
+// @name         发票-1.2订单页面
 // @namespace    https://tampermonkey.net/soa-order-invoice/
 // @version      1.6
 // @description  SOA订单发票列表页面增强：列重排、宽度调整、文案替换、复制优化。
