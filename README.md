@@ -20,10 +20,10 @@ GitHub 作为唯一开发源，Cloudflare Pages 提供展示、安装与自动�
 
 | 浏览器 | 安装入口 |
 |---|---|
-| Chrome | [Chrome Web Store](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo) |
-| Edge | [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd) |
-| Firefox | [Firefox Add-ons](https://addons.mozilla.org/zh-CN/firefox/addon/tampermonkey/) |
-| 官方网站 | [Tampermonkey](https://www.tampermonkey.net/) |
+| Chrome | [Crx搜搜 · Chrome版](https://www.crxsoso.com/webstore/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo) |
+| Edge | [Crx搜搜 · Edge版](https://www.crxsoso.com/addon/detail/iikmkjmpaadaobahmlepeloendndfphd) |
+| Firefox | [Crx搜搜 · Firefox版](https://www.crxsoso.com/firefox/detail/tampermonkey) |
+| 扩展聚合站 | [Crx搜搜](https://www.crxsoso.com/) |
 
 ### 2. 安装脚本
 
