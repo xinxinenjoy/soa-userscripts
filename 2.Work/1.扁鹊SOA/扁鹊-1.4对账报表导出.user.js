@@ -3379,7 +3379,7 @@
           "
         >
           <strong style="
-            font-size:18px;
+            font-size:15px;
             line-height:1.2;
           ">对账报表 v1.6</strong>
   
