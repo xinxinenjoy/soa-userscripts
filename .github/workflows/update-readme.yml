@@ -334,7 +334,12 @@ jobs:
           )
 
           latest_text = latest["modified_at"] if latest else "-"
-          page_generated_at = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
+
+          # 页面右上角显示“页面改版时间”，不是本次自动重新生成时间。
+          # 以 update-readme.yml 本身最后一次 Git 修改时间为准。
+          page_modified_text, _ = source_modified(
+              Path(".github/workflows/update-readme.yml")
+          )
 
 
           # 4. README
@@ -1835,7 +1840,7 @@ jobs:
             <header class="hero">
               <div class="wrap">
                 <div class="hero-panel">
-                  <div class="page-updated">页面更新 {h(page_generated_at)}</div>
+                  <div class="page-updated">页面改版 {h(page_modified_text)}</div>
 
                   <div class="brand-row">
                     <img class="brand-avatar"
@@ -2658,6 +2663,8 @@ jobs:
 
       - name: Commit README And Homepage
         shell: bash
+        env:
+          WORKFLOW_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           git config user.name "GitHub Actions"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -2669,7 +2676,48 @@ jobs:
             exit 0
           fi
 
-          git commit -m "[auto-readme] 自动更新 README 与脚本主页"
+          # ----------------------------------------------------
+          # 使用触发 Build Userscripts 的原始提交标题。
+          #
+          # 示例：
+          #   用户：
+          #     优化智能审批模块的处理逻辑，避免卡住
+          #
+          #   自动主页：
+          #     [AUTO·主页] 优化智能审批模块的处理逻辑，避免卡住
+          # ----------------------------------------------------
+          SOURCE_SHA="${WORKFLOW_SOURCE_SHA}"
+
+          if [[ -z "${SOURCE_SHA}" ]] || ! git cat-file -e "${SOURCE_SHA}^{commit}" 2>/dev/null; then
+            SOURCE_SHA="$(
+              git log \
+                --format='%H%x09%s' \
+                -n 50 |
+              awk -F '\t' '$2 !~ /^\[AUTO·/ {print $1; exit}'
+            )"
+          fi
+
+          SOURCE_SUBJECT="$(
+            git show \
+              -s \
+              --format='%s' \
+              "${SOURCE_SHA}" \
+              2>/dev/null ||
+            true
+          )"
+
+          if [[ -z "${SOURCE_SUBJECT}" ]]; then
+            SOURCE_SUBJECT="更新脚本主页"
+          fi
+
+          SOURCE_SUBJECT="${SOURCE_SUBJECT:0:120}"
+
+          git commit \
+            -m "[AUTO·主页] ${SOURCE_SUBJECT}" \
+            -m "来源提交：${SOURCE_SHA}" \
+            -m "自动处理：更新 README 与 Cloudflare 脚本主页。"
+
           git push origin "HEAD:${GITHUB_BRANCH}"
 
-          echo "README 与 Cloudflare 脚本主页更新完成。"
+          echo "README 与 Cloudflare 脚本主页更新完成："
+          echo "[AUTO·主页] ${SOURCE_SUBJECT}"

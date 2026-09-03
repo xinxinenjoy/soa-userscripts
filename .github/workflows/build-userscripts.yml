@@ -11,17 +11,17 @@ name: Build Userscripts
 # 5. 没有 @publishID 时，首次运行自动生成并写回源脚本
 # 6. 最终稳定地址统一为：
 #      publish/<publishGroup>/<publishID>.user.js
-# 7. @updateURL / @downloadURL 永远指向 Cloudflare Pages 自定义域名
-# 8. GitCode 仅保留展示镜像，由独立 Workflow 在 README 完成后同步
+# 7. @updateURL / @downloadURL 永远指向稳定 publish 地址
+# 8. GitCode 同步由独立 Workflow 在 README 完成后执行
 # ============================================================
 
 env:
   GITHUB_BRANCH: main
 
-  # Tampermonkey 长期固定安装 / 更新域名
-  # Cloudflare Pages 的构建输出目录已经设置为 publish，
-  # 所以 URL 中不要再带 /publish/。
-  DISTRIBUTION_BASE_URL: https://scripts.wanxinxin.dpdns.org
+  GITCODE_OWNER: gcw_7DpHPfUr
+  GITCODE_REPO: wanxin-userscripts
+  GITCODE_BRANCH: main
+
 
   USERSCRIPT_AUTHOR: WanXin
 
@@ -48,20 +48,14 @@ concurrency:
 
 jobs:
   publish:
-    # Build 自己和 README Workflow 都可能产生自动提交。
-    # 对这两类自动提交直接跳过，避免重复构建和无意义的 Flow 链。
+    # 自动提交会再次触发 push。
+    # 所有以 [AUTO· 开头的提交均跳过 Build，避免自动提交造成重复构建。
     if: >-
       ${{
         github.event_name != 'push' ||
-        (
-          !contains(
-            github.event.head_commit.message,
-            '[auto-userscript-maintenance]'
-          ) &&
-          !contains(
-            github.event.head_commit.message,
-            '[auto-readme]'
-          )
+        !startsWith(
+          github.event.head_commit.message,
+          '[AUTO·'
         )
       }}
 
@@ -114,10 +108,9 @@ jobs:
 
           PUBLISH_ROOT = ROOT / PUBLISH_DIR
 
-          DISTRIBUTION_BASE_URL = os.environ.get(
-              "DISTRIBUTION_BASE_URL",
-              "https://scripts.wanxinxin.dpdns.org"
-          ).rstrip("/")
+          GITCODE_OWNER = os.environ["GITCODE_OWNER"]
+          GITCODE_REPO = os.environ["GITCODE_REPO"]
+          GITCODE_BRANCH = os.environ["GITCODE_BRANCH"]
 
           USERSCRIPT_AUTHOR = os.environ.get(
               "USERSCRIPT_AUTHOR",
@@ -132,6 +125,13 @@ jobs:
           GITHUB_BRANCH = os.environ.get(
               "GITHUB_BRANCH",
               "main"
+          )
+
+          GITCODE_RAW_BASE = (
+              f"https://raw.gitcode.com/"
+              f"{GITCODE_OWNER}/"
+              f"{GITCODE_REPO}/"
+              f"raw/{GITCODE_BRANCH}/"
           )
 
           GITHUB_RAW_BASE = (
@@ -396,18 +396,16 @@ jobs:
               )
 
 
-          def build_distribution_url(
+          def build_gitcode_url(
               publish_group: str,
               publish_id: str
           ) -> str:
-              # Cloudflare Pages 的网站根目录就是 GitHub 的 publish/，
-              # 因此对外地址为：/<publishGroup>/<publishID>.user.js
-              filename = f"{publish_id}.user.js"
-
               return (
-                  f"{DISTRIBUTION_BASE_URL}/"
-                  f"{quote(publish_group, safe='._-')}/"
-                  f"{quote(filename, safe='._-')}"
+                  GITCODE_RAW_BASE
+                  + encoded_publish_path(
+                      publish_group,
+                      publish_id
+                  )
               )
 
 
@@ -582,7 +580,7 @@ jobs:
 
               used_publish_paths[publish_path_key] = relative
 
-              expected_url = build_distribution_url(
+              expected_url = build_gitcode_url(
                   publish_group,
                   publish_id
               )
@@ -712,7 +710,7 @@ jobs:
                       "description",
                       ""
                   ),
-                  "distribution_url": expected_url,
+                  "gitcode_url": expected_url,
                   "github_url": github_backup_url,
                   "group": publish_group,
               })
@@ -777,10 +775,10 @@ jobs:
           )
           print(
               "所有 @updateURL / @downloadURL "
-              "已切换到 Cloudflare Pages 固定域名。"
+              "已切换到稳定 publish 地址。"
           )
           print(
-              f"Cloudflare 分发根地址：{DISTRIBUTION_BASE_URL}"
+              f"README 已更新：{README_PATH}"
           )
           PY
 
@@ -807,11 +805,60 @@ jobs:
             exit 0
           fi
 
+          # ----------------------------------------------------
+          # 自动提交日志：
+          #   用户提交：
+          #     优化智能审批模块的处理逻辑，避免卡住
+          #
+          #   自动发布提交：
+          #     [AUTO·发布] 优化智能审批模块的处理逻辑，避免卡住
+          #
+          # GitHub 提交列表中可以直接看出哪些是用户提交、哪些是自动处理。
+          # ----------------------------------------------------
+          SOURCE_SHA="${GITHUB_SHA}"
+
+          if [[ "${GITHUB_EVENT_NAME}" != "push" ]]; then
+            SOURCE_SHA="$(
+              git log \
+                --format='%H%x09%s' \
+                -n 50 |
+              awk -F '\t' '$2 !~ /^\[AUTO·/ {print $1; exit}'
+            )"
+          fi
+
+          if [[ -z "${SOURCE_SHA}" ]] || ! git cat-file -e "${SOURCE_SHA}^{commit}" 2>/dev/null; then
+            SOURCE_SHA="$(
+              git log \
+                --format='%H%x09%s' \
+                -n 50 |
+              awk -F '\t' '$2 !~ /^\[AUTO·/ {print $1; exit}'
+            )"
+          fi
+
+          SOURCE_SUBJECT="$(
+            git show \
+              -s \
+              --format='%s' \
+              "${SOURCE_SHA}" \
+              2>/dev/null ||
+            true
+          )"
+
+          if [[ -z "${SOURCE_SUBJECT}" ]]; then
+            SOURCE_SUBJECT="定时维护脚本发布内容"
+          fi
+
+          # 防止异常超长提交标题影响 GitHub 历史可读性。
+          SOURCE_SUBJECT="${SOURCE_SUBJECT:0:120}"
+
           git commit \
-            -m "[auto-userscript-maintenance] 固定分组发布地址"
+            -m "[AUTO·发布] ${SOURCE_SUBJECT}" \
+            -m "来源提交：${SOURCE_SHA}" \
+            -m "自动处理：维护脚本元数据、固定发布地址并更新 publish 文件。"
 
           git push \
             origin \
             "HEAD:${GITHUB_BRANCH}"
 
-          echo "GitHub 自动维护内容已提交。"
+          echo "GitHub 自动发布内容已提交："
+          echo "[AUTO·发布] ${SOURCE_SUBJECT}"
