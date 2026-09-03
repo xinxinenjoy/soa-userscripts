@@ -13,8 +13,8 @@
 // @author       WanXin
 // @publishGroup diemei
 // @publishID    diemei-danweixinxi
-// @updateURL    https://scripts.wanxinxin.dpdns.org/diemei/diemei-danweixinxi.user.js
-// @downloadURL  https://scripts.wanxinxin.dpdns.org/diemei/diemei-danweixinxi.user.js
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/diemei/diemei-danweixinxi.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/diemei/diemei-danweixinxi.user.js
 // ==/UserScript==
 
 /*

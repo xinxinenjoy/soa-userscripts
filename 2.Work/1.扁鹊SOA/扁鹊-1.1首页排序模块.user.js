@@ -10,8 +10,8 @@
 // @author       WanXin
 // @publishGroup bianque
 // @publishID    soa-shouye
-// @updateURL    https://scripts.wanxinxin.dpdns.org/bianque/soa-shouye.user.js
-// @downloadURL  https://scripts.wanxinxin.dpdns.org/bianque/soa-shouye.user.js
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/bianque/soa-shouye.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/bianque/soa-shouye.user.js
 // ==/UserScript==
 
 /*

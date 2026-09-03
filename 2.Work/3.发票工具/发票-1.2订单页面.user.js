@@ -10,8 +10,8 @@
 // @author       WanXin
 // @publishGroup fapiao
 // @publishID    fapiao-dingdan
-// @updateURL    https://scripts.wanxinxin.dpdns.org/fapiao/fapiao-dingdan.user.js
-// @downloadURL  https://scripts.wanxinxin.dpdns.org/fapiao/fapiao-dingdan.user.js
+// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/fapiao/fapiao-dingdan.user.js
+// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/fapiao/fapiao-dingdan.user.js
 // ==/UserScript==
 
 /*
