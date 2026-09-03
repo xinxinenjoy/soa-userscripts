@@ -536,36 +536,73 @@ jobs:
               return (1, str(value or "").lower())
 
 
-          # Cloudflare 页面采用两级分区：源文件夹 → 1.x / 2.x / 3.x 系列
+          # 页面展示名称与仓库真实路径解耦。
+          # 这里可以按需增加“源码目录 -> 页面分类名称”的映射。
+          FOLDER_LABEL_OVERRIDES = {
+              "2.Work/1.扁鹊SOA": "扁鹊 SOA",
+          }
+
+
+          def folder_display_name(folder):
+              folder = str(folder or "").strip()
+
+              if folder in FOLDER_LABEL_OVERRIDES:
+                  return FOLDER_LABEL_OVERRIDES[folder]
+
+              if not folder or folder == "根目录":
+                  return "其他工具"
+
+              # 默认只取最后一级目录，并去掉“1.”、“2-”一类仓库排序前缀。
+              name = folder.replace("\\", "/").rstrip("/").split("/")[-1]
+              name = re.sub(r"^\d+[._、\-\s]*", "", name).strip()
+
+              # 中文名称与 SOA 连写时增加空格，仅影响页面展示。
+              name = re.sub(r"(?<=[\u4e00-\u9fff])SOA$", " SOA", name)
+
+              return name or folder
+
+
+          # Cloudflare 页面采用两级分区：业务分类 → 1.x / 2.x / 3.x
+          # 仓库真实目录仅用于后台识别，不直接展示给访客。
           page_groups = {}
 
           for item in items:
               series = detect_series(item["name"])
               item["series_group"] = series
+              item["folder_label"] = folder_display_name(item["display_folder"])
 
               page_groups.setdefault(
                   item["display_folder"], {}
               ).setdefault(series, []).append(item)
 
           buttons = [
-              '<button class="filter active" data-group="all">全部</button>'
+              '<button class="filter active" data-group="all">全部脚本</button>'
           ]
 
-          for folder in sorted(page_groups, key=str.lower):
+          for folder in sorted(
+              page_groups,
+              key=lambda value: folder_display_name(value).lower(),
+          ):
               folder_count = sum(
                   len(group_items)
                   for group_items in page_groups[folder].values()
               )
+              folder_label = folder_display_name(folder)
+
               buttons.append(
                   f'<button class="filter" data-group="{h(folder)}">'
-                  f'{h(folder)} · {folder_count}'
+                  f'{h(folder_label)} <span>{folder_count}</span>'
                   '</button>'
               )
 
           page_sections = []
 
-          for folder in sorted(page_groups, key=str.lower):
+          for folder in sorted(
+              page_groups,
+              key=lambda value: folder_display_name(value).lower(),
+          ):
               series_map = page_groups[folder]
+              folder_label = folder_display_name(folder)
               folder_count = sum(
                   len(group_items)
                   for group_items in series_map.values()
@@ -587,25 +624,25 @@ jobs:
                       search_text = " ".join([
                           item["name"],
                           item["description"],
-                          item["display_group"],
-                          item["display_folder"],
+                          item["folder_label"],
                           item["series_group"],
-                          item["publish_id"],
                       ]).lower()
+
+                      modified_date = (
+                          item["modified_at"].split(" ", 1)[0]
+                          if item["modified_at"] and item["modified_at"] != "-"
+                          else "-"
+                      )
 
                       cards.append(
                           f"""
                           <article class="script-card"
                                    data-folder="{h(item["display_folder"])}"
                                    data-series="{h(item["series_group"])}"
+                                   data-script-id="{h(item["publish_id"])}"
                                    data-search="{h(search_text)}">
                             <div class="script-card-head">
-                              <div class="script-title-wrap">
-                                <span class="script-category">
-                                  {h(item["series_group"])} 系列
-                                </span>
-                                <h3>{h(item["name"])}</h3>
-                              </div>
+                              <h3>{h(item["name"])}</h3>
                               <span class="script-version">v{h(item["version"])}</span>
                             </div>
 
@@ -613,22 +650,26 @@ jobs:
                               {h(item["description"]) or "暂无功能说明"}
                             </p>
 
-                            <div class="script-meta">
-                              <span>更新：{h(item["modified_at"])}</span>
-                              <span>ID：{h(item["publish_id"])}</span>
-                            </div>
+                            <div class="script-card-foot">
+                              <div class="script-meta">
+                                <span>更新 {h(modified_date)}</span>
+                                <span class="install-count" hidden>
+                                  安装 <strong>0</strong> 次
+                                </span>
+                              </div>
 
-                            <div class="script-actions">
-                              <a class="button button-primary"
-                                 href="{h(item["install_url"])}">
-                                立即安装
-                              </a>
-                              <a class="button button-secondary"
-                                 href="{h(item["github_source"])}"
-                                 target="_blank"
-                                 rel="noopener noreferrer">
-                                查看源码
-                              </a>
+                              <div class="script-actions">
+                                <a class="button button-primary"
+                                   href="{h(item["install_url"])}">
+                                  立即安装
+                                </a>
+                                <a class="button button-secondary"
+                                   href="{h(item["github_source"])}"
+                                   target="_blank"
+                                   rel="noopener noreferrer">
+                                  查看源码
+                                </a>
+                              </div>
                             </div>
                           </article>
                           """
@@ -642,7 +683,7 @@ jobs:
                         <div class="series-head">
                           <div class="series-title-wrap">
                             <span class="series-badge">{h(series)}</span>
-                            <h3>{h(series)} 系列</h3>
+                            <span class="series-name">脚本组</span>
                           </div>
                           <span class="series-count">{len(group_items)} 个脚本</span>
                         </div>
@@ -659,8 +700,8 @@ jobs:
                   <section class="folder-group" data-folder="{h(folder)}">
                     <div class="folder-head">
                       <div>
-                        <p class="folder-eyebrow">SOURCE FOLDER</p>
-                        <h2>{h(folder)}</h2>
+                        <p class="folder-eyebrow">脚本分类</p>
+                        <h2>{h(folder_label)}</h2>
                       </div>
                       <span class="folder-count">{folder_count} 个脚本</span>
                     </div>
@@ -1146,6 +1187,13 @@ jobs:
                 white-space: nowrap;
               }}
 
+              .filter span {{
+                margin-left: 4px;
+                opacity: .72;
+                font-size: 11px;
+                font-weight: 800;
+              }}
+
               .filter.active {{
                 color: #fff;
                 border-color: var(--accent);
@@ -1153,16 +1201,55 @@ jobs:
               }}
 
               .scripts-content {{
-                padding: 8px 0 42px;
+                padding: 10px 0 42px;
+              }}
+
+              .stats-section {{
+                padding: 6px 0 18px;
+              }}
+
+              .stats-section.hidden {{
+                display: none;
+              }}
+
+              .stats-panel {{
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 12px;
+                padding: 16px;
+                border: 1px solid var(--line);
+                border-radius: var(--radius-lg);
+                background: rgba(255, 255, 255, .84);
+              }}
+
+              .stat-item {{
+                min-width: 0;
+                padding: 4px 12px;
+              }}
+
+              .stat-item + .stat-item {{
+                border-left: 1px solid var(--line);
+              }}
+
+              .stat-label {{
+                display: block;
+                margin-bottom: 5px;
+                color: var(--muted);
+                font-size: 12px;
+              }}
+
+              .stat-value {{
+                display: block;
+                overflow: hidden;
+                font-size: 20px;
+                font-weight: 850;
+                line-height: 1.35;
+                text-overflow: ellipsis;
+                white-space: nowrap;
               }}
 
               .folder-group {{
-                margin-bottom: 26px;
-                padding: 26px;
-                border: 1px solid var(--line);
-                border-radius: var(--radius-xl);
-                background: rgba(255, 255, 255, .72);
-                box-shadow: 0 10px 28px rgba(23, 28, 38, .04);
+                margin-bottom: 34px;
               }}
 
               .folder-group.hidden,
@@ -1175,14 +1262,12 @@ jobs:
                 gap: 18px;
                 align-items: flex-end;
                 justify-content: space-between;
-                margin-bottom: 22px;
-                padding-bottom: 18px;
-                border-bottom: 1px solid var(--line);
+                margin-bottom: 18px;
               }}
 
               .folder-head h2 {{
-                margin: 3px 0 0;
-                font-size: 27px;
+                margin: 4px 0 0;
+                font-size: 26px;
                 line-height: 1.3;
               }}
 
@@ -1191,7 +1276,7 @@ jobs:
                 color: var(--accent);
                 font-size: 11px;
                 font-weight: 850;
-                letter-spacing: .08em;
+                letter-spacing: .06em;
               }}
 
               .folder-count,
@@ -1204,7 +1289,7 @@ jobs:
 
               .folder-series {{
                 display: grid;
-                gap: 26px;
+                gap: 24px;
               }}
 
               .series-group {{
@@ -1216,28 +1301,24 @@ jobs:
                 gap: 12px;
                 align-items: center;
                 justify-content: space-between;
-                margin-bottom: 13px;
+                margin-bottom: 12px;
+                padding-bottom: 10px;
+                border-bottom: 1px solid var(--line);
               }}
 
               .series-title-wrap {{
                 display: flex;
-                gap: 10px;
+                gap: 9px;
                 align-items: center;
-              }}
-
-              .series-title-wrap h3 {{
-                margin: 0;
-                font-size: 18px;
-                line-height: 1.35;
               }}
 
               .series-badge {{
                 display: inline-flex;
-                min-width: 46px;
+                min-width: 48px;
                 height: 28px;
                 align-items: center;
                 justify-content: center;
-                padding: 0 10px;
+                padding: 0 11px;
                 border-radius: 999px;
                 color: var(--accent);
                 background: var(--accent-soft);
@@ -1245,28 +1326,36 @@ jobs:
                 font-weight: 850;
               }}
 
+              .series-name {{
+                color: var(--text);
+                font-size: 15px;
+                font-weight: 800;
+              }}
+
               .script-grid {{
                 display: grid;
                 grid-template-columns: repeat(2, minmax(0, 1fr));
-                gap: 16px;
+                gap: 14px;
               }}
 
               .script-card {{
                 display: flex;
-                min-height: 246px;
+                min-height: 218px;
                 flex-direction: column;
-                padding: 23px;
+                padding: 21px;
                 border: 1px solid var(--line);
                 border-radius: var(--radius-lg);
                 background: var(--panel);
-                box-shadow: 0 8px 22px rgba(23, 28, 38, .035);
+                box-shadow: 0 7px 20px rgba(23, 28, 38, .03);
                 transition:
                   transform .16s ease,
-                  box-shadow .16s ease;
+                  box-shadow .16s ease,
+                  border-color .16s ease;
               }}
 
               .script-card:hover {{
                 transform: translateY(-2px);
+                border-color: #d9dde5;
                 box-shadow: var(--shadow);
               }}
 
@@ -1281,19 +1370,9 @@ jobs:
                 justify-content: space-between;
               }}
 
-              .script-title-wrap {{
-                min-width: 0;
-              }}
-
-              .script-category {{
-                color: var(--accent);
-                font-size: 12px;
-                font-weight: 800;
-              }}
-
               .script-card h3 {{
-                margin: 7px 0 0;
-                font-size: 20px;
+                margin: 0;
+                font-size: 19px;
                 line-height: 1.45;
               }}
 
@@ -1308,25 +1387,37 @@ jobs:
               }}
 
               .script-description {{
-                margin: 15px 0 0;
+                display: -webkit-box;
+                overflow: hidden;
+                margin: 13px 0 0;
                 color: var(--muted);
-                line-height: 1.72;
+                line-height: 1.68;
+                -webkit-box-orient: vertical;
+                -webkit-line-clamp: 2;
+              }}
+
+              .script-card-foot {{
+                margin-top: auto;
+                padding-top: 18px;
               }}
 
               .script-meta {{
                 display: flex;
                 flex-wrap: wrap;
-                gap: 8px 15px;
-                margin-top: auto;
-                padding-top: 18px;
+                gap: 8px 14px;
                 color: #969ca9;
                 font-size: 12px;
               }}
 
+              .install-count strong {{
+                color: var(--text);
+                font-weight: 800;
+              }}
+
               .script-actions {{
                 display: flex;
-                gap: 10px;
-                margin-top: 17px;
+                gap: 9px;
+                margin-top: 14px;
               }}
 
               .guide {{
@@ -1387,6 +1478,15 @@ jobs:
               }}
 
               @media (max-width: 760px) {{
+                .stats-panel {{
+                  grid-template-columns: 1fr;
+                }}
+
+                .stat-item + .stat-item {{
+                  border-top: 1px solid var(--line);
+                  border-left: 0;
+                }}
+
                 .hero {{
                   padding-top: 24px;
                 }}
@@ -1607,15 +1707,33 @@ jobs:
               </div>
             </section>
 
+            <section class="stats-section hidden" id="usage-stats">
+              <div class="wrap">
+                <div class="stats-panel">
+                  <div class="stat-item">
+                    <span class="stat-label">页面访问</span>
+                    <strong class="stat-value" id="stats-visits">-</strong>
+                  </div>
+                  <div class="stat-item">
+                    <span class="stat-label">脚本安装</span>
+                    <strong class="stat-value" id="stats-installs">-</strong>
+                  </div>
+                  <div class="stat-item">
+                    <span class="stat-label">热门地区</span>
+                    <strong class="stat-value" id="stats-region">-</strong>
+                  </div>
+                </div>
+              </div>
+            </section>
+
             <section class="section" id="scripts">
               <div class="wrap">
                 <div class="section-head">
                   <div>
-                    <h2 class="section-title">脚本列表</h2>
+                    <h2 class="section-title">脚本中心</h2>
                     <p class="section-desc">
-                      按源代码文件夹分区展示；同一文件夹内再按脚本编号自动划分为
-                      1.x、2.x、3.x 等系列。也可通过上方筛选或搜索快速定位。
-                      “立即安装”使用本站固定 Cloudflare 地址，后续自动更新地址保持一致。
+                      按业务分类整理，再以 1.x、2.x、3.x 等脚本组区分功能。
+                      仓库目录和脚本 ID 不再展示，只保留使用时真正需要的信息。
                     </p>
                   </div>
                 </div>
@@ -1628,7 +1746,7 @@ jobs:
                   id="search"
                   class="search"
                   type="search"
-                  placeholder="搜索脚本名称、文件夹、系列、说明或 ID..."
+                  placeholder="搜索脚本名称、分类或功能说明..."
                   autocomplete="off"
                 >
                 <div class="filters">
@@ -1692,6 +1810,10 @@ jobs:
                 const filters = [...document.querySelectorAll(".filter")];
                 const empty = document.getElementById("empty");
                 const ua = navigator.userAgent;
+                const statsSection = document.getElementById("usage-stats");
+                const statsVisits = document.getElementById("stats-visits");
+                const statsInstalls = document.getElementById("stats-installs");
+                const statsRegion = document.getElementById("stats-region");
 
                 let activeGroup = "all";
                 let browser = "";
@@ -1711,6 +1833,87 @@ jobs:
 
                   if (recommended) {{
                     recommended.classList.add("recommended");
+                  }}
+                }}
+
+                function formatNumber(value) {{
+                  const number = Number(value);
+
+                  if (!Number.isFinite(number)) {{
+                    return "-";
+                  }}
+
+                  return new Intl.NumberFormat("zh-CN").format(number);
+                }}
+
+                async function loadStats() {{
+                  try {{
+                    const response = await fetch("/api/stats", {{
+                      cache: "no-store"
+                    }});
+
+                    if (!response.ok) {{
+                      return;
+                    }}
+
+                    const data = await response.json();
+                    const hasVisits = Number.isFinite(Number(data.totalVisits));
+                    const hasInstalls = Number.isFinite(Number(data.totalInstalls));
+
+                    let regionText = "";
+
+                    if (data.topRegion && typeof data.topRegion === "object") {{
+                      const regionName = data.topRegion.name || "";
+                      const regionCount = Number(data.topRegion.count);
+
+                      if (regionName) {{
+                        regionText = Number.isFinite(regionCount)
+                          ? regionName + " · " + formatNumber(regionCount) + " 次"
+                          : regionName;
+                      }}
+                    }} else if (typeof data.topRegion === "string") {{
+                      regionText = data.topRegion;
+                    }}
+
+                    if (hasVisits) {{
+                      statsVisits.textContent = formatNumber(data.totalVisits);
+                    }}
+
+                    if (hasInstalls) {{
+                      statsInstalls.textContent = formatNumber(data.totalInstalls);
+                    }}
+
+                    if (regionText) {{
+                      statsRegion.textContent = regionText;
+                    }}
+
+                    if (hasVisits || hasInstalls || regionText) {{
+                      statsSection.classList.remove("hidden");
+                    }}
+
+                    const scriptInstalls =
+                      data.scriptInstalls && typeof data.scriptInstalls === "object"
+                        ? data.scriptInstalls
+                        : {{}};
+
+                    cards.forEach(card => {{
+                      const scriptId = card.dataset.scriptId;
+                      const count = Number(scriptInstalls[scriptId]);
+
+                      if (!Number.isFinite(count)) {{
+                        return;
+                      }}
+
+                      const target = card.querySelector(".install-count");
+                      const strong = target?.querySelector("strong");
+
+                      if (target && strong) {{
+                        strong.textContent = formatNumber(count);
+                        target.hidden = false;
+                      }}
+                    }});
+                  }} catch (_) {{
+                    // 统计后端尚未启用时保持页面正常，不显示空统计区。
                   }}
                 }}
 
@@ -1763,6 +1966,7 @@ jobs:
                 }});
 
                 search.addEventListener("input", refresh);
+                loadStats();
               }})();
             </script>
           </body>
