@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         扁鹊-1.2订单智能审批
 // @namespace    https://tampermonkey.net/
-// @version      2.4
-// @description  SOA智能审批：合同严格验证、其他阶段轻量推进、文件上传、落单审核及完成后自动复制落单数据。
+// @version      2.5
+// @description  SOA智能审批：合同严格验证、落单阶段自动回正、文件上传、审批推进及完成后自动复制落单数据。
 
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
@@ -27,6 +27,11 @@
  * - 面板支持显示开关、拖动、折叠、位置记忆和网页提示记录。
  *
  * 更新记录
+ *
+ * v2.5  -  2026-9-3
+ * - 修复落单审核短暂进入“落单中”后又真实回到“落单审核”时持续等待的问题；检测到落单审核操作已重新可用后自动回正并继续处理。
+ * - “网页提示”改为可选择/复制的只读文本框；增加一键复制，手动上翻记录时不再被新提示强制拉回底部。
+ * - 保持合同阶段严格复核，其余已稳定阶段逻辑不额外加严。
  *
  * v2.4  -  2026-9-2
  * - 非合同阶段改为轻量推进验证：短暂阶段回显/倒退不再立即报错，只等待真正向后续阶段稳定推进。
@@ -246,6 +251,9 @@
     WEB_NOTICE_CLEAR_ID:
       "__soa_flow_web_notice_clear_v114",
 
+    WEB_NOTICE_COPY_ID:
+      "__soa_flow_web_notice_copy_v25",
+
     FLOW_STAGE_LABEL_ID:
       "__soa_flow_stage_label_v16",
     FLOW_STAGE_VALUE_ID:
@@ -279,6 +287,14 @@
   let webNoticeObserver = null;
   let webNoticeScanScheduled = false;
   let webNoticeHistory = [];
+
+  /*
+   * 用户主动向上翻网页提示时暂停自动跟随底部。
+   * 只有滚动条重新回到底部附近，后续新提示才继续自动下滚。
+   */
+  let webNoticeAutoFollow =
+    true;
+
   let webNoticeSeen = new WeakMap();
   let lastWebNoticeSignature = "";
   let lastWebNoticeAt = 0;
@@ -426,6 +442,17 @@
     }
   }
 
+  function getWebNoticeText() {
+    return webNoticeHistory
+      .map(
+        item =>
+          `[${item.time}] ${item.type}：${item.text}`
+      )
+      .join(
+        "\n"
+      );
+  }
+
   function renderWebNoticeHistory() {
     const wrapper =
       document.getElementById(
@@ -450,8 +477,18 @@
       wrapper.style.display =
         "none";
 
-      list.textContent =
-        "";
+      if (
+        "value" in list
+      ) {
+        list.value =
+          "";
+      } else {
+        list.textContent =
+          "";
+      }
+
+      webNoticeAutoFollow =
+        true;
 
       return;
     }
@@ -459,15 +496,101 @@
     wrapper.style.display =
       "block";
 
-    list.textContent =
-      webNoticeHistory
-        .map(item =>
-          `[${item.time}] ${item.type}：${item.text}`
-        )
-        .join("\n");
+    const wasNearBottom =
+      (
+        list.scrollHeight -
+        list.scrollTop -
+        list.clientHeight
+      ) <=
+      8;
 
-    list.scrollTop =
-      list.scrollHeight;
+    const shouldFollow =
+      webNoticeAutoFollow ||
+      wasNearBottom;
+
+    const text =
+      getWebNoticeText();
+
+    if (
+      "value" in list
+    ) {
+      list.value =
+        text;
+    } else {
+      list.textContent =
+        text;
+    }
+
+    if (shouldFollow) {
+      list.scrollTop =
+        list.scrollHeight;
+
+      webNoticeAutoFollow =
+        true;
+    }
+  }
+
+  async function copyWebNoticeHistory() {
+    const text =
+      getWebNoticeText();
+
+    if (!text) {
+      updatePanelStatus(
+        "当前没有网页提示可复制"
+      );
+
+      return false;
+    }
+
+    try {
+      await navigator.clipboard.writeText(
+        text
+      );
+
+      updatePanelStatus(
+        "✓ 网页提示已复制到剪贴板",
+        "success"
+      );
+
+      return true;
+    } catch (_) {
+      const list =
+        document.getElementById(
+          UI.WEB_NOTICE_LIST_ID
+        );
+
+      if (
+        list &&
+        typeof list.select ===
+          "function"
+      ) {
+        list.focus();
+        list.select();
+
+        try {
+          const ok =
+            document.execCommand(
+              "copy"
+            );
+
+          if (ok) {
+            updatePanelStatus(
+              "✓ 网页提示已复制到剪贴板",
+              "success"
+            );
+
+            return true;
+          }
+        } catch (_) {}
+      }
+
+      updatePanelStatus(
+        "网页提示复制失败，可在记录框内手动选择后复制",
+        "error"
+      );
+
+      return false;
+    }
   }
 
   function syncWebNoticeOrderContext() {
@@ -749,6 +872,9 @@
 
   function resetWebNoticeHistory() {
     webNoticeHistory = [];
+
+    webNoticeAutoFollow =
+      true;
     webNoticeSeen =
       new WeakMap();
 
@@ -7070,13 +7196,60 @@
       oldIndex;
   }
 
+  function isLandingReviewReadyForResync() {
+    if (
+      getCurrentFlowStage() !==
+        "落单审核"
+    ) {
+      return false;
+    }
+
+    const modal =
+      getVisibleApprovalModal();
+
+    if (modal) {
+      const confirm =
+        findModalConfirmButton(
+          modal
+        );
+
+      return Boolean(
+        confirm &&
+        !confirm.disabled &&
+        !confirm.classList.contains(
+          "ant-btn-loading"
+        )
+      );
+    }
+
+    const action =
+      findBottomActionByText(
+        "确认落单"
+      ) ||
+      findBottomPrimaryAction();
+
+    return Boolean(
+      action &&
+      isVisible(
+        action
+      ) &&
+      !action.disabled &&
+      !action.classList.contains(
+        "ant-btn-loading"
+      )
+    );
+  }
+
   async function waitForStageChange(
     oldStage,
     token = null,
     {
       strict =
         oldStage ===
-          "合同补充"
+          "合同补充",
+
+      allowLandingReviewResync =
+        false
     } = {}
   ) {
     const timeout =
@@ -7089,6 +7262,9 @@
       "";
 
     let transientSince =
+      0;
+
+    let resyncReadyCount =
       0;
 
     const nextStage =
@@ -7105,6 +7281,9 @@
               "";
 
             transientSince =
+              0;
+
+            resyncReadyCount =
               0;
 
             return null;
@@ -7124,6 +7303,40 @@
             )
           ) {
             return stage;
+          }
+
+          /*
+           * 针对已实际观察到的场景：
+           * 落单审核提交后页面曾短暂进入“落单中”，
+           * 随后又真实回到“落单审核”并重新出现可操作按钮。
+           *
+           * 这时继续死等“已落单”没有意义；
+           * 当落单审核页面连续两次被确认“可操作”后，
+           * 自动把流程重新同步回落单审核，相当于自动完成
+           * 用户原先的“停止 -> 再启动”操作。
+           *
+           * 仅对 oldStage=落单中 生效，不扩展到其他阶段。
+           */
+          if (
+            allowLandingReviewResync &&
+            oldStage ===
+              "落单中" &&
+            stage ===
+              "落单审核" &&
+            isLandingReviewReadyForResync()
+          ) {
+            resyncReadyCount +=
+              1;
+
+            if (
+              resyncReadyCount >=
+                2
+            ) {
+              return stage;
+            }
+          } else {
+            resyncReadyCount =
+              0;
           }
 
           if (
@@ -7190,8 +7403,17 @@
                 );
               }
 
+              const resyncText =
+                (
+                  allowLandingReviewResync &&
+                  current ===
+                    "落单审核"
+                )
+                  ? "；正在确认是否需要自动回到落单审核继续处理"
+                  : "";
+
               return (
-                `当前阶段=${current || "未识别"}${transientText}`
+                `当前阶段=${current || "未识别"}${transientText}${resyncText}`
               );
             }
         }
@@ -7806,13 +8028,31 @@
             "流程处于“落单中”，等待网页实际完成落单..."
           );
 
-          await waitForStageChange(
-            "落单中",
-            token,
-            {
-              strict: false
-            }
-          );
+          const observedStage =
+            await waitForStageChange(
+              "落单中",
+              token,
+              {
+                strict:
+                  false,
+
+                allowLandingReviewResync:
+                  true
+              }
+            );
+
+          if (
+            observedStage ===
+              "落单审核"
+          ) {
+            log(
+              "检测到“落单中”未稳定并重新回到可操作的“落单审核”，已自动重新同步流程。"
+            );
+
+            updatePanelStatus(
+              "检测到流程重新回到“落单审核”，正在自动继续处理..."
+            );
+          }
 
           continue;
         }
@@ -8607,7 +8847,7 @@
           min-width:0;
           font-size:15px;
         ">
-          智能审批 v2.4
+          智能审批 v2.5
         </strong>
 
         <button
@@ -9131,7 +9371,7 @@
             align-items:center;
             justify-content:space-between;
             gap:8px;
-            margin-bottom:3px;
+            margin-bottom:5px;
           ">
             <span style="
               color:#096dd9;
@@ -9141,39 +9381,81 @@
               网页提示
             </span>
 
-            <button
-              id="${UI.WEB_NOTICE_CLEAR_ID}"
-              type="button"
-              style="
-                flex:0 0 auto;
-                height:20px;
-                padding:0 6px;
-                border:1px solid #ffccc7;
-                border-radius:4px;
-                background:#fff;
-                color:#cf1322;
-                font-size:10px;
-                line-height:18px;
-                cursor:pointer;
-              "
-              title="清空当前订单的网页提示记录"
-            >
-              清空
-            </button>
+            <div style="
+              display:flex;
+              align-items:center;
+              gap:5px;
+            ">
+              <button
+                id="${UI.WEB_NOTICE_COPY_ID}"
+                type="button"
+                style="
+                  flex:0 0 auto;
+                  height:21px;
+                  padding:0 7px;
+                  border:1px solid #91d5ff;
+                  border-radius:4px;
+                  background:#fff;
+                  color:#096dd9;
+                  font-size:10px;
+                  line-height:19px;
+                  cursor:pointer;
+                "
+                title="复制全部网页提示记录"
+              >
+                复制
+              </button>
+
+              <button
+                id="${UI.WEB_NOTICE_CLEAR_ID}"
+                type="button"
+                style="
+                  flex:0 0 auto;
+                  height:21px;
+                  padding:0 7px;
+                  border:1px solid #ffccc7;
+                  border-radius:4px;
+                  background:#fff;
+                  color:#cf1322;
+                  font-size:10px;
+                  line-height:19px;
+                  cursor:pointer;
+                "
+                title="清空当前订单的网页提示记录"
+              >
+                清空
+              </button>
+            </div>
           </div>
 
-          <div
+          <textarea
             id="${UI.WEB_NOTICE_LIST_ID}"
+            readonly
+            spellcheck="false"
             style="
-              max-height:62px;
+              display:block;
+              width:100%;
+              height:82px;
+              min-height:58px;
+              max-height:150px;
+              box-sizing:border-box;
+              margin:0;
+              padding:4px 6px;
+              border:1px solid #d6efff;
+              border-radius:4px;
+              outline:none;
+              resize:vertical;
               overflow:auto;
-              color:#555;
-              font-size:11px;
-              line-height:1.45;
-              white-space:pre-wrap;
-              word-break:break-all;
+              background:#fff;
+              color:#444;
+              font-family:Consolas, 'Microsoft YaHei', monospace;
+              font-size:10.5px;
+              line-height:1.5;
+              white-space:pre;
+              user-select:text;
+              cursor:text;
             "
-          ></div>
+          ></textarea>
         </div>
 
         </div>
@@ -9190,6 +9472,43 @@
     enablePanelDragging(
       panel
     );
+
+    const webNoticeList =
+      document.getElementById(
+        UI.WEB_NOTICE_LIST_ID
+      );
+
+    webNoticeList
+      ?.addEventListener(
+        "scroll",
+        () => {
+          const distanceToBottom =
+            webNoticeList.scrollHeight -
+            webNoticeList.scrollTop -
+            webNoticeList.clientHeight;
+
+          webNoticeAutoFollow =
+            distanceToBottom <=
+            8;
+        },
+        {
+          passive:
+            true
+        }
+      );
+
+    document
+      .getElementById(
+        UI.WEB_NOTICE_COPY_ID
+      )
+      ?.addEventListener(
+        "click",
+        event => {
+          event.stopPropagation();
+
+          copyWebNoticeHistory();
+        }
+      );
 
     document
       .getElementById(
@@ -10164,6 +10483,6 @@
   routeCheck();
 
   console.log(
-    "[SOA智能审批] v2.4 已加载"
+    "[SOA智能审批] v2.5 已加载"
   );
 })();
