@@ -2,7 +2,7 @@
 // @name         扁鹊-1.2订单智能审批
 // @namespace    https://tampermonkey.net/
 // @version      2.5
-// @description  SOA智能审批：合同严格验证、落单阶段自动回正、文件上传、审批推进及完成后自动复制落单数据。
+// @description  SOA订单智能审批：自动推进审批流程，合同阶段会自动导入提前选择好的文件。
 
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none

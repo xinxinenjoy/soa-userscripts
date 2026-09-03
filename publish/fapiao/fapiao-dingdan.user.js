@@ -2,7 +2,7 @@
 // @name         发票-1.2订单页面
 // @namespace    https://tampermonkey.net/soa-order-invoice/
 // @version      1.6
-// @description  SOA订单发票列表页面增强：列重排、宽度调整、文案替换、复制优化。
+// @description  发票订单页面：优化SOA发票页面的表格布局，此脚本处理的是通过某个订单进入的开票页面。与全局开票脚本互不影响。
 
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
