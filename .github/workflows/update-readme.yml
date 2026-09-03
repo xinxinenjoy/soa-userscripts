@@ -683,7 +683,6 @@ jobs:
                         <div class="series-head">
                           <div class="series-title-wrap">
                             <span class="series-badge">{h(series)}</span>
-                            <span class="series-name">脚本组</span>
                           </div>
                           <span class="series-count">{len(group_items)} 个脚本</span>
                         </div>
@@ -1326,12 +1325,6 @@ jobs:
                 font-weight: 850;
               }}
 
-              .series-name {{
-                color: var(--text);
-                font-size: 15px;
-                font-weight: 800;
-              }}
-
               .script-grid {{
                 display: grid;
                 grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1732,7 +1725,7 @@ jobs:
                   <div>
                     <h2 class="section-title">脚本中心</h2>
                     <p class="section-desc">
-                      按业务分类整理，再以 1.x、2.x、3.x 等脚本组区分功能。
+                      按业务分类整理，再以 1.x、2.x、3.x 等编号区分功能。
                       仓库目录和脚本 ID 不再展示，只保留使用时真正需要的信息。
                     </p>
                   </div>
