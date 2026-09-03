@@ -1,7 +1,7 @@
 // Cloudflare Pages Function
 // 保存路径：functions/api/stats.js
 //
-// V4 首页统计：
+// V5 首页统计（页面访问已由 track.js 做 48 小时同 IP 去重）：
 // - 页面访问总次数
 // - 脚本安装点击总次数
 // - 国内地区 TOP 5
