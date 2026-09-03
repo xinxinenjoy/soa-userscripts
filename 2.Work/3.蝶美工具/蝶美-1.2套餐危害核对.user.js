@@ -12,8 +12,8 @@
 // @author       WanXin
 // @publishGroup diemei
 // @publishID    diemei-weihaihedui
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/diemei/diemei-weihaihedui.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/diemei/diemei-weihaihedui.user.js
+// @updateURL    https://scripts.wanxinxin.dpdns.org/diemei/diemei-weihaihedui.user.js
+// @downloadURL  https://scripts.wanxinxin.dpdns.org/diemei/diemei-weihaihedui.user.js
 // ==/UserScript==
 
 /*

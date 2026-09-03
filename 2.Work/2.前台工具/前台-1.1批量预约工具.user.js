@@ -11,8 +11,8 @@
 // @author       WanXin
 // @publishGroup qiantai
 // @publishID    qiantai-piliangyuyue
-// @updateURL    https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/qiantai/qiantai-piliangyuyue.user.js
-// @downloadURL  https://raw.gitcode.com/gcw_7DpHPfUr/wanxin-userscripts/raw/main/publish/qiantai/qiantai-piliangyuyue.user.js
+// @updateURL    https://scripts.wanxinxin.dpdns.org/qiantai/qiantai-piliangyuyue.user.js
+// @downloadURL  https://scripts.wanxinxin.dpdns.org/qiantai/qiantai-piliangyuyue.user.js
 // ==/UserScript==
 
 /*
