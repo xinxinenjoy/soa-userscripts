@@ -2,7 +2,7 @@
 // @name         发票-1.1全局页面
 // @namespace    https://tampermonkey.net/
 // @version      6.14
-// @description  优化SOA发票页面的表格布局、文案显示和复制功能，支持动态加载内容的处理。
+// @description  发票全局页面：优化SOA发票页面的表格布局，全局指的是通过左上角订单中心-订单开票进入的开票页面，需要自行手动维护对应的单位名称才可以正常显示。请在代码内搜索“文案替换表”自行配置。
 
 // @match        https://checkup-soa3.health-100.cn/*
 // @grant        none
@@ -49,6 +49,7 @@ const COLUMN_LAYOUT = [
     { header: "发票类型", width: 100 },
   ];
 
+// 文案替换表，左侧为原文，值为替换后的文案。仅在单元格中出现时才会替换，不会影响其他位置的文本。
   const TEXT_REPLACE = {
     "全电普通发票（电子）": "电子普票",
     "待提交审批": "❓核对后提交",

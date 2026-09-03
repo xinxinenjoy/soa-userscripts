@@ -2,7 +2,7 @@
 // @name         扁鹊-1.4对账报表导出
 // @namespace    https://tampermonkey.net/
 // @version      1.6
-// @description  SOA对账报表：支持自定义日期、自动分段、体检名单自动读取、金额差异核对与分段导出。
+// @description  SOA对账报表：支持自定义日期区间，突破3年的时间段限制，自动分段查询、导出。并自动对比报表与订单内的数据差异。
 
 // @match        https://checkup-soa3.health-100.cn/*
 // @match        https://app-fly.health-100.cn/*

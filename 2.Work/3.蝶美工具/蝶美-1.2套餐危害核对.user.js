@@ -2,7 +2,7 @@
 // @name         蝶美-1.2套餐危害核对
 // @namespace    https://dime.health-100.cn/
 // @version      4.2.15
-// @description  增强“套餐危害核对”功能，提供自动化核对、批量处理、用户自定义别名和忽略列表等功能。
+// @description  蝶美套餐危害核对：提供自动化核对、批量处理、自动选择等功能。注意：套餐名称的标准格式应为：XX-危害1+危害2+危害3+岗中+男，不保证能识别其他格式。
 
 // @match        https://dime.health-100.cn/*
 // @run-at       document-idle
