@@ -334,6 +334,7 @@ jobs:
           )
 
           latest_text = latest["modified_at"] if latest else "-"
+          page_generated_at = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
 
 
           # 4. README
@@ -659,8 +660,9 @@ jobs:
                               </div>
 
                               <div class="script-actions">
-                                <a class="button button-primary"
-                                   href="{h(item["install_url"])}">
+                                <a class="button button-primary script-install-link"
+                                   href="{h(item["install_url"])}"
+                                   data-script-id="{h(item["publish_id"])}">
                                   立即安装
                                 </a>
                                 <a class="button button-secondary"
@@ -796,6 +798,21 @@ jobs:
                 background:
                   linear-gradient(135deg, #ffffff 0%, #fff7f7 100%);
                 box-shadow: var(--shadow);
+              }}
+
+              .page-updated {{
+                position: absolute;
+                z-index: 2;
+                top: 20px;
+                right: 22px;
+                padding: 7px 10px;
+                border: 1px solid rgba(229, 72, 77, .10);
+                border-radius: 999px;
+                color: #8b7379;
+                background: rgba(255, 255, 255, .78);
+                font-size: 11px;
+                font-weight: 700;
+                backdrop-filter: blur(8px);
               }}
 
               .hero-panel::after {{
@@ -1204,7 +1221,7 @@ jobs:
               }}
 
               .stats-section {{
-                padding: 6px 0 18px;
+                padding: 6px 0 24px;
               }}
 
               .stats-section.hidden {{
@@ -1245,6 +1262,176 @@ jobs:
                 line-height: 1.35;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+              }}
+
+              .region-summary {{
+                grid-column: 1 / -1;
+                display: flex;
+                gap: 14px;
+                align-items: center;
+                padding: 14px 12px 2px;
+                border-top: 1px solid var(--line);
+              }}
+
+              .region-summary-label {{
+                flex: 0 0 auto;
+                color: var(--muted);
+                font-size: 12px;
+                font-weight: 750;
+              }}
+
+              .region-chips {{
+                display: flex;
+                min-width: 0;
+                flex-wrap: wrap;
+                gap: 7px;
+              }}
+
+              .region-chip {{
+                padding: 6px 9px;
+                border-radius: 999px;
+                color: #6f5960;
+                background: var(--accent-soft);
+                font-size: 11px;
+                font-weight: 750;
+              }}
+
+              .stats-detail-grid {{
+                display: grid;
+                grid-template-columns: minmax(0, 1.7fr) minmax(220px, .65fr) minmax(220px, .65fr);
+                gap: 12px;
+                margin-top: 12px;
+              }}
+
+              .stats-card {{
+                min-width: 0;
+                padding: 18px;
+                border: 1px solid var(--line);
+                border-radius: var(--radius-lg);
+                background: rgba(255, 255, 255, .84);
+              }}
+
+              .stats-card-head {{
+                display: flex;
+                gap: 14px;
+                align-items: flex-start;
+                justify-content: space-between;
+                margin-bottom: 14px;
+              }}
+
+              .stats-card-title {{
+                margin: 0;
+                font-size: 15px;
+                font-weight: 850;
+                line-height: 1.4;
+              }}
+
+              .stats-card-note {{
+                margin: 4px 0 0;
+                color: var(--muted);
+                font-size: 11px;
+                line-height: 1.45;
+              }}
+
+              .trend-legend {{
+                display: flex;
+                flex: 0 0 auto;
+                gap: 10px;
+                align-items: center;
+                color: var(--muted);
+                font-size: 11px;
+                font-weight: 700;
+              }}
+
+              .trend-legend-item {{
+                display: inline-flex;
+                gap: 5px;
+                align-items: center;
+              }}
+
+              .trend-dot {{
+                width: 8px;
+                height: 8px;
+                border-radius: 999px;
+              }}
+
+              .trend-dot.visits {{
+                background: #e5484d;
+              }}
+
+              .trend-dot.installs {{
+                background: #4d78df;
+              }}
+
+              .trend-canvas-wrap {{
+                position: relative;
+                width: 100%;
+                min-height: 238px;
+              }}
+
+              #trend-chart {{
+                display: block;
+                width: 100%;
+                height: 238px;
+              }}
+
+              .ranking-list {{
+                display: grid;
+                gap: 3px;
+                margin: 0;
+                padding: 0;
+                list-style: none;
+              }}
+
+              .ranking-item {{
+                display: grid;
+                grid-template-columns: 24px minmax(0, 1fr) auto;
+                gap: 8px;
+                align-items: center;
+                min-height: 36px;
+                padding: 6px 0;
+                border-bottom: 1px solid #f0f1f4;
+              }}
+
+              .ranking-item:last-child {{
+                border-bottom: 0;
+              }}
+
+              .ranking-index {{
+                display: inline-flex;
+                width: 22px;
+                height: 22px;
+                align-items: center;
+                justify-content: center;
+                border-radius: 7px;
+                color: var(--accent);
+                background: var(--accent-soft);
+                font-size: 10px;
+                font-weight: 850;
+              }}
+
+              .ranking-name {{
+                overflow: hidden;
+                color: var(--text);
+                font-size: 12px;
+                font-weight: 750;
+                line-height: 1.4;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+              }}
+
+              .ranking-count {{
+                color: var(--muted);
+                font-size: 11px;
+                font-weight: 750;
+                white-space: nowrap;
+              }}
+
+              .ranking-empty {{
+                padding: 28px 0;
+                color: var(--muted);
+                font-size: 12px;
+                text-align: center;
               }}
 
               .folder-group {{
@@ -1480,6 +1667,35 @@ jobs:
                   border-left: 0;
                 }}
 
+                .region-summary {{
+                  align-items: flex-start;
+                  flex-direction: column;
+                  gap: 8px;
+                }}
+
+                .stats-detail-grid {{
+                  grid-template-columns: 1fr;
+                }}
+
+                .stats-card-head {{
+                  align-items: flex-start;
+                  flex-direction: column;
+                }}
+
+                .trend-canvas-wrap,
+                #trend-chart {{
+                  min-height: 210px;
+                  height: 210px;
+                }}
+
+                .page-updated {{
+                  position: relative;
+                  top: auto;
+                  right: auto;
+                  display: inline-flex;
+                  margin-bottom: 14px;
+                }}
+
                 .hero {{
                   padding-top: 24px;
                 }}
@@ -1542,6 +1758,8 @@ jobs:
             <header class="hero">
               <div class="wrap">
                 <div class="hero-panel">
+                  <div class="page-updated">页面更新 {h(page_generated_at)}</div>
+
                   <div class="brand-row">
                     <img class="brand-avatar"
                          src="{h(SITE_ICON)}"
@@ -1715,6 +1933,57 @@ jobs:
                     <span class="stat-label">热门地区</span>
                     <strong class="stat-value" id="stats-region">-</strong>
                   </div>
+
+                  <div class="region-summary" id="region-summary" hidden>
+                    <span class="region-summary-label">国内访问 TOP 5</span>
+                    <div class="region-chips" id="region-chips"></div>
+                  </div>
+                </div>
+
+                <div class="stats-detail-grid" id="stats-details" hidden>
+                  <section class="stats-card">
+                    <div class="stats-card-head">
+                      <div>
+                        <h3 class="stats-card-title">最近 14 天趋势</h3>
+                        <p class="stats-card-note">页面访问与脚本安装点击</p>
+                      </div>
+
+                      <div class="trend-legend" aria-label="趋势图图例">
+                        <span class="trend-legend-item">
+                          <span class="trend-dot visits"></span>
+                          页面访问
+                        </span>
+                        <span class="trend-legend-item">
+                          <span class="trend-dot installs"></span>
+                          脚本安装
+                        </span>
+                      </div>
+                    </div>
+
+                    <div class="trend-canvas-wrap">
+                      <canvas id="trend-chart"></canvas>
+                    </div>
+                  </section>
+
+                  <section class="stats-card">
+                    <div class="stats-card-head">
+                      <div>
+                        <h3 class="stats-card-title">热门脚本</h3>
+                        <p class="stats-card-note">按安装点击次数排序</p>
+                      </div>
+                    </div>
+                    <ol class="ranking-list" id="top-scripts"></ol>
+                  </section>
+
+                  <section class="stats-card">
+                    <div class="stats-card-head">
+                      <div>
+                        <h3 class="stats-card-title">热门城市</h3>
+                        <p class="stats-card-note">仅统计中国大陆访问</p>
+                      </div>
+                    </div>
+                    <ol class="ranking-list" id="top-cities"></ol>
+                  </section>
                 </div>
               </div>
             </section>
@@ -1807,8 +2076,22 @@ jobs:
                 const statsVisits = document.getElementById("stats-visits");
                 const statsInstalls = document.getElementById("stats-installs");
                 const statsRegion = document.getElementById("stats-region");
+                const regionSummary = document.getElementById("region-summary");
+                const regionChips = document.getElementById("region-chips");
+                const statsDetails = document.getElementById("stats-details");
+                const trendCanvas = document.getElementById("trend-chart");
+                const topScriptsList = document.getElementById("top-scripts");
+                const topCitiesList = document.getElementById("top-cities");
+                const installLinks = [...document.querySelectorAll(".script-install-link")];
+                const scriptNameMap = new Map(
+                  cards.map(card => [
+                    card.dataset.scriptId,
+                    card.querySelector("h3")?.textContent?.trim() || card.dataset.scriptId
+                  ])
+                );
 
                 let activeGroup = "all";
+                let trendData = [];
                 let browser = "";
 
                 if (ua.includes("Edg/")) {{
@@ -1837,6 +2120,216 @@ jobs:
                   }}
 
                   return new Intl.NumberFormat("zh-CN").format(number);
+                }}
+
+                function trackEvent(eventType, scriptId = "") {{
+                  const payload = JSON.stringify({{
+                    eventType,
+                    scriptId
+                  }});
+
+                  if (navigator.sendBeacon) {{
+                    try {{
+                      navigator.sendBeacon("/api/track", payload);
+                      return;
+                    }} catch (_) {{
+                    }}
+                  }}
+
+                  fetch("/api/track", {{
+                    method: "POST",
+                    headers: {{
+                      "Content-Type": "application/json"
+                    }},
+                    body: payload,
+                    keepalive: true
+                  }}).catch(() => {{}});
+                }}
+
+                function niceMax(value) {{
+                  const n = Math.max(1, Number(value) || 1);
+                  const power = Math.pow(10, Math.floor(Math.log10(n)));
+                  const normalized = n / power;
+
+                  let nice = 1;
+                  if (normalized <= 1) nice = 1;
+                  else if (normalized <= 2) nice = 2;
+                  else if (normalized <= 5) nice = 5;
+                  else nice = 10;
+
+                  return nice * power;
+                }}
+
+                function shortDate(value) {{
+                  const parts = String(value || "").split("-");
+                  if (parts.length !== 3) return value || "";
+                  return Number(parts[1]) + "/" + Number(parts[2]);
+                }}
+
+                function drawTrendChart() {{
+                  if (!trendCanvas || !trendData.length) {{
+                    return;
+                  }}
+
+                  const rect = trendCanvas.getBoundingClientRect();
+                  const width = Math.max(320, rect.width || 640);
+                  const height = Math.max(200, rect.height || 238);
+                  const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+
+                  trendCanvas.width = Math.round(width * dpr);
+                  trendCanvas.height = Math.round(height * dpr);
+
+                  const ctx = trendCanvas.getContext("2d");
+                  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                  ctx.clearRect(0, 0, width, height);
+
+                  const padding = {{
+                    top: 16,
+                    right: 12,
+                    bottom: 30,
+                    left: 42
+                  }};
+
+                  const chartWidth = width - padding.left - padding.right;
+                  const chartHeight = height - padding.top - padding.bottom;
+
+                  const maxValue = niceMax(
+                    Math.max(
+                      1,
+                      ...trendData.map(item => Number(item.visits) || 0),
+                      ...trendData.map(item => Number(item.installs) || 0)
+                    )
+                  );
+
+                  const gridCount = 4;
+
+                  ctx.lineWidth = 1;
+                  ctx.font = "11px system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+                  ctx.textBaseline = "middle";
+
+                  for (let i = 0; i <= gridCount; i++) {{
+                    const ratio = i / gridCount;
+                    const y = padding.top + chartHeight * ratio;
+                    const value = Math.round(maxValue * (1 - ratio));
+
+                    ctx.beginPath();
+                    ctx.strokeStyle = "#eceef2";
+                    ctx.moveTo(padding.left, y);
+                    ctx.lineTo(width - padding.right, y);
+                    ctx.stroke();
+
+                    ctx.fillStyle = "#969ca9";
+                    ctx.textAlign = "right";
+                    ctx.fillText(
+                      new Intl.NumberFormat("zh-CN", {{
+                        notation: value >= 10000 ? "compact" : "standard",
+                        maximumFractionDigits: 1
+                      }}).format(value),
+                      padding.left - 8,
+                      y
+                    );
+                  }}
+
+                  const pointX = index => {{
+                    if (trendData.length <= 1) return padding.left;
+                    return padding.left +
+                      (chartWidth * index) / (trendData.length - 1);
+                  }};
+
+                  const pointY = value => {{
+                    const ratio = Math.max(0, Math.min(1, Number(value || 0) / maxValue));
+                    return padding.top + chartHeight * (1 - ratio);
+                  }};
+
+                  const labelIndexes = new Set([
+                    0,
+                    Math.floor((trendData.length - 1) / 3),
+                    Math.floor(((trendData.length - 1) * 2) / 3),
+                    trendData.length - 1
+                  ]);
+
+                  ctx.fillStyle = "#969ca9";
+                  ctx.textAlign = "center";
+                  ctx.textBaseline = "top";
+
+                  trendData.forEach((item, index) => {{
+                    if (!labelIndexes.has(index)) return;
+                    ctx.fillText(
+                      shortDate(item.date),
+                      pointX(index),
+                      height - padding.bottom + 9
+                    );
+                  }});
+
+                  function drawLine(key, color) {{
+                    ctx.beginPath();
+                    ctx.lineWidth = 2.25;
+                    ctx.lineJoin = "round";
+                    ctx.lineCap = "round";
+                    ctx.strokeStyle = color;
+
+                    trendData.forEach((item, index) => {{
+                      const x = pointX(index);
+                      const y = pointY(item[key]);
+
+                      if (index === 0) ctx.moveTo(x, y);
+                      else ctx.lineTo(x, y);
+                    }});
+
+                    ctx.stroke();
+
+                    trendData.forEach((item, index) => {{
+                      const x = pointX(index);
+                      const y = pointY(item[key]);
+
+                      ctx.beginPath();
+                      ctx.fillStyle = "#fff";
+                      ctx.strokeStyle = color;
+                      ctx.lineWidth = 1.7;
+                      ctx.arc(x, y, 2.7, 0, Math.PI * 2);
+                      ctx.fill();
+                      ctx.stroke();
+                    }});
+                  }}
+
+                  drawLine("visits", "#e5484d");
+                  drawLine("installs", "#4d78df");
+                }}
+
+                function renderRanking(container, items, nameResolver) {{
+                  if (!container) return;
+
+                  container.innerHTML = "";
+
+                  const source = Array.isArray(items) ? items.slice(0, 5) : [];
+
+                  if (!source.length) {{
+                    const emptyItem = document.createElement("li");
+                    emptyItem.className = "ranking-empty";
+                    emptyItem.textContent = "暂无数据";
+                    container.appendChild(emptyItem);
+                    return;
+                  }}
+
+                  source.forEach((item, index) => {{
+                    const li = document.createElement("li");
+                    li.className = "ranking-item";
+
+                    const rank = document.createElement("span");
+                    rank.className = "ranking-index";
+                    rank.textContent = String(index + 1);
+
+                    const name = document.createElement("span");
+                    name.className = "ranking-name";
+                    name.textContent = nameResolver(item);
+
+                    const count = document.createElement("span");
+                    count.className = "ranking-count";
+                    count.textContent = formatNumber(item.count) + " 次";
+
+                    li.append(rank, name, count);
+                    container.appendChild(li);
+                  }});
                 }}
 
                 async function loadStats() {{
@@ -1880,8 +2373,22 @@ jobs:
                       statsRegion.textContent = regionText;
                     }}
 
-                    if (hasVisits || hasInstalls || regionText) {{
-                      statsSection.classList.remove("hidden");
+                    const domesticRegions = Array.isArray(data.domesticRegions)
+                      ? data.domesticRegions.slice(0, 5)
+                      : [];
+
+                    if (domesticRegions.length) {{
+                      regionChips.innerHTML = domesticRegions
+                        .map(item => {{
+                          const name = String(item.name || "");
+                          const count = formatNumber(item.count);
+                          return '<span class="region-chip">' +
+                            name + " " + count +
+                            "</span>";
+                        }})
+                        .join("");
+
+                      regionSummary.hidden = false;
                     }}
 
                     const scriptInstalls =
@@ -1905,6 +2412,53 @@ jobs:
                         target.hidden = false;
                       }}
                     }});
+
+                    const topScripts = Array.isArray(data.topScripts)
+                      ? data.topScripts.slice(0, 5)
+                      : [];
+
+                    const domesticCities = Array.isArray(data.domesticCities)
+                      ? data.domesticCities.slice(0, 5)
+                      : [];
+
+                    renderRanking(
+                      topScriptsList,
+                      topScripts,
+                      item => scriptNameMap.get(item.scriptId) || item.scriptId || "未知脚本"
+                    );
+
+                    renderRanking(
+                      topCitiesList,
+                      domesticCities,
+                      item => String(item.name || "未知城市")
+                    );
+
+                    trendData = Array.isArray(data.recent14Days)
+                      ? data.recent14Days.slice(-14)
+                      : [];
+
+                    const hasDetailData =
+                      topScripts.length ||
+                      domesticCities.length ||
+                      trendData.some(item =>
+                        Number(item.visits) > 0 ||
+                        Number(item.installs) > 0
+                      );
+
+                    if (hasDetailData) {{
+                      statsDetails.hidden = false;
+                      requestAnimationFrame(drawTrendChart);
+                    }}
+
+                    if (
+                      hasVisits ||
+                      hasInstalls ||
+                      regionText ||
+                      domesticRegions.length ||
+                      hasDetailData
+                    ) {{
+                      statsSection.classList.remove("hidden");
+                    }}
                   }} catch (_) {{
                     // 统计后端尚未启用时保持页面正常，不显示空统计区。
                   }}
@@ -1959,6 +2513,24 @@ jobs:
                 }});
 
                 search.addEventListener("input", refresh);
+
+                installLinks.forEach(link => {{
+                  link.addEventListener("click", () => {{
+                    trackEvent(
+                      "install_click",
+                      link.dataset.scriptId || ""
+                    );
+                  }});
+                }});
+
+                let chartResizeTimer = null;
+
+                window.addEventListener("resize", () => {{
+                  clearTimeout(chartResizeTimer);
+                  chartResizeTimer = setTimeout(drawTrendChart, 120);
+                }});
+
+                trackEvent("page_view");
                 loadStats();
               }})();
             </script>
