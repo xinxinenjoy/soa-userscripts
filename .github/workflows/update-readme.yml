@@ -335,8 +335,9 @@ jobs:
 
           latest_text = latest["modified_at"] if latest else "-"
 
-          # 页面右上角显示“页面改版时间”，不是本次自动重新生成时间。
-          # 以 update-readme.yml 本身最后一次 Git 修改时间为准。
+          # 页面右上角显示“页面改版时间”。
+          # 取 update-readme.yml 本身最后一次 Git 修改时间，
+          # 普通脚本更新导致的自动重新生成不会改变它。
           page_modified_text, _ = source_modified(
               Path(".github/workflows/update-readme.yml")
           )
@@ -2676,24 +2677,22 @@ jobs:
             exit 0
           fi
 
-          # ----------------------------------------------------
-          # 使用触发 Build Userscripts 的原始提交标题。
-          #
-          # 示例：
-          #   用户：
-          #     优化智能审批模块的处理逻辑，避免卡住
-          #
-          #   自动主页：
-          #     [AUTO·主页] 优化智能审批模块的处理逻辑，避免卡住
-          # ----------------------------------------------------
           SOURCE_SHA="${WORKFLOW_SOURCE_SHA}"
 
-          if [[ -z "${SOURCE_SHA}" ]] || ! git cat-file -e "${SOURCE_SHA}^{commit}" 2>/dev/null; then
+          if [[ -z "${SOURCE_SHA}" ]] ||
+             ! git cat-file -e "${SOURCE_SHA}^{commit}" 2>/dev/null; then
             SOURCE_SHA="$(
               git log \
                 --format='%H%x09%s' \
-                -n 50 |
-              awk -F '\t' '$2 !~ /^\[AUTO·/ {print $1; exit}'
+                -n 80 |
+              awk -F '\t' '
+                $2 !~ /^\[AUTO·/ &&
+                $2 !~ /^\[auto-userscript-maintenance\]/ &&
+                $2 !~ /^\[auto-readme\]/ {
+                  print $1
+                  exit
+                }
+              '
             )"
           fi
 
