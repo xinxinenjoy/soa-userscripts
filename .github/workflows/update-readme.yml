@@ -1021,6 +1021,154 @@ jobs:
                 box-shadow: 0 8px 24px rgba(23, 28, 38, .045);
               }}
 
+              .tm-guide-details {{
+                margin-bottom: 16px;
+                border: 1px solid rgba(229, 72, 77, .18);
+                border-radius: var(--radius-lg);
+                background: rgba(255, 255, 255, .92);
+                overflow: hidden;
+              }}
+
+              .tm-guide-toggle {{
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                justify-content: space-between;
+                padding: 15px 17px;
+                color: #fff;
+                background: linear-gradient(135deg, #e5484d, #ef6469);
+                cursor: pointer;
+                list-style: none;
+                user-select: none;
+              }}
+
+              .tm-guide-toggle::-webkit-details-marker {{
+                display: none;
+              }}
+
+              .tm-guide-toggle-main {{
+                display: flex;
+                min-width: 0;
+                gap: 10px;
+                align-items: center;
+              }}
+
+              .tm-guide-toggle-icon {{
+                display: grid;
+                flex: 0 0 auto;
+                width: 30px;
+                height: 30px;
+                place-items: center;
+                border-radius: 50%;
+                color: var(--accent);
+                background: #fff;
+                font-size: 14px;
+                font-weight: 900;
+              }}
+
+              .tm-guide-toggle-text {{
+                min-width: 0;
+              }}
+
+              .tm-guide-toggle-title {{
+                display: block;
+                font-size: 14px;
+                font-weight: 850;
+                line-height: 1.35;
+              }}
+
+              .tm-guide-toggle-desc {{
+                display: block;
+                margin-top: 2px;
+                color: rgba(255, 255, 255, .82);
+                font-size: 11px;
+                line-height: 1.4;
+              }}
+
+              .tm-guide-toggle-action {{
+                flex: 0 0 auto;
+                font-size: 11px;
+                font-weight: 800;
+                opacity: .92;
+              }}
+
+              .tm-guide-toggle-action::after {{
+                content: "展开 ↓";
+              }}
+
+              .tm-guide-details[open] .tm-guide-toggle-action::after {{
+                content: "收起 ↑";
+              }}
+
+              .tm-guide-body {{
+                padding: 18px;
+                background: linear-gradient(
+                  135deg,
+                  rgba(255, 248, 248, .96),
+                  rgba(255, 255, 255, .98)
+                );
+              }}
+
+              .tm-guide-section + .tm-guide-section {{
+                margin-top: 17px;
+                padding-top: 16px;
+                border-top: 1px solid rgba(229, 72, 77, .10);
+              }}
+
+              .tm-guide-section h4 {{
+                margin: 0 0 9px;
+                color: var(--text);
+                font-size: 13px;
+                font-weight: 850;
+              }}
+
+              .tm-guide-list {{
+                display: grid;
+                gap: 7px;
+                margin: 0;
+                padding: 0;
+                list-style: none;
+              }}
+
+              .tm-guide-list li {{
+                position: relative;
+                padding-left: 18px;
+                color: #616775;
+                font-size: 12px;
+                line-height: 1.65;
+              }}
+
+              .tm-guide-list li::before {{
+                content: "✓";
+                position: absolute;
+                top: 0;
+                left: 0;
+                color: var(--accent);
+                font-weight: 900;
+              }}
+
+              .tm-guide-list strong {{
+                color: var(--text);
+              }}
+
+              .tm-guide-steps {{
+                margin: 0;
+                padding-left: 20px;
+                color: #616775;
+                font-size: 12px;
+                line-height: 1.8;
+              }}
+
+              .tm-guide-tip {{
+                margin: 10px 0 0;
+                padding: 10px 12px;
+                border-radius: 10px;
+                color: #7d6268;
+                background: rgba(229, 72, 77, .07);
+                font-size: 11px;
+                line-height: 1.6;
+              }}
+
               .tm-grid {{
                 display: grid;
                 grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1648,6 +1796,14 @@ jobs:
               }}
 
               @media (max-width: 900px) {{
+                .tm-guide-toggle {{
+                  align-items: flex-start;
+                }}
+
+                .tm-guide-toggle-action {{
+                  padding-top: 5px;
+                }}
+
                 .tm-grid {{
                   grid-template-columns: 1fr;
                 }}
@@ -1836,13 +1992,85 @@ jobs:
                   <div>
                     <h2 class="section-title">安装 Tampermonkey</h2>
                     <p class="section-desc">
-                      下面按钮直接前往 Crx搜搜 对应浏览器的 Tampermonkey 页面。
-                      国内网络访问更方便，可按页面提示选择在线安装或离线安装包。
+                      选择与你当前浏览器对应的版本安装；第一次使用如有疑问，点击下方教程查看完整步骤。
                     </p>
                   </div>
                 </div>
 
                 <div class="tm-panel">
+                  <details class="tm-guide-details">
+                    <summary class="tm-guide-toggle">
+                      <span class="tm-guide-toggle-main">
+                        <span class="tm-guide-toggle-icon">?</span>
+                        <span class="tm-guide-toggle-text">
+                          <span class="tm-guide-toggle-title">首次使用？查看完整安装教程</span>
+                          <span class="tm-guide-toggle-desc">
+                            浏览器选择、开发者模式、脚本安装和更新问题都在这里
+                          </span>
+                        </span>
+                      </span>
+                      <span class="tm-guide-toggle-action"></span>
+                    </summary>
+
+                    <div class="tm-guide-body">
+                      <div class="tm-guide-section">
+                        <h4>安装前先确认</h4>
+                        <ul class="tm-guide-list">
+                          <li>
+                            <strong>请使用电脑端常规浏览器打开本页。</strong>
+                            推荐 Chrome、Microsoft Edge、Firefox、360 等；
+                            不要使用微信、企业微信、QQ 等应用内置浏览器。
+                          </li>
+                          <li>
+                            <strong>请选择与你当前浏览器对应的 Tampermonkey。</strong>
+                            Chrome、Edge、Firefox 使用下方对应入口；
+                            360 等 Chromium 内核浏览器通常可优先尝试 Chrome 版。
+                          </li>
+                          <li>
+                            <strong>如果使用 CRX 离线安装，通常需要先开启“开发者模式”。</strong>
+                            在浏览器“扩展程序 / 扩展管理”页面开启后，再按 Crx搜搜提示安装。
+                            如果在线安装可以直接完成，则无需额外操作。
+                          </li>
+                        </ul>
+                      </div>
+
+                      <div class="tm-guide-section">
+                        <h4>安装用户脚本</h4>
+                        <ol class="tm-guide-steps">
+                          <li>先在下方安装并启用 Tampermonkey，建议固定到浏览器工具栏。</li>
+                          <li>返回本页，在需要的脚本卡片中点击“立即安装”。</li>
+                          <li>Tampermonkey 打开脚本确认页后，核对脚本名称并点击“安装”。</li>
+                          <li>打开脚本对应的网站并刷新页面，即可开始使用。</li>
+                        </ol>
+                      </div>
+
+                      <div class="tm-guide-section">
+                        <h4>更新与常见问题</h4>
+                        <ul class="tm-guide-list">
+                          <li>
+                            <strong>脚本会自动检查新版。</strong>
+                            也可以打开 Tampermonkey 管理面板，手动执行“检查用户脚本更新”。
+                          </li>
+                          <li>
+                            <strong>新版刚发布但暂时没有检测到时，</strong>
+                            先等待 GitHub Actions 与 Cloudflare Pages 部署完成；
+                            如需立即更新，可以重新点击该脚本的“立即安装”覆盖安装。
+                          </li>
+                          <li>
+                            <strong>点击脚本后如果只是下载文件或直接显示代码，</strong>
+                            通常表示 Tampermonkey 尚未正确安装、未启用，
+                            或当前浏览器不支持用户脚本，请先检查扩展状态。
+                          </li>
+                        </ul>
+
+                        <p class="tm-guide-tip">
+                          公司电脑或受统一策略管理的浏览器可能禁止安装第三方扩展。
+                          如果浏览器提示“由组织管理”或禁止扩展安装，需要先确认本机浏览器策略。
+                        </p>
+                      </div>
+                    </div>
+                  </details>
+
                   <div class="tm-grid">
                     <article class="tm-card" data-browser="chrome">
                       <div class="tm-card-top">
@@ -1904,9 +2132,8 @@ jobs:
 
                   <div class="tm-note">
                     <span>
-                      页面会根据当前浏览器自动标记推荐安装入口。
-                      Crx搜搜聚合 Chrome、Edge、Firefox 扩展资源，并提供在线安装与离线安装方式；
-                      实际安装步骤请以 Crx搜搜页面提示为准。
+                      页面会自动识别当前浏览器并标记推荐入口。
+                      如果在线安装失败，可在 Crx搜搜页面查看对应浏览器的离线安装说明。
                     </span>
                     <a href="{h(TAMPERMONKEY_STORE)}"
                        target="_blank"
@@ -2025,37 +2252,6 @@ jobs:
                 <div id="empty" class="empty">没有找到匹配的脚本。</div>
               </div>
             </main>
-
-            <section class="wrap guide">
-              <h2>使用与更新说明</h2>
-
-              <details open>
-                <summary>如何安装脚本</summary>
-                <ol>
-                  <li>先在上方安装与你浏览器对应的 Tampermonkey 正式版。</li>
-                  <li>返回本页，在脚本列表中点击“立即安装”。</li>
-                  <li>Tampermonkey 打开安装页面后，确认脚本名称并点击“安装”。</li>
-                  <li>打开脚本对应的网站并刷新页面即可使用。</li>
-                </ol>
-              </details>
-
-              <details>
-                <summary>如何检查脚本更新</summary>
-                <p>
-                  打开 Tampermonkey 管理面板，点击“检查用户脚本更新”。
-                  脚本会通过固定的 @updateURL 比较远程和本地 @version；
-                  发现新版后通过 @downloadURL 获取更新。
-                </p>
-              </details>
-
-              <details>
-                <summary>新版刚发布但暂时没有检测到</summary>
-                <p>
-                  请先等待 GitHub Actions 与 Cloudflare Pages 部署完成。
-                  如果希望立即更新，也可以重新点击对应脚本的“立即安装”按钮覆盖安装。
-                </p>
-              </details>
-            </section>
 
             <footer class="footer">
               <div class="wrap">
