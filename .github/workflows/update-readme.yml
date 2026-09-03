@@ -944,47 +944,62 @@ jobs:
                 line-height: 1.7;
               }}
 
-              .steps {{
+              .quick-start-flow {{
                 display: grid;
                 grid-template-columns: repeat(3, minmax(0, 1fr));
-                gap: 12px;
-                margin-top: 16px;
-              }}
-
-              .step {{
-                display: flex;
-                gap: 12px;
-                align-items: flex-start;
-                padding: 17px;
+                gap: 0;
+                margin-bottom: 16px;
+                overflow: hidden;
                 border: 1px solid var(--line);
                 border-radius: var(--radius-lg);
-                background: #fff;
+                background: #f8f9fb;
               }}
 
-              .step-number {{
+              .quick-start-item {{
+                position: relative;
+                display: flex;
+                min-width: 0;
+                gap: 10px;
+                align-items: center;
+                padding: 13px 15px;
+              }}
+
+              .quick-start-item + .quick-start-item {{
+                border-left: 1px solid var(--line);
+              }}
+
+              .quick-start-number {{
                 display: grid;
                 flex: 0 0 auto;
-                width: 30px;
-                height: 30px;
+                width: 27px;
+                height: 27px;
                 place-items: center;
                 border-radius: 50%;
                 color: #fff;
                 background: var(--accent);
-                font-size: 13px;
-                font-weight: 800;
+                font-size: 12px;
+                font-weight: 850;
               }}
 
-              .step strong {{
+              .quick-start-copy {{
+                min-width: 0;
+              }}
+
+              .quick-start-copy strong {{
                 display: block;
-                margin-bottom: 4px;
-                font-size: 14px;
+                font-size: 13px;
+                line-height: 1.4;
               }}
 
-              .step p {{
-                margin: 0;
+              .quick-start-copy span {{
+                display: block;
+                overflow: hidden;
+                margin-top: 2px;
                 color: var(--muted);
-                font-size: 13px;
-                line-height: 1.55;
+                font-size: 11px;
+                line-height: 1.45;
+                text-overflow: ellipsis;
+                white-space: nowrap;
               }}
 
               .tm-panel {{
@@ -1141,6 +1156,14 @@ jobs:
                 background: rgba(229, 72, 77, .07);
                 font-size: 11px;
                 line-height: 1.6;
+              }}
+
+              .tm-guide-link {{
+                display: inline-flex;
+                margin-top: 8px;
+                color: var(--accent);
+                font-size: 11px;
+                font-weight: 800;
               }}
 
               .tm-grid {{
@@ -1735,8 +1758,13 @@ jobs:
                   grid-template-columns: 1fr;
                 }}
 
-                .steps {{
+                .quick-start-flow {{
                   grid-template-columns: 1fr;
+                }}
+
+                .quick-start-item + .quick-start-item {{
+                  border-top: 1px solid var(--line);
+                  border-left: 0;
                 }}
               }}
 
@@ -1854,17 +1882,17 @@ jobs:
                   </div>
 
                   <p class="hero-copy">
-                    一个用于集中发布和维护 Tampermonkey 用户脚本的轻量主页。
-                    先安装脚本管理器，再点击下方脚本的“立即安装”即可使用；
-                    已安装脚本会通过固定地址自动检查后续更新。
+                    集中发布和维护 Tampermonkey 用户脚本。
+                    首次使用完成一次浏览器设置后，直接选择脚本安装即可；
+                    已安装脚本会自动检查后续更新。
                   </p>
 
                   <div class="hero-actions">
-                    <a class="button button-primary" href="#tampermonkey">
-                      先安装 Tampermonkey
-                    </a>
-                    <a class="button button-secondary" href="#scripts">
+                    <a class="button button-primary" href="#scripts">
                       浏览脚本
+                    </a>
+                    <a class="button button-secondary" href="#tampermonkey">
+                      首次使用指南
                     </a>
                     <a class="button button-secondary"
                        href="{h(GITHUB_REPO_URL)}"
@@ -1883,56 +1911,50 @@ jobs:
               </div>
             </header>
 
-            <section class="section">
-              <div class="wrap">
-                <div class="steps">
-                  <div class="step">
-                    <span class="step-number">1</span>
-                    <div>
-                      <strong>安装 Tampermonkey</strong>
-                      <p>按你的浏览器点击 Crx搜搜 安装入口。</p>
-                    </div>
-                  </div>
-
-                  <div class="step">
-                    <span class="step-number">2</span>
-                    <div>
-                      <strong>选择需要的脚本</strong>
-                      <p>找到脚本后点击“立即安装”。</p>
-                    </div>
-                  </div>
-
-                  <div class="step">
-                    <span class="step-number">3</span>
-                    <div>
-                      <strong>后续自动更新</strong>
-                      <p>脚本通过固定更新地址获取新版。</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-
             <section class="section" id="tampermonkey">
               <div class="wrap">
                 <div class="section-head">
                   <div>
-                    <h2 class="section-title">安装 Tampermonkey</h2>
+                    <h2 class="section-title">首次使用</h2>
                     <p class="section-desc">
-                      选择与你当前浏览器对应的版本安装；第一次使用如有疑问，点击下方教程查看完整步骤。
+                      第一次只需完成下面三步；以后直接在脚本中心安装和使用即可。
                     </p>
                   </div>
                 </div>
 
                 <div class="tm-panel">
+                  <div class="quick-start-flow" aria-label="首次使用流程">
+                    <div class="quick-start-item">
+                      <span class="quick-start-number">1</span>
+                      <div class="quick-start-copy">
+                        <strong>安装 Tampermonkey</strong>
+                        <span>选择当前浏览器对应版本</span>
+                      </div>
+                    </div>
+                    <div class="quick-start-item">
+                      <span class="quick-start-number">2</span>
+                      <div class="quick-start-copy">
+                        <strong>开启用户脚本权限</strong>
+                        <span>Chrome / Edge / 360 用户必看</span>
+                      </div>
+                    </div>
+                    <div class="quick-start-item">
+                      <span class="quick-start-number">3</span>
+                      <div class="quick-start-copy">
+                        <strong>安装需要的脚本</strong>
+                        <span>脚本中心点击“立即安装”</span>
+                      </div>
+                    </div>
+                  </div>
+
                   <details class="tm-guide-details">
                     <summary class="tm-guide-toggle">
                       <span class="tm-guide-toggle-main">
                         <span class="tm-guide-toggle-icon">?</span>
                         <span class="tm-guide-toggle-text">
-                          <span class="tm-guide-toggle-title">首次使用？查看完整安装教程</span>
+                          <span class="tm-guide-toggle-title">首次使用设置与故障排查</span>
                           <span class="tm-guide-toggle-desc">
-                            浏览器选择、开发者模式、脚本安装和更新问题都在这里
+                            用户脚本权限、开发者模式、自动更新与常见问题
                           </span>
                         </span>
                       </span>
@@ -1941,58 +1963,91 @@ jobs:
 
                     <div class="tm-guide-body">
                       <div class="tm-guide-section">
-                        <h4>安装前先确认</h4>
+                        <h4>浏览器与插件安装</h4>
                         <ul class="tm-guide-list">
                           <li>
                             <strong>请使用电脑端常规浏览器打开本页。</strong>
                             推荐 Chrome、Microsoft Edge、Firefox、360 等；
-                            不要使用微信、企业微信、QQ 等应用内置浏览器。
+                            微信、企业微信、QQ 等应用内置浏览器无法正常安装浏览器扩展。
                           </li>
                           <li>
                             <strong>请选择与你当前浏览器对应的 Tampermonkey。</strong>
-                            Chrome、Edge、Firefox 使用下方对应入口；
                             360 等 Chromium 内核浏览器通常可优先尝试 Chrome 版。
                           </li>
                           <li>
-                            <strong>如果使用 CRX 离线安装，通常需要先开启“开发者模式”。</strong>
-                            在浏览器“扩展程序 / 扩展管理”页面开启后，再按 Crx搜搜提示安装。
-                            如果在线安装可以直接完成，则无需额外操作。
+                            <strong>如果使用 CRX 离线安装，先开启浏览器“开发者模式”。</strong>
+                            再进入扩展管理页按 Crx搜搜说明安装；在线安装正常时不需要这一步。
                           </li>
                         </ul>
                       </div>
 
                       <div class="tm-guide-section">
-                        <h4>安装用户脚本</h4>
-                        <ol class="tm-guide-steps">
-                          <li>先在下方安装并启用 Tampermonkey，建议固定到浏览器工具栏。</li>
-                          <li>返回本页，在需要的脚本卡片中点击“立即安装”。</li>
-                          <li>Tampermonkey 打开脚本确认页后，核对脚本名称并点击“安装”。</li>
-                          <li>打开脚本对应的网站并刷新页面，即可开始使用。</li>
-                        </ol>
+                        <h4>关键权限设置：Chrome / Edge / 360 用户必看</h4>
+                        <ul class="tm-guide-list">
+                          <li>
+                            <strong>Tampermonkey 5.3+ 在 Chromium 浏览器中需要额外的用户脚本执行权限。</strong>
+                            Chrome 138+ 可在 Tampermonkey 的“管理扩展程序”页面开启“允许用户脚本”；
+                            如果没有这个开关，则开启浏览器扩展页面的“开发者模式”。
+                          </li>
+                          <li>
+                            <strong>Edge 或其他 Chromium 内核浏览器同样需要满足上述权限条件。</strong>
+                            不同浏览器的开关位置可能略有差异，设置完成后建议刷新目标网页。
+                          </li>
+                          <li>
+                            <strong>脚本安装成功但完全不运行时，优先检查这一项。</strong>
+                            这是目前 Chromium 浏览器最常见的首次使用遗漏。
+                          </li>
+                        </ul>
+                        <a class="tm-guide-link"
+                           href="https://www.tampermonkey.net/faq.php?locale=zh&amp;q=Q209"
+                           target="_blank"
+                           rel="noopener noreferrer">
+                          Tampermonkey 官方权限说明 ↗
+                        </a>
                       </div>
 
                       <div class="tm-guide-section">
-                        <h4>更新与常见问题</h4>
+                        <h4>Tampermonkey 内部设置</h4>
                         <ul class="tm-guide-list">
                           <li>
-                            <strong>脚本会自动检查新版。</strong>
-                            也可以打开 Tampermonkey 管理面板，手动执行“检查用户脚本更新”。
+                            <strong>确认 Tampermonkey 总开关和目标脚本开关均处于启用状态。</strong>
+                            建议把 Tampermonkey 固定到浏览器工具栏，方便随时查看当前页面是否有脚本运行。
                           </li>
                           <li>
-                            <strong>新版刚发布但暂时没有检测到时，</strong>
-                            先等待 GitHub Actions 与 Cloudflare Pages 部署完成；
-                            如需立即更新，可以重新点击该脚本的“立即安装”覆盖安装。
+                            <strong>建议保留用户脚本自动更新。</strong>
+                            新版 Tampermonkey 将“检查更新”和“自动安装更新”逐步分开；
+                            如果设置中出现“Automatic installation / 自动安装”，希望全自动更新时请保持开启。
                           </li>
                           <li>
-                            <strong>点击脚本后如果只是下载文件或直接显示代码，</strong>
-                            通常表示 Tampermonkey 尚未正确安装、未启用，
-                            或当前浏览器不支持用户脚本，请先检查扩展状态。
+                            <strong>一般不需要修改高级执行模式。</strong>
+                            Content Script API、沙箱等高级选项保持默认即可，除非某个脚本明确要求调整。
+                          </li>
+                        </ul>
+                      </div>
+
+                      <div class="tm-guide-section">
+                        <h4>安装脚本与常见问题</h4>
+                        <ol class="tm-guide-steps">
+                          <li>安装并启用 Tampermonkey，完成上面的用户脚本权限设置。</li>
+                          <li>进入脚本中心，在需要的脚本卡片中点击“立即安装”。</li>
+                          <li>Tampermonkey 打开确认页后，核对脚本名称并点击“安装”。</li>
+                          <li>打开脚本对应的网站并刷新页面即可使用。</li>
+                        </ol>
+                        <ul class="tm-guide-list" style="margin-top:10px;">
+                          <li>
+                            <strong>点击“立即安装”后只是下载文件或显示代码：</strong>
+                            先检查 Tampermonkey 是否已安装并启用，以及当前浏览器是否允许用户脚本。
+                          </li>
+                          <li>
+                            <strong>新版暂时没有检测到：</strong>
+                            等待 GitHub Actions 与 Cloudflare Pages 部署完成后再检查，
+                            或重新点击“立即安装”覆盖安装最新版。
                           </li>
                         </ul>
 
                         <p class="tm-guide-tip">
                           公司电脑或受统一策略管理的浏览器可能禁止安装第三方扩展。
-                          如果浏览器提示“由组织管理”或禁止扩展安装，需要先确认本机浏览器策略。
+                          如果浏览器提示“由组织管理”或扩展安装被禁用，需要先确认本机策略。
                         </p>
                       </div>
                     </div>
@@ -2243,10 +2298,49 @@ jobs:
                   return new Intl.NumberFormat("zh-CN").format(number);
                 }}
 
+                const DEVICE_ID_STORAGE_KEY = "wanxin_userscripts_device_id_v1";
+                let anonymousDeviceId = "";
+
+                function getAnonymousDeviceId() {{
+                  if (anonymousDeviceId) return anonymousDeviceId;
+
+                  const isValid = value =>
+                    /^[A-Za-z0-9._:-]{{8,120}}$/.test(String(value || ""));
+
+                  try {{
+                    const saved = localStorage.getItem(DEVICE_ID_STORAGE_KEY);
+                    if (isValid(saved)) {{
+                      anonymousDeviceId = saved;
+                      return anonymousDeviceId;
+                    }}
+                  }} catch (_) {{
+                  }}
+
+                  if (globalThis.crypto?.randomUUID) {{
+                    anonymousDeviceId = globalThis.crypto.randomUUID();
+                  }} else {{
+                    anonymousDeviceId =
+                      "d-" + Date.now().toString(36) + "-" +
+                      Math.random().toString(36).slice(2) + "-" +
+                      Math.random().toString(36).slice(2);
+                  }}
+
+                  try {{
+                    localStorage.setItem(
+                      DEVICE_ID_STORAGE_KEY,
+                      anonymousDeviceId
+                    );
+                  }} catch (_) {{
+                  }}
+
+                  return anonymousDeviceId;
+                }}
+
                 function trackEvent(eventType, scriptId = "") {{
                   const payload = JSON.stringify({{
                     eventType,
-                    scriptId
+                    scriptId,
+                    deviceId: getAnonymousDeviceId()
                   }});
 
                   if (navigator.sendBeacon) {{
@@ -2683,16 +2777,11 @@ jobs:
              ! git cat-file -e "${SOURCE_SHA}^{commit}" 2>/dev/null; then
             SOURCE_SHA="$(
               git log \
-                --format='%H%x09%s' \
-                -n 80 |
-              awk -F '\t' '
-                $2 !~ /^\[AUTO·/ &&
-                $2 !~ /^\[auto-userscript-maintenance\]/ &&
-                $2 !~ /^\[auto-readme\]/ {
-                  print $1
-                  exit
-                }
-              '
+                --format='%H' \
+                --extended-regexp \
+                --invert-grep \
+                --grep='^(\[AUTO·|\[auto-userscript-maintenance\]|\[auto-readme\])' \
+                -n 1
             )"
           fi
 

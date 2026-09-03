@@ -1,19 +1,24 @@
 // Cloudflare Pages Function
-// V5 统计事件采集
+// V6 统计事件采集
 // 保存路径：functions/api/track.js
 //
 // 页面访问统计规则：
-// - 同一公网 IP 在 48 小时内重复访问，只计 1 次 page_view。
-// - 48 小时后再次访问，可重新计 1 次。
-// - install_click 不做 IP 去重，每次点击“立即安装”都正常统计。
-// - 不保存原始 IP。
-// - 仅保存 HMAC-SHA256 后的临时 visitor_key，并自动清理旧记录。
+// - 以“匿名浏览器设备 ID + 当前公网 IP”作为一次访问设备的临时去重键。
+// - 同一设备、同一公网 IP 在 8 小时内重复访问，只计 1 次 page_view。
+// - 同一公网 IP 下，不同设备 / 不同浏览器配置可分别计数。
+// - 同一设备切换公网 IP 后，会按新的网络环境重新计数。
+// - install_click 不做去重，每次点击“立即安装”都正常累计。
+// - 不保存原始 IP，也不保存客户端匿名设备 ID。
+// - D1 仅保存 HMAC-SHA256 后的 visitor_key，并自动清理旧记录。
+//
+// 说明：匿名设备 ID 由首页在浏览器本地生成并保存，不读取硬件序列号，
+//      也不进行 Canvas / 字体等浏览器指纹采集。
 //
 // D1 Binding：STATS_DB
 // Secret / 环境变量：VISITOR_HASH_SECRET
 
-const PAGE_VIEW_DEDUPE_HOURS = 48;
-const VISITOR_RETENTION_HOURS = 72;
+const PAGE_VIEW_DEDUPE_HOURS = 8;
+const VISITOR_RETENTION_HOURS = 24;
 
 const DOMESTIC_COUNTRIES = new Set(["CN", "HK", "MO", "TW"]);
 
@@ -71,14 +76,30 @@ function looksLikeBot(ua) {
 }
 
 function getClientIp(request) {
-    // 在 Cloudflare Pages / Workers 中，CF-Connecting-IP 是访问者公网 IP。
-    // 原始 IP 只在当前请求内用于生成 HMAC，不写入数据库。
+    // 原始公网 IP 只在当前请求内用于生成 HMAC，不写入数据库。
     return clean(request.headers.get("CF-Connecting-IP"), 80);
 }
 
-async function makeVisitorKey(ip, secret) {
+function normalizeDeviceId(value) {
+    const id = clean(value, 120);
+
+    // 首页生成的 ID 只允许常见 UUID / 随机 token 字符。
+    // 无效值直接忽略，避免把任意长文本参与 visitor_key。
+    if (!/^[A-Za-z0-9._:-]{8,120}$/.test(id)) {
+        return "";
+    }
+
+    return id;
+}
+
+async function makeVisitorKey({ ip, deviceId, ua, secret }) {
     if (!ip || !secret) return "";
 
+    // 正常情况使用匿名设备 ID。
+    // 如果浏览器阻止本地存储导致 deviceId 缺失，退化为 UA，
+    // 仍保留一定的去重能力，但同网络同 UA 的设备可能被合并。
+    const devicePart = deviceId || `ua:${clean(ua, 280)}`;
+    const source = `${ip}\n${devicePart}`;
     const encoder = new TextEncoder();
 
     const key = await crypto.subtle.importKey(
@@ -95,7 +116,7 @@ async function makeVisitorKey(ip, secret) {
     const signature = await crypto.subtle.sign(
         "HMAC",
         key,
-        encoder.encode(ip)
+        encoder.encode(source)
     );
 
     return Array.from(new Uint8Array(signature))
@@ -105,8 +126,7 @@ async function makeVisitorKey(ip, secret) {
 
 async function shouldCountPageView(db, visitorKey) {
     if (!visitorKey) {
-        // 无法取得 visitor_key 时采用 fail-open：
-        // 正常统计这次访问，避免因为异常环境完全漏记。
+        // 无法得到去重键时 fail-open，避免异常环境完全漏记访问。
         return true;
     }
 
@@ -121,10 +141,7 @@ async function shouldCountPageView(db, visitorKey) {
            )
          LIMIT 1`
     )
-        .bind(
-            visitorKey,
-            `-${PAGE_VIEW_DEDUPE_HOURS} hours`
-        )
+        .bind(visitorKey, `-${PAGE_VIEW_DEDUPE_HOURS} hours`)
         .first();
 
     if (recent?.found) {
@@ -146,8 +163,7 @@ async function shouldCountPageView(db, visitorKey) {
         .bind(visitorKey)
         .run();
 
-    // visitor_key 只用于短期去重。
-    // 保留时间略长于去重窗口，避免长期保存可关联标识。
+    // visitor_key 仅用于短期去重，不长期保存。
     await db.prepare(
         `DELETE FROM page_visitors
          WHERE last_counted_at < strftime(
@@ -162,12 +178,7 @@ async function shouldCountPageView(db, visitorKey) {
     return true;
 }
 
-async function insertEvent({
-    db,
-    eventType,
-    scriptId,
-    request,
-}) {
+async function insertEvent({ db, eventType, scriptId, request }) {
     const requestUrl = new URL(request.url);
     const ua = request.headers.get("User-Agent") || "";
     const cf = request.cf || {};
@@ -222,37 +233,20 @@ export async function onRequestPost(context) {
     const { request, env } = context;
 
     if (!env.STATS_DB) {
-        return json(
-            {
-                ok: false,
-                error: "STATS_DB binding missing",
-            },
-            500
-        );
+        return json({ ok: false, error: "STATS_DB binding missing" }, 500);
     }
 
-    // 仅接受本站页面发起的请求，降低接口被外部刷写的概率。
     const requestUrl = new URL(request.url);
     const origin = request.headers.get("Origin");
 
     if (origin && origin !== requestUrl.origin) {
-        return json(
-            {
-                ok: false,
-                error: "invalid origin",
-            },
-            403
-        );
+        return json({ ok: false, error: "invalid origin" }, 403);
     }
 
     const ua = request.headers.get("User-Agent") || "";
 
     if (looksLikeBot(ua)) {
-        return json({
-            ok: true,
-            counted: false,
-            ignored: "bot",
-        });
+        return json({ ok: true, counted: false, ignored: "bot" });
     }
 
     let body = {};
@@ -261,25 +255,13 @@ export async function onRequestPost(context) {
         const raw = await request.text();
         body = raw ? JSON.parse(raw) : {};
     } catch {
-        return json(
-            {
-                ok: false,
-                error: "invalid json",
-            },
-            400
-        );
+        return json({ ok: false, error: "invalid json" }, 400);
     }
 
     const eventType = clean(body.eventType, 32);
 
     if (!["page_view", "install_click"].includes(eventType)) {
-        return json(
-            {
-                ok: false,
-                error: "invalid event",
-            },
-            400
-        );
+        return json({ ok: false, error: "invalid event" }, 400);
     }
 
     const scriptId =
@@ -288,35 +270,28 @@ export async function onRequestPost(context) {
             : "";
 
     if (eventType === "install_click" && !scriptId) {
-        return json(
-            {
-                ok: false,
-                error: "script id required",
-            },
-            400
-        );
+        return json({ ok: false, error: "script id required" }, 400);
     }
 
     // ========================================================
-    // 页面访问：同公网 IP 48 小时内只计 1 次
+    // 页面访问：同设备 + 同公网 IP，8 小时内只计 1 次
     // ========================================================
-
     if (eventType === "page_view") {
         if (!env.VISITOR_HASH_SECRET) {
             return json(
-                {
-                    ok: false,
-                    error: "VISITOR_HASH_SECRET missing",
-                },
+                { ok: false, error: "VISITOR_HASH_SECRET missing" },
                 500
             );
         }
 
         const ip = getClientIp(request);
-        const visitorKey = await makeVisitorKey(
+        const deviceId = normalizeDeviceId(body.deviceId);
+        const visitorKey = await makeVisitorKey({
             ip,
-            env.VISITOR_HASH_SECRET
-        );
+            deviceId,
+            ua,
+            secret: env.VISITOR_HASH_SECRET,
+        });
 
         const countThisVisit = await shouldCountPageView(
             env.STATS_DB,
@@ -329,6 +304,7 @@ export async function onRequestPost(context) {
                 counted: false,
                 ignored: "duplicate_page_view",
                 dedupeHours: PAGE_VIEW_DEDUPE_HOURS,
+                dedupeScope: "same_device_same_ip",
             });
         }
 
@@ -343,13 +319,13 @@ export async function onRequestPost(context) {
             ok: true,
             counted: true,
             eventType,
+            dedupeHours: PAGE_VIEW_DEDUPE_HOURS,
         });
     }
 
     // ========================================================
-    // 安装点击：不做 IP 去重，每次点击都计数
+    // 安装点击：不做去重，每次点击都计数
     // ========================================================
-
     await insertEvent({
         db: env.STATS_DB,
         eventType,
@@ -369,7 +345,8 @@ export async function onRequestGet() {
     return json({
         ok: true,
         endpoint: "WanXin Userscripts statistics tracker",
-        pageViewRule: `same IP counted once per ${PAGE_VIEW_DEDUPE_HOURS} hours`,
+        pageViewRule: `same browser device + same IP counted once per ${PAGE_VIEW_DEDUPE_HOURS} hours`,
         installRule: "every install click is counted",
+        privacy: "raw IP and client device ID are not stored",
     });
 }
