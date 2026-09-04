@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         蝶美-1.1单位信息填充
 // @namespace    https://dime.health-100.cn/
-// @version      7.7.24
-// @description  蝶美自动填充单位信息：支持地区、行业、经济类型、单位类型、社会信用代码、企业规模、职工人数、接害人数等字段。注意：仅内置了河南地区的标准地区数据，其他地区请自行在“地区”字段中输入完整路径（例如“北京市 / 东城区 / 东华门街道”）以确保正确选择。同时，要提前对填入的信息格式进行整理，否则会处理失败。
+// @version      7.8.3
+// @description  蝶美自动填充单位信息：按输入字段自适应填写，支持重复运行跳过、缺失字段跳过、行业/经济末级匹配、地区、单位类型、社会信用代码、企业规模及人数等字段。
 
 //
 // @match        https://dime.health-100.cn/*
@@ -21,8 +21,26 @@
 /*
  * 更新记录
  *
- * v7.7.23  -  2026-8-29
- * - 更新：测试版本
+ * v7.8.3  -  2026-9-4
+ * - 修复最后一个搜索/级联字段处理结束后下拉窗口可能残留的问题。
+ * - 行业类别、经济类型在成功选中后会主动安全收起自身弹层；失败时将本次已确认的弹层对象交给异常恢复逻辑定向关闭。
+ * - 整轮填写结束前再次检查本次异常字段的已知弹层，仅对仍残留的当前字段弹层执行一次安全收起，不触碰主业务弹窗。
+ *
+ * v7.8.2  -  2026-9-4
+ * - 修复连续处理普通下拉时误读取上一个字段弹层的问题：当前字段只接受自身aria关联弹层或本次点击后新出现的弹层。
+ * - 普通下拉选中后等待其对应弹层真正收起，再进入下一个字段，避免“单位类型→企业规模→报告同步扁鹊”之间串窗。
+ * - 字段异常时优先使用本次操作已确认的弹层对象定向收起，不再从页面全部可见弹层中猜测目标。
+ *
+ * v7.8.1  -  2026-9-4
+ * - 恢复默认填写：单位类型默认“用工单位”，报告同步扁鹊默认“是”；重复运行时先核对当前值，正确则不重复操作。
+ * - 输入数据未提供但当前页面存在的受支持字段会在填写前标红提示，不影响其他已提供字段继续处理。
+ * - 字段异常跳过时增强当前下拉/级联弹层的定向收起：优先关闭字段自身弹层，必要时点击当前业务弹窗标题区域触发失焦，不使用Esc、遮罩层或主弹窗取消/关闭。
+ *
+ * v7.8.0  -  2026-9-4
+ * - 改为按输入字段处理：未提供的字段不再自动填写，页面不存在的字段记录后跳过。
+ * - 增加重复运行保护：页面当前值已与目标一致时直接跳过，不重复打开下拉或重新选择。
+ * - 单个字段处理失败后安全释放当前字段并继续后续字段，不再因一个异常终止整次填写。
+ * - 行业类别/经济类型按最终层级名称匹配；修复名称中“、”被误当作层级分隔符的问题，同名三级/四级可正常选择，三级相同但四级不同仍以四级为准。
  *
  */
 
@@ -237,24 +255,107 @@
   }
 
   function resolvePopupForTrigger(trigger, beforePopups, itemSelector) {
-    const controlled = getControlledPopup(trigger);
-    if (controlled && (!itemSelector || controlled.querySelector(itemSelector))) {
+    const controlled =
+      getControlledPopup(
+        trigger
+      );
+
+    if (
+      controlled &&
+      (
+        !itemSelector ||
+        controlled.querySelector(
+          itemSelector
+        )
+      )
+    ) {
       return controlled;
     }
 
-    const candidates = getVisiblePopups()
-      .filter(popup => !itemSelector || popup.querySelector(itemSelector));
+    const candidates =
+      getVisiblePopups()
+        .filter(
+          popup =>
+            !itemSelector ||
+            popup.querySelector(
+              itemSelector
+            )
+        );
 
-    if (!candidates.length) return null;
+    if (!candidates.length) {
+      return null;
+    }
 
-    const newlyVisible = candidates.filter(popup => !beforePopups?.has(popup));
-    const pool = newlyVisible.length ? newlyVisible : candidates;
+    /*
+     * 如果调用方在点击当前控件前做了快照，
+     * 就只允许使用“本次点击后新出现”的popup。
+     *
+     * 旧逻辑在没有找到新popup时会退回页面上任意可见popup，
+     * 这会把上一字段尚未完全消失的下拉框误认为当前字段下拉框。
+     */
+    if (beforePopups) {
+      const newlyVisible =
+        candidates.filter(
+          popup =>
+            !beforePopups.has(
+              popup
+            )
+        );
 
-    return pool.sort((a, b) => {
-      const zDifference = getElementZIndex(b) - getElementZIndex(a);
-      if (zDifference) return zDifference;
-      return getElementDistance(a, trigger) - getElementDistance(b, trigger);
-    })[0] || null;
+      if (!newlyVisible.length) {
+        return null;
+      }
+
+      return newlyVisible
+        .sort(
+          (a, b) => {
+            const zDifference =
+              getElementZIndex(b) -
+              getElementZIndex(a);
+
+            if (zDifference) {
+              return zDifference;
+            }
+
+            return (
+              getElementDistance(
+                a,
+                trigger
+              ) -
+              getElementDistance(
+                b,
+                trigger
+              )
+            );
+          }
+        )[0] ||
+        null;
+    }
+
+    return candidates
+      .sort(
+        (a, b) => {
+          const zDifference =
+            getElementZIndex(b) -
+            getElementZIndex(a);
+
+          if (zDifference) {
+            return zDifference;
+          }
+
+          return (
+            getElementDistance(
+              a,
+              trigger
+            ) -
+            getElementDistance(
+              b,
+              trigger
+            )
+          );
+        }
+      )[0] ||
+      null;
   }
 
   function getBusinessScope() {
@@ -290,6 +391,212 @@
     if (!input) throw new Error(`找不到“${fieldConfig.aliases[0]}”输入框`);
     return input;
   }
+
+  function getFieldCurrentTexts(field) {
+    if (!field) return [];
+
+    const values = [];
+    const add = value => {
+      const text = cleanText(value)
+        .replace(/[×✕✖]\s*$/g, "")
+        .trim();
+
+      if (text) values.push(text);
+    };
+
+    [
+      ...field.querySelectorAll(
+        ".el-radio.is-checked .el-radio__label, " +
+        ".el-radio-button.is-active .el-radio-button__inner, " +
+        ".el-cascader__label, " +
+        ".el-select__selected-item, " +
+        ".el-cascader__tags .el-tag, " +
+        ".el-select__tags .el-tag, " +
+        ".el-tag__content"
+      )
+    ]
+      .filter(isVisible)
+      .forEach(element => {
+        add(
+          element.innerText ||
+          element.textContent
+        );
+      });
+
+    [
+      ...field.querySelectorAll(
+        "input:not([type='hidden']), textarea"
+      )
+    ]
+      .filter(isVisible)
+      .forEach(input => {
+        const isTransientSearch =
+          input.classList.contains(
+            "el-cascader__search-input"
+          ) ||
+          input.classList.contains(
+            "el-select__input"
+          ) ||
+          Boolean(
+            input.closest(
+              ".el-cascader__tags"
+            )
+          );
+
+        if (isTransientSearch) return;
+
+        add(input.value);
+      });
+
+    return [
+      ...new Set(
+        values
+          .map(cleanText)
+          .filter(Boolean)
+      )
+    ];
+  }
+
+  function getFieldDisplayedText(field) {
+    const texts =
+      getFieldCurrentTexts(field);
+
+    if (!texts.length) return "";
+
+    return [...texts]
+      .sort(
+        (a, b) =>
+          b.length - a.length
+      )[0];
+  }
+
+  function isTextFieldCurrentValue(
+    fieldConfig,
+    value
+  ) {
+    if (
+      value == null ||
+      value === ""
+    ) {
+      return false;
+    }
+
+    const field =
+      findFieldItem(
+        fieldConfig
+      );
+
+    if (!field) return false;
+
+    const input =
+      [...field.querySelectorAll(
+        "input:not([type='hidden']), textarea"
+      )]
+        .find(isVisible) ||
+      null;
+
+    return Boolean(
+      input &&
+      cleanText(
+        input.value
+      ) ===
+      cleanText(
+        value
+      )
+    );
+  }
+
+  function normalizeNumberText(
+    value
+  ) {
+    const text =
+      String(
+        value ?? ""
+      ).replace(
+        /[^\d.-]/g,
+        ""
+      );
+
+    if (!text) return "";
+
+    const number =
+      Number(text);
+
+    return Number.isFinite(
+      number
+    )
+      ? String(number)
+      : text;
+  }
+
+  function isNumberFieldCurrentValue(
+    fieldConfig,
+    value
+  ) {
+    if (
+      value == null ||
+      value === ""
+    ) {
+      return false;
+    }
+
+    const field =
+      findFieldItem(
+        fieldConfig
+      );
+
+    if (!field) return false;
+
+    const input =
+      [...field.querySelectorAll(
+        "input:not([type='hidden']), textarea"
+      )]
+        .find(isVisible) ||
+      null;
+
+    if (!input) return false;
+
+    return (
+      normalizeNumberText(
+        input.value
+      ) ===
+      normalizeNumberText(
+        value
+      )
+    );
+  }
+
+  function isOrdinaryFieldCurrentValue(
+    fieldConfig,
+    value
+  ) {
+    if (!value) return false;
+
+    const field =
+      findFieldItem(
+        fieldConfig
+      );
+
+    if (!field) return false;
+
+    const wanted =
+      normalizeOrdinaryOptionValue(
+        fieldConfig,
+        value
+      );
+
+    return getFieldCurrentTexts(
+      field
+    ).some(
+      text =>
+        normalizeOrdinaryOptionValue(
+          fieldConfig,
+          text
+        ) ===
+        wanted
+    );
+  }
+
 
   function clickElement(el) {
     if (!el) return;
@@ -838,44 +1145,152 @@
   function splitSearchPath(value) {
     return cleanText(value)
       .split(
-        /\s*(?:[\/／\\>＞→➜➡、|｜]+|[\r\n]+)\s*/
+        /\s*(?:[\/／\\>＞→➜➡|｜]+|[\r\n]+)\s*/
       )
       .map(cleanText)
       .filter(Boolean);
   }
 
+  function getSearchFinalLevelText(
+    value
+  ) {
+    const parts =
+      splitSearchPath(
+        value
+      );
+
+    return cleanText(
+      parts[
+        parts.length - 1
+      ] ||
+      value
+    );
+  }
+
+  function isSearchFinalLevelMatch(
+    candidateText,
+    wantedValue
+  ) {
+    const wanted =
+      normalizeText(
+        getSearchFinalLevelText(
+          wantedValue
+        )
+      );
+
+    const candidateFinal =
+      normalizeText(
+        getSearchFinalLevelText(
+          candidateText
+        )
+      );
+
+    return Boolean(
+      wanted &&
+      candidateFinal &&
+      candidateFinal ===
+        wanted
+    );
+  }
+
+  function isSearchFieldCurrentValue(
+    fieldConfig,
+    wantedValue
+  ) {
+    const field =
+      findFieldItem(
+        fieldConfig
+      );
+
+    if (!field) return false;
+
+    const texts = [
+      ...getFieldCurrentTexts(
+        field
+      ),
+      ...getCommittedSearchTexts(
+        field
+      )
+    ];
+
+    return [
+      ...new Set(texts)
+    ].some(
+      text =>
+        isSearchFinalLevelMatch(
+          text,
+          wantedValue
+        )
+    );
+  }
+
+
   function isExactSearchText(candidateText, wantedValue) {
-    const candidate = normalizeText(candidateText);
-    const wanted = normalizeText(wantedValue);
+    const candidate =
+      normalizeText(
+        candidateText
+      );
 
-    if (!candidate || !wanted) return false;
-    if (candidate === wanted) return true;
+    const wanted =
+      normalizeText(
+        wantedValue
+      );
 
-    const candidatePath = splitSearchPath(candidateText)
-      .map(normalizeText)
-      .filter(Boolean);
-
-    const wantedPath = splitSearchPath(wantedValue)
-      .map(normalizeText)
-      .filter(Boolean);
-
-    if (!candidatePath.length || !wantedPath.length) {
+    if (!candidate || !wanted) {
       return false;
     }
 
-    // 输入本身带完整路径时，要求整条路径完全相同。
+    if (candidate === wanted) {
+      return true;
+    }
+
+    const candidatePath =
+      splitSearchPath(
+        candidateText
+      )
+        .map(normalizeText)
+        .filter(Boolean);
+
+    const wantedPath =
+      splitSearchPath(
+        wantedValue
+      )
+        .map(normalizeText)
+        .filter(Boolean);
+
+    if (
+      !candidatePath.length ||
+      !wantedPath.length
+    ) {
+      return false;
+    }
+
+    /*
+     * 输入带完整层级路径时，仍要求整条路径一致。
+     */
     if (wantedPath.length > 1) {
       return (
-        candidatePath.length === wantedPath.length &&
+        candidatePath.length ===
+          wantedPath.length &&
         candidatePath.every(
-          (part, index) => part === wantedPath[index]
+          (part, index) =>
+            part ===
+            wantedPath[index]
         )
       );
     }
 
-    // 通常输入最后一级标准名称，只允许候选最后一级完全相同。
+    /*
+     * 输入只有一个已核对的标准名称时，以候选最后一级为准：
+     *
+     * 三级=A、四级=A，输入A -> 可选择；
+     * 三级=A、四级=B，输入A -> 不匹配该候选；
+     * 因此始终以实际末级分类判定。
+     */
     return (
-      candidatePath[candidatePath.length - 1] ===
+      candidatePath[
+        candidatePath.length - 1
+      ] ===
       wantedPath[0]
     );
   }
@@ -1347,20 +1762,13 @@
         )
       );
 
-    // 必须仍然只有一个精确候选。
-    if (exactCandidates.length !== 1) {
-      return "";
-    }
-
     const candidate =
-      exactCandidates[0];
+      exactCandidates.find(
+        isSuggestionExplicitlySelected
+      );
 
-    // 必须有明确的“已勾选”证据。
-    if (
-      !isSuggestionExplicitlySelected(
-        candidate
-      )
-    ) {
+    // 至少有一个末级匹配候选被明确勾选即可。
+    if (!candidate) {
       return "";
     }
 
@@ -1565,11 +1973,20 @@
         `“${fieldName}”切换到搜索结果模式`
       );
 
-    const candidates =
-      await waitForStableSuggestionCandidates(
-        popup,
-        fieldName
-      );
+    let candidates;
+
+    try {
+      candidates =
+        await waitForStableSuggestionCandidates(
+          popup,
+          fieldName
+        );
+    } catch (error) {
+      error.fieldPopup =
+        popup;
+
+      throw error;
+    }
 
     const exactCandidates =
       candidates.filter(item =>
@@ -1590,37 +2007,39 @@
         .slice(0, 8)
         .join("、");
 
-      throw new Error(
-        `搜索结果中没有与“${value}”完全一致的末级选项。` +
-        `当前候选：${preview || "无"}`
-      );
+      const error =
+        new Error(
+          `搜索结果中没有末级名称为“${value}”的选项。` +
+          `当前候选：${preview || "无"}`
+        );
+
+      error.fieldPopup =
+        popup;
+
+      throw error;
     }
 
-    if (
-      exactCandidates.length > 1
-    ) {
-      const duplicatePreview =
-        exactCandidates
-          .map(
-            getSuggestionCandidateText
-          )
-          .filter(Boolean)
-          .slice(0, 8)
-          .join("、");
+    /*
+     * 输入值已经由使用者核对。
+     * 若页面返回多个末级同名候选，按页面顺序选择第一个；
+     * 不再因同名层级或同名候选整体终止。
+     */
+    let selection;
 
-      throw new Error(
-        `搜索结果中存在多个完全一致的候选“${value}”，` +
-        `无法安全选择：${duplicatePreview}`
-      );
+    try {
+      selection =
+        selectUniqueExactSuggestion(
+          popup,
+          exactCandidates[0],
+          fieldName,
+          value
+        );
+    } catch (error) {
+      error.fieldPopup =
+        popup;
+
+      throw error;
     }
-
-    const selection =
-      selectUniqueExactSuggestion(
-        popup,
-        exactCandidates[0],
-        fieldName,
-        value
-      );
 
     try {
       const confirmed =
@@ -1684,6 +2103,24 @@
         }
       );
 
+      /*
+       * 即使这是本轮最后一个字段，也主动收起当前搜索弹层。
+       * 只把本字段已经确认归属的popup交给安全收起逻辑，
+       * 不会操作主业务弹窗。
+       */
+      if (
+        popup &&
+        popup.isConnected &&
+        isVisible(
+          popup
+        )
+      ) {
+        await safeReleaseFieldInteraction(
+          fieldConfig,
+          popup
+        );
+      }
+
       return confirmed;
     } catch {
       const liveField =
@@ -1707,21 +2144,27 @@
           value
         );
 
-      throw new Error(
-        `已选择唯一精确候选“${selection.candidateText}”，` +
-        `但没有确认到稳定的真实选中状态。` +
-        `只读/标签值：${
-          currentValues.join("、") ||
-          "空"
-        }；` +
-        `可编辑正式值：${
-          editableSelected.join("、") ||
-          "空"
-        }；` +
-        `列表勾选值：${
-          openSelected || "空"
-        }`
-      );
+      const error =
+        new Error(
+          `已选择唯一精确候选“${selection.candidateText}”，` +
+          `但没有确认到稳定的真实选中状态。` +
+          `只读/标签值：${
+            currentValues.join("、") ||
+            "空"
+          }；` +
+          `可编辑正式值：${
+            editableSelected.join("、") ||
+            "空"
+          }；` +
+          `列表勾选值：${
+            openSelected || "空"
+          }`
+        );
+
+      error.fieldPopup =
+        popup;
+
+      throw error;
     }
   }
 
@@ -1773,9 +2216,15 @@
   async function chooseOrdinaryOption(fieldConfig, value) {
     if (!value) return;
 
-    const field = findFieldItem(fieldConfig);
+    const field =
+      findFieldItem(
+        fieldConfig
+      );
+
     if (!field) {
-      throw new Error(`找不到字段：${fieldConfig.aliases[0]}`);
+      throw new Error(
+        `找不到字段：${fieldConfig.aliases[0]}`
+      );
     }
 
     const wanted =
@@ -1793,15 +2242,21 @@
 
     // 优先处理 radio 类型
     const direct = [
-      ...field.querySelectorAll(".el-radio, .el-radio-button, label")
+      ...field.querySelectorAll(
+        ".el-radio, .el-radio-button, label"
+      )
     ]
       .filter(isVisible)
       .find(item => {
         const text =
           normalizeOrdinaryOptionValue(
             fieldConfig,
-            item.querySelector(".el-radio__label")?.innerText ||
-            item.querySelector(".el-radio-button__inner")?.innerText ||
+            item.querySelector(
+              ".el-radio__label"
+            )?.innerText ||
+            item.querySelector(
+              ".el-radio-button__inner"
+            )?.innerText ||
             item.innerText
           );
 
@@ -1810,77 +2265,202 @@
 
     if (direct) {
       fastClick(
-        direct.querySelector("input") ||
-        direct.querySelector(".el-radio__inner") ||
+        direct.querySelector(
+          "input"
+        ) ||
+        direct.querySelector(
+          ".el-radio__inner"
+        ) ||
         direct
       );
 
-      await sleep(300);
+      await waitUntil(
+        () =>
+          isOrdinaryFieldCurrentValue(
+            fieldConfig,
+            value
+          ),
+        1800,
+        50,
+        `“${fieldConfig.aliases[0]}”选中结果写入`
+      );
 
       return;
     }
 
-    // 普通下拉
     const trigger =
-      field.querySelector(".el-select") ||
-      field.querySelector(".el-input") ||
-      field.querySelector("input");
-
-    if (!trigger) {
-      throw new Error(`找不到“${fieldConfig.aliases[0]}”选择控件`);
-    }
-
-    const beforePopups = snapshotVisiblePopups();
-
-    fastClick(trigger);
-
-    const popup = await waitUntil(() => {
-      const resolved = resolvePopupForTrigger(
-        trigger,
-        beforePopups,
-        ".el-select-dropdown__item, .el-dropdown-menu__item"
+      field.querySelector(
+        ".el-select"
+      ) ||
+      field.querySelector(
+        ".el-input"
+      ) ||
+      field.querySelector(
+        "input"
       );
 
-      return resolved && getVisibleSelectOptions(resolved).length
-        ? resolved
-        : null;
-    }, 2500, 50, `“${fieldConfig.aliases[0]}”下拉弹层出现`);
+    if (!trigger) {
+      throw new Error(
+        `找不到“${fieldConfig.aliases[0]}”选择控件`
+      );
+    }
 
-    const options =
-      getVisibleSelectOptions(popup);
+    /*
+     * 点击前记录当前页面已经可见的popup。
+     * 当前字段只能认：
+     * 1. aria明确关联到自己的popup；
+     * 2. 或本次点击之后新出现的popup。
+     */
+    const beforePopups =
+      snapshotVisiblePopups();
 
-    const option = options.find(item =>
-      normalizeOrdinaryOptionValue(
-        fieldConfig,
-        item.innerText
-      ) === wanted
+    fastClick(
+      trigger
     );
 
+    let popup = null;
+
+    try {
+      popup =
+        await waitUntil(
+          () => {
+            const controlled =
+              getControlledPopup(
+                trigger
+              );
+
+            if (
+              controlled &&
+              getVisibleSelectOptions(
+                controlled
+              ).length
+            ) {
+              return controlled;
+            }
+
+            const resolved =
+              resolvePopupForTrigger(
+                trigger,
+                beforePopups,
+                ".el-select-dropdown__item, .el-dropdown-menu__item"
+              );
+
+            return (
+              resolved &&
+              getVisibleSelectOptions(
+                resolved
+              ).length
+                ? resolved
+                : null
+            );
+          },
+          2500,
+          50,
+          `“${fieldConfig.aliases[0]}”下拉弹层出现`
+        );
+    } catch (error) {
+      error.fieldPopup =
+        popup;
+
+      throw error;
+    }
+
+    const options =
+      getVisibleSelectOptions(
+        popup
+      );
+
+    const option =
+      options.find(
+        item =>
+          normalizeOrdinaryOptionValue(
+            fieldConfig,
+            item.innerText
+          ) ===
+          wanted
+      );
+
     if (!option) {
-      const available = options
-        .map(item =>
-          cleanText(item.innerText)
-        )
-        .filter(Boolean)
-        .slice(0, 20)
-        .join("、");
+      const available =
+        options
+          .map(
+            item =>
+              cleanText(
+                item.innerText
+              )
+          )
+          .filter(Boolean)
+          .slice(0, 20)
+          .join("、");
 
       const scaleInfo =
         fieldConfig ===
-        CONFIG.fields.companyScale
+          CONFIG.fields.companyScale
           ? `（已按标准值“${wanted}”匹配）`
           : "";
 
-      throw new Error(
-        `找不到选项：${value}${scaleInfo}。` +
-        `当前可选：${available || "无"}`
-      );
+      const error =
+        new Error(
+          `找不到选项：${value}${scaleInfo}。` +
+          `当前可选：${available || "无"}`
+        );
+
+      /*
+       * 把本次已经确认归属的popup直接带给上层，
+       * 异常恢复时无需再从页面可见弹层中猜测。
+       */
+      error.fieldPopup =
+        popup;
+
+      throw error;
     }
 
-    fastClick(option);
+    fastClick(
+      option
+    );
 
-    // 不等待长时间 Vue 回写，只给页面一次刷新时间
-    await sleep(300);
+    try {
+      await waitUntil(
+        () =>
+          isOrdinaryFieldCurrentValue(
+            fieldConfig,
+            value
+          ),
+        1800,
+        50,
+        `“${fieldConfig.aliases[0]}”选中结果写入`
+      );
+    } catch (error) {
+      error.fieldPopup =
+        popup;
+
+      throw error;
+    }
+
+    /*
+     * Element UI的关闭动画期间popup仍可能被isVisible判断为可见。
+     * 在进入下一个字段前等待当前popup退出，避免后续字段串窗。
+     */
+    try {
+      await waitUntil(
+        () =>
+          !popup.isConnected ||
+          !isVisible(
+            popup
+          ),
+        1200,
+        45,
+        `“${fieldConfig.aliases[0]}”下拉弹层关闭`
+      );
+    } catch {
+      /*
+       * 已经确认字段值写入成功，popup残留不把本字段判失败。
+       * 上层继续前会优先依赖新popup/aria关联，因此不会误读它。
+       */
+      console.warn(
+        `[单位填写] “${fieldConfig.aliases[0]}”已选中，但下拉关闭较慢。`
+      );
+    }
   }
 
 
@@ -1891,6 +2471,8 @@
     unitType: ["单位类型"],
     socialCreditCode: ["社会信用代码", "统一社会信用代码", "统一信用代码", "信用代码"],
     companyScale: ["企业规模", "单位规模", "规模"],
+    employeeCount: ["职工数", "职工人数"],
+    exposedCount: ["接害人数", "接害数"],
     medicalCount: ["体检人数", "体检数", "人数"],
     syncBianQue: ["报告同步扁鹊", "同步扁鹊", "是否同步扁鹊"]
   };
@@ -1908,41 +2490,101 @@
       area: "",
       industry: "",
       economy: "",
-      unitType: CONFIG.defaults.unitType,
+      unitType:
+        CONFIG.defaults.unitType,
       socialCreditCode: "",
       companyScale: "",
+      employeeCount: "",
+      exposedCount: "",
       medicalCount: "",
-      syncBianQue: CONFIG.defaults.syncBianQue
+      syncBianQue:
+        CONFIG.defaults.syncBianQue,
+      _providedKeys:
+        new Set()
     };
 
-    const lines = String(text).split(/\r?\n/).map(cleanText).filter(Boolean);
+    const lines =
+      String(text)
+        .split(/\r?\n/)
+        .map(cleanText)
+        .filter(Boolean);
+
     let namedCount = 0;
     const unnamed = [];
 
-    for (const line of lines) {
-      const match = line.match(/^([^:：]+)\s*[:：]\s*(.*)$/);
+    for (
+      const line
+      of lines
+    ) {
+      const match =
+        line.match(
+          /^([^:：]+)\s*[:：]\s*(.*)$/
+        );
+
       if (!match) {
         unnamed.push(line);
         continue;
       }
 
-      const key = resolveKey(match[1]);
+      const key =
+        resolveKey(
+          match[1]
+        );
+
       if (!key) {
         unnamed.push(line);
         continue;
       }
 
-      data[key] = cleanText(match[2]);
+      data[key] =
+        cleanText(
+          match[2]
+        );
+
+      data._providedKeys.add(
+        key
+      );
+
       namedCount++;
     }
 
-    if (namedCount === 0 && unnamed.length >= 3) {
-      data.area = unnamed[0] || "";
-      data.industry = unnamed[1] || "";
-      data.economy = unnamed[2] || "";
-      data.socialCreditCode = unnamed[3] || "";
-      data.companyScale = unnamed[4] || "";
-      data.medicalCount = unnamed[5] || "";
+    if (
+      namedCount === 0 &&
+      unnamed.length >= 3
+    ) {
+      const positional = [
+        ["area", 0],
+        ["industry", 1],
+        ["economy", 2],
+        ["socialCreditCode", 3],
+        ["companyScale", 4],
+        ["medicalCount", 5]
+      ];
+
+      for (
+        const [
+          key,
+          index
+        ]
+        of positional
+      ) {
+        const value =
+          cleanText(
+            unnamed[index] ||
+            ""
+          );
+
+        if (!value) {
+          continue;
+        }
+
+        data[key] =
+          value;
+
+        data._providedKeys.add(
+          key
+        );
+      }
     }
 
     return data;
@@ -2012,95 +2654,490 @@
     return result;
   }
 
-  function findScrollContainer(scope) {
-    return [scope, ...scope.querySelectorAll("*")].find(el => {
-      if (!isVisible(el)) return false;
-      const style = getComputedStyle(el);
-      return el.scrollHeight > el.clientHeight + 60 &&
-        ["auto", "scroll"].includes(style.overflowY);
-    }) || null;
+  function collapseConsecutivePathParts(
+    parts
+  ) {
+    const result = [];
+
+    for (
+      const part
+      of parts
+    ) {
+      const key =
+        normalizeText(
+          part
+        );
+
+      if (!key) continue;
+
+      if (
+        result.length &&
+        normalizeText(
+          result[
+            result.length - 1
+          ]
+        ) ===
+        key
+      ) {
+        continue;
+      }
+
+      result.push(part);
+    }
+
+    return result;
   }
 
-  async function scrollBusinessFormTop() {
-    const scope = getBusinessScope();
-    const container = findScrollContainer(scope);
+  function isAreaFieldCurrentValue(
+    value
+  ) {
+    const field =
+      findFieldItem(
+        CONFIG.fields.area
+      );
 
-    if (container) container.scrollTo({ top: 0, behavior: "auto" });
-    else scope.scrollIntoView({ block: "start", behavior: "auto" });
+    if (!field) return false;
 
-    await sleep(350);
+    const targetPath =
+      collapseConsecutivePathParts(
+        splitAreaPath(
+          value
+        )
+      )
+        .map(normalizeText)
+        .filter(Boolean);
+
+    if (!targetPath.length) {
+      return false;
+    }
+
+    return getFieldCurrentTexts(
+      field
+    ).some(
+      text => {
+        const currentPath =
+          collapseConsecutivePathParts(
+            splitSearchPath(
+              text
+            )
+          )
+            .map(normalizeText)
+            .filter(Boolean);
+
+        if (
+          currentPath.length !==
+          targetPath.length
+        ) {
+          return false;
+        }
+
+        return currentPath.every(
+          (part, index) =>
+            part ===
+            targetPath[index]
+        );
+      }
+    );
   }
+
+  async function safeReleaseFieldInteraction(
+    fieldConfig,
+    knownPopup =
+      null
+  ) {
+    /*
+     * 异常跳过时只收起当前字段自己的下拉/级联弹层。
+     *
+     * 不发送 Esc；
+     * 不点击遮罩层；
+     * 不点击主业务弹窗的取消、关闭或确定按钮。
+     */
+    try {
+      const field =
+        findFieldItem(
+          fieldConfig
+        );
+
+      if (!field) {
+        return false;
+      }
+
+      const trigger =
+        field.querySelector(
+          ".el-cascader"
+        ) ||
+        field.querySelector(
+          ".el-select"
+        ) ||
+        field.querySelector(
+          ".el-input"
+        ) ||
+        field;
+
+      let popup =
+        (
+          knownPopup &&
+          knownPopup.isConnected &&
+          isVisible(
+            knownPopup
+          )
+            ? knownPopup
+            : null
+        ) ||
+        getControlledPopup(
+          trigger
+        );
+
+      const transientInputs = [
+        ...field.querySelectorAll(
+          "input.el-cascader__search-input, " +
+          "input.el-select__input, " +
+          ".el-cascader__tags input"
+        )
+      ].filter(isVisible);
+
+      for (
+        const input
+        of transientInputs
+      ) {
+        if (
+          cleanText(
+            input.value
+          )
+        ) {
+          setNativeValue(
+            input,
+            ""
+          );
+        }
+
+        try {
+          input.blur();
+        } catch {}
+      }
+
+      const active =
+        document.activeElement;
+
+      if (
+        active &&
+        field.contains(active) &&
+        typeof active.blur ===
+          "function"
+      ) {
+        active.blur();
+      }
+
+      await sleep(
+        90
+      );
+
+      if (
+        popup &&
+        isVisible(popup)
+      ) {
+        fastClick(
+          trigger
+        );
+
+        try {
+          await waitUntil(
+            () =>
+              !popup.isConnected ||
+              !isVisible(
+                popup
+              ),
+            650,
+            45,
+            "当前字段弹层收起"
+          );
+        } catch {}
+      }
+
+      /*
+       * Element UI 搜索级联在“无匹配数据”时有时不会因 blur 自动收起。
+       * 此时只点击“编辑单位信息”弹窗标题/头部空白区域，
+       * 让组件自身的 click-outside 关闭当前字段 popup。
+       */
+      if (
+        popup &&
+        popup.isConnected &&
+        isVisible(popup)
+      ) {
+        const scope =
+          getBusinessScope();
+
+        const neutralTarget =
+          [
+            scope.querySelector(
+              ".el-dialog__header .el-dialog__title"
+            ),
+            scope.querySelector(
+              ".el-dialog__header"
+            )
+          ].find(
+            element =>
+              element &&
+              isVisible(element)
+          );
+
+        if (neutralTarget) {
+          clickElement(
+            neutralTarget
+          );
+
+          try {
+            await waitUntil(
+              () =>
+                !popup.isConnected ||
+                !isVisible(
+                  popup
+                ),
+              900,
+              45,
+              "异常字段弹层关闭"
+            );
+          } catch {}
+        }
+      }
+
+      popup =
+        getControlledPopup(
+          trigger
+        );
+
+      const released =
+        !popup ||
+        !popup.isConnected ||
+        !isVisible(
+          popup
+        );
+
+      if (!released) {
+        console.warn(
+          `[单位填写] “${fieldConfig.aliases[0]}”弹层仍可见，已停止继续关闭以避免误关主弹窗。`
+        );
+      }
+
+      return released;
+    } catch (error) {
+      console.warn(
+        "[单位填写] 安全释放字段失败，已忽略：",
+        error
+      );
+
+      return false;
+    }
+  }
+
+
+  function hasProvidedInputKey(
+    data,
+    ...keys
+  ) {
+    const provided =
+      data?._providedKeys;
+
+    if (
+      !provided ||
+      typeof provided.has !==
+        "function"
+    ) {
+      return false;
+    }
+
+    return keys.some(
+      key =>
+        provided.has(
+          key
+        )
+    );
+  }
+
 
   async function processData(data, updateStatus) {
-    const completed = [];
-    const planned = [];
+    const summary = {
+      filled: [],
+      existing: [],
+      omitted: [],
+      missing: [],
+      failed: [],
+      requested: []
+    };
 
-    if (data.socialCreditCode) planned.push("社会信用代码");
-    if (data.medicalCount) {
-      planned.push("职工数");
-      planned.push("接害人数");
-    }
-    if (data.unitType) planned.push("单位类型");
-    if (data.companyScale) planned.push("企业规模");
-    if (data.syncBianQue) planned.push("报告同步扁鹊");
-    if (data.area) planned.push("地区");
-    if (data.industry) planned.push("行业类别");
-    if (data.economy) planned.push("经济类型");
+    const employeeCount =
+      cleanText(
+        data.employeeCount ||
+        data.medicalCount
+      );
 
-    async function runStep(name, statusText, action, successText) {
-      updateStatus(statusText);
+    const exposedCount =
+      cleanText(
+        data.exposedCount ||
+        data.medicalCount
+      );
 
-      try {
-        const result = await action();
-        completed.push(successText(result));
-        return result;
-      } catch (error) {
-        error.runSummary = {
-          completed: [...completed],
-          failed: `${name}：${error.message || error}`,
-          pending: planned.slice(completed.length + 1)
-        };
-        throw error;
+    const tasks = [];
+
+    const addTask = task => {
+      if (
+        task.value == null ||
+        cleanText(
+          task.value
+        ) === ""
+      ) {
+        return;
+      }
+
+      tasks.push(task);
+      summary.requested.push(
+        task.name
+      );
+    };
+
+    const omissionChecks = [
+      {
+        name: "社会信用代码",
+        fieldConfig: CONFIG.fields.socialCreditCode,
+        provided: hasProvidedInputKey(data, "socialCreditCode")
+      },
+      {
+        name: "职工数",
+        fieldConfig: CONFIG.fields.employeeCount,
+        provided: hasProvidedInputKey(data, "employeeCount", "medicalCount")
+      },
+      {
+        name: "接害人数",
+        fieldConfig: CONFIG.fields.exposedCount,
+        provided: hasProvidedInputKey(data, "exposedCount", "medicalCount")
+      },
+      {
+        name: "企业规模",
+        fieldConfig: CONFIG.fields.companyScale,
+        provided: hasProvidedInputKey(data, "companyScale")
+      },
+      {
+        name: "地区",
+        fieldConfig: CONFIG.fields.area,
+        provided: hasProvidedInputKey(data, "area")
+      },
+      {
+        name: "行业类别",
+        fieldConfig: CONFIG.fields.industry,
+        provided: hasProvidedInputKey(data, "industry")
+      },
+      {
+        name: "经济类型",
+        fieldConfig: CONFIG.fields.economy,
+        provided: hasProvidedInputKey(data, "economy")
+      }
+    ];
+
+    for (
+      const check
+      of omissionChecks
+    ) {
+      if (
+        check.provided
+      ) {
+        continue;
+      }
+
+      if (
+        findFieldItem(
+          check.fieldConfig
+        )
+      ) {
+        summary.omitted.push({
+          name: check.name,
+          reason: "输入数据未提供该字段"
+        });
       }
     }
 
-    // 第一组：纯输入字段
-    if (data.socialCreditCode) {
-      await runStep(
+    addTask({
+      name:
         "社会信用代码",
-        `第一阶段：填写数据\n\n正在填写社会信用代码：${data.socialCreditCode}`,
-        () => fillTextField(CONFIG.fields.socialCreditCode, data.socialCreditCode),
-        () => `社会信用代码：${data.socialCreditCode}`
-      );
-    }
+      fieldConfig:
+        CONFIG.fields.socialCreditCode,
+      value:
+        data.socialCreditCode,
+      currentCheck:
+        () =>
+          isTextFieldCurrentValue(
+            CONFIG.fields.socialCreditCode,
+            data.socialCreditCode
+          ),
+      action:
+        () =>
+          fillTextField(
+            CONFIG.fields.socialCreditCode,
+            data.socialCreditCode
+          )
+    });
 
-    if (data.medicalCount) {
-      await runStep(
+    addTask({
+      name:
         "职工数",
-        `第一阶段：填写数据\n\n正在把体检人数 ${data.medicalCount} 填入职工数`,
-        () => fillNumberField(CONFIG.fields.employeeCount, data.medicalCount),
-        () => `职工数：${data.medicalCount}`
-      );
+      fieldConfig:
+        CONFIG.fields.employeeCount,
+      value:
+        employeeCount,
+      currentCheck:
+        () =>
+          isNumberFieldCurrentValue(
+            CONFIG.fields.employeeCount,
+            employeeCount
+          ),
+      action:
+        () =>
+          fillNumberField(
+            CONFIG.fields.employeeCount,
+            employeeCount
+          )
+    });
 
-      await runStep(
+    addTask({
+      name:
         "接害人数",
-        `第一阶段：填写数据\n\n正在把体检人数 ${data.medicalCount} 填入接害人数`,
-        () => fillNumberField(CONFIG.fields.exposedCount, data.medicalCount),
-        () => `接害人数：${data.medicalCount}`
-      );
-    }
+      fieldConfig:
+        CONFIG.fields.exposedCount,
+      value:
+        exposedCount,
+      currentCheck:
+        () =>
+          isNumberFieldCurrentValue(
+            CONFIG.fields.exposedCount,
+            exposedCount
+          ),
+      action:
+        () =>
+          fillNumberField(
+            CONFIG.fields.exposedCount,
+            exposedCount
+          )
+    });
 
-    await scrollBusinessFormTop();
-
-    // 第二组：普通选择组件
-    if (data.unitType) {
-      await runStep(
+    addTask({
+      name:
         "单位类型",
-        `第二阶段：普通选择\n\n正在选择单位类型：${data.unitType}`,
-        () => chooseOrdinaryOption(CONFIG.fields.unitType, data.unitType),
-        () => `单位类型：${data.unitType}`
-      );
-    }
+      fieldConfig:
+        CONFIG.fields.unitType,
+      value:
+        data.unitType,
+      currentCheck:
+        () =>
+          isOrdinaryFieldCurrentValue(
+            CONFIG.fields.unitType,
+            data.unitType
+          ),
+      action:
+        () =>
+          chooseOrdinaryOption(
+            CONFIG.fields.unitType,
+            data.unitType
+          )
+    });
 
     if (data.companyScale) {
       const standardScale =
@@ -2108,98 +3145,343 @@
           data.companyScale
         );
 
-      await runStep(
-        "企业规模",
-        `第二阶段：普通选择\n\n` +
-        `输入值：${data.companyScale}\n` +
-        `标准选项：${standardScale}`,
+      addTask({
+        name:
+          "企业规模",
+        fieldConfig:
+          CONFIG.fields.companyScale,
+        value:
+          standardScale,
+        currentCheck:
+          () =>
+            isOrdinaryFieldCurrentValue(
+              CONFIG.fields.companyScale,
+              standardScale
+            ),
+        action:
+          () =>
+            chooseOrdinaryOption(
+              CONFIG.fields.companyScale,
+              standardScale
+            )
+      });
+    }
+
+    addTask({
+      name:
+        "报告同步扁鹊",
+      fieldConfig:
+        CONFIG.fields.syncBianQue,
+      value:
+        data.syncBianQue,
+      currentCheck:
+        () =>
+          isOrdinaryFieldCurrentValue(
+            CONFIG.fields.syncBianQue,
+            data.syncBianQue
+          ),
+      action:
         () =>
           chooseOrdinaryOption(
-            CONFIG.fields.companyScale,
-            standardScale
-          ),
-        () =>
-          `企业规模：${standardScale}`
-      );
-    }
+            CONFIG.fields.syncBianQue,
+            data.syncBianQue
+          )
+    });
 
-    if (data.syncBianQue) {
-      await runStep(
-        "报告同步扁鹊",
-        `第二阶段：普通选择\n\n正在选择报告同步扁鹊：${data.syncBianQue}`,
-        () => chooseOrdinaryOption(CONFIG.fields.syncBianQue, data.syncBianQue),
-        () => `报告同步扁鹊：${data.syncBianQue}`
-      );
-    }
-
-    // 第三组：复杂组件（级联/搜索）
-    if (data.area) {
-      const path = splitAreaPath(data.area);
-
-      if (path.length < 2) {
-        const error = new Error(
-          "地区内容不足。可输入例如：驻马店市 泌阳县 泰山庙镇；脚本会自动补上河南省。"
-        );
-        error.runSummary = {
-          completed: [...completed],
-          failed: `地区：${error.message}`,
-          pending: planned.slice(completed.length + 1)
-        };
-        throw error;
-      }
-
-      await runStep(
+    addTask({
+      name:
         "地区",
-        `第三阶段：复杂选择\n\n正在选择地区：\n${path.join(" / ")}`,
-        () => selectAreaPath(path),
-        result => {
-          const actualPath =
-            result?.actualPath?.length
-              ? result.actualPath.join(
-                " / "
-              )
-              : path.join(" / ");
+      fieldConfig:
+        CONFIG.fields.area,
+      value:
+        data.area,
+      currentCheck:
+        () =>
+          isAreaFieldCurrentValue(
+            data.area
+          ),
+      action:
+        async () => {
+          const path =
+            splitAreaPath(
+              data.area
+            );
 
-          const bridgeText =
-            result?.autoBridges?.length
-              ? `（自动跨越：${
-                result.autoBridges
-                  .map(item => item.name)
-                  .join("、")
-              }）`
-              : "";
+          if (
+            path.length <
+              2
+          ) {
+            throw new Error(
+              "地区内容不足。可输入例如：驻马店市 泌阳县 泰山庙镇；脚本会自动补上河南省。"
+            );
+          }
 
-          return (
-            `地区：${actualPath}` +
-            bridgeText
+          return selectAreaPath(
+            path
           );
         }
-      );
-    }
+    });
 
-    if (data.industry) {
-      await runStep(
+    addTask({
+      name:
         "行业类别",
-        `第三阶段：搜索组件\n\n正在搜索并选择行业类别：\n${data.industry}`,
-        () => fillAndChooseSearch(CONFIG.fields.industry, data.industry),
-        selected => `行业类别：${selected || data.industry}`
-      );
-    }
+      fieldConfig:
+        CONFIG.fields.industry,
+      value:
+        data.industry,
+      currentCheck:
+        () =>
+          isSearchFieldCurrentValue(
+            CONFIG.fields.industry,
+            data.industry
+          ),
+      action:
+        () =>
+          fillAndChooseSearch(
+            CONFIG.fields.industry,
+            data.industry
+          )
+    });
 
-    if (data.economy) {
-      await runStep(
+    addTask({
+      name:
         "经济类型",
-        `第三阶段：搜索组件\n\n正在搜索并选择经济类型：\n${data.economy}`,
-        () => fillAndChooseSearch(CONFIG.fields.economy, data.economy),
-        selected => `经济类型：${selected || data.economy}`
+      fieldConfig:
+        CONFIG.fields.economy,
+      value:
+        data.economy,
+      currentCheck:
+        () =>
+          isSearchFieldCurrentValue(
+            CONFIG.fields.economy,
+            data.economy
+          ),
+      action:
+        () =>
+          fillAndChooseSearch(
+            CONFIG.fields.economy,
+            data.economy
+          )
+    });
+
+    /*
+     * 前置字段检查：
+     * 在任何写入动作前，先确认本次输入对应的页面字段是否存在。
+     */
+    const runnableTasks = [];
+
+    for (
+      const task
+      of tasks
+    ) {
+      const field =
+        findFieldItem(
+          task.fieldConfig
+        );
+
+      if (!field) {
+        summary.missing.push({
+          name:
+            task.name,
+          value:
+            cleanText(
+              task.value
+            ),
+          reason:
+            "当前页面不存在该字段"
+        });
+
+        continue;
+      }
+
+      runnableTasks.push(
+        task
       );
     }
 
-    return {
-      completed,
-      failed: null,
-      pending: []
-    };
+    console.info(
+      "[单位填写-字段检查]",
+      {
+        requested:
+          summary.requested,
+        runnable:
+          runnableTasks.map(
+            task =>
+              task.name
+          ),
+        omitted:
+          summary.omitted.map(
+            item =>
+              item.name
+          ),
+        missing:
+          summary.missing.map(
+            item =>
+              item.name
+          )
+      }
+    );
+
+    updateStatus(
+      `字段检查｜处理 ${tasks.length}` +
+      `｜可执行 ${runnableTasks.length}` +
+      (
+        summary.omitted.length
+          ? `｜未提供 ${summary.omitted.length}`
+          : ""
+      ) +
+      (
+        summary.missing.length
+          ? `｜页面缺失 ${summary.missing.length}`
+          : ""
+      )
+    );
+
+    for (
+      const task
+      of runnableTasks
+    ) {
+      updateStatus(
+        `正在处理：${task.name}｜目标：${cleanText(
+          task.value
+        )}`
+      );
+
+      try {
+        if (
+          task.currentCheck()
+        ) {
+          summary.existing.push({
+            name:
+              task.name,
+            value:
+              cleanText(
+                task.value
+              )
+          });
+
+          console.info(
+            `[单位填写] ${task.name} 已是目标值，跳过重复操作。`
+          );
+
+          continue;
+        }
+
+        await task.action();
+
+        /*
+         * 操作后再做一次当前值检查。
+         * 个别复杂控件自身已有更严格的写入确认；
+         * 若这里可以确认，则作为额外保险。
+         */
+        let verified =
+          false;
+
+        try {
+          verified =
+            task.currentCheck();
+        } catch {}
+
+        if (
+          !verified &&
+          (
+            task.name ===
+              "行业类别" ||
+            task.name ===
+              "经济类型"
+          )
+        ) {
+          /*
+           * 搜索组件 fillAndChooseSearch 已在内部验证真实选中状态，
+           * 某些Element UI版本在关闭弹层后不会立即暴露统一显示值，
+           * 因此不重复判失败。
+           */
+          verified =
+            true;
+        }
+
+        if (!verified) {
+          throw new Error(
+            "操作完成后未确认到目标值"
+          );
+        }
+
+        summary.filled.push({
+          name:
+            task.name,
+          value:
+            cleanText(
+              task.value
+            )
+        });
+      } catch (error) {
+        const message =
+          error?.message ||
+          String(error);
+
+        summary.failed.push({
+          name:
+            task.name,
+          value:
+            cleanText(
+              task.value
+            ),
+          reason:
+            message,
+          fieldConfig:
+            task.fieldConfig,
+          fieldPopup:
+            error?.fieldPopup ||
+            null
+        });
+
+        markFieldTitle(
+          task.name,
+          "error"
+        );
+
+        console.error(
+          `[单位填写] ${task.name} 处理失败，已跳过并继续：`,
+          error
+        );
+
+        await safeReleaseFieldInteraction(
+          task.fieldConfig,
+          error?.fieldPopup ||
+            null
+        );
+      }
+    }
+
+    /*
+     * 最后一项如果恰好是搜索/级联异常，后面没有其他字段获得焦点，
+     * Element UI可能不会自行收起残留popup。
+     * 因此整轮结束前只针对“本轮异常里已经明确归属的popup”
+     * 再做一次安全收起。
+     */
+    for (
+      const item
+      of summary.failed
+    ) {
+      const popup =
+        item.fieldPopup;
+
+      if (
+        popup &&
+        popup.isConnected &&
+        isVisible(
+          popup
+        ) &&
+        item.fieldConfig
+      ) {
+        await safeReleaseFieldInteraction(
+          item.fieldConfig,
+          popup
+        );
+      }
+    }
+
+    return summary;
   }
 
 
@@ -2314,13 +3596,24 @@
     #${TOOL_ID} .tool-log-error:hover{
       border-color:#f56c6c;background:#fef0f0
     }
+    #${TOOL_ID} .tool-log-missing{
+      display:block;width:100%;box-sizing:border-box;
+      margin-top:6px;padding:6px 8px;
+      border:1px solid #fbc4c4;border-radius:4px;
+      background:#fff7f7;color:#e45656;text-align:left;
+      font:inherit;line-height:1.4
+    }
+    #${TOOL_ID} .tool-log-existing{
+      margin-top:5px;color:#67c23a;font-size:12px;line-height:1.45
+    }
+
     .dime-company-label-error-v7718>.el-form-item__label,
     .dime-company-label-error-v7718 .el-form-item__label{
       color:#f56c6c!important;font-weight:800!important
     }
     .dime-company-label-pending-v7718>.el-form-item__label,
     .dime-company-label-pending-v7718 .el-form-item__label{
-      color:#f56c6c!important;font-weight:700!important;opacity:.82
+      color:#f56c6c!important;font-weight:800!important;opacity:1
     }
 
     #${LAUNCHER_ID}{
@@ -2362,7 +3655,7 @@
   tool.id = TOOL_ID;
   tool.innerHTML = `
     <div class="tool-header">
-      <strong>单位信息自动填写工具 v7.7.22</strong>
+      <strong>单位信息自动填写工具 v7.8.3</strong>
       <div class="tool-header-actions">
         <button class="tool-header-button tool-collapse" type="button" title="折叠工具">−</button>
         <button class="tool-header-button tool-close" type="button" title="收起到快捷按钮">×</button>
@@ -2378,10 +3671,10 @@
           使用条件等待减少无效停顿，并锁定当前字段对应的下拉弹层。<br>
           地区缺少省级时自动补“河南省”，支持斜杠、反斜杠、空格、顿号、逗号、横杠、箭头等分隔；网页地区树出现连续同名层级时会自动跨越。<br>
           企业规模网页标准选项为“大、中、小、微型”；输入“大型、中型、小型、微”等常见写法会自动转换。<br>
-          行业类别和经济类型会区分两种状态：未输入时的普通级联树只用于展示；输入后切换到搜索结果列表。只有唯一且末级名称完全一致的候选才会被选择。选中后支持三种确认方式：只读框或标签中的正式值、搜索列表暂未关闭但唯一精确候选已明确勾选、搜索列表关闭后可编辑主输入框中显示的正式完整路径。仅有搜索文字且没有路径或已选清除标志时仍判定失败。<br>
-          遇到异常立即停止：当前异常标题深红，后续未执行字段标题浅红。点击异常日志可跳转到字段并选中粘贴框中的对应原文。<br>
-          第一阶段填写信用代码和人数，第二阶段选择其他字段。<br>
-          单位类型默认“用工单位”，报告同步扁鹊默认“是”。
+          行业类别和经济类型以搜索结果的最后一级名称为准；名称中的“、”属于名称本身，不作为层级分隔符。三级、四级同名时可直接选择；三级相同但四级不同仍以第四级判断。<br>
+          单位类型固定默认“用工单位”，报告同步扁鹊固定默认“是”；两项也会先检查当前值，正确时不重复选择。其他字段按粘贴内容处理。<br>
+          输入中未提供但当前页面存在的受支持字段会标红提示；页面不存在的已提供字段会记录后跳过。页面已有正确值时直接保留，不重复选择。<br>
+          单个字段处理失败时会定向收起当前字段自己的下拉/级联弹层；搜索字段即使是本轮最后一项，也会在成功或失败后主动检查并收起自身残留窗口。连续普通下拉只识别当前字段本次打开的弹层，不使用 Esc、遮罩层或页面取消/关闭按钮。
         </div>
       </details>
 
@@ -2458,15 +3751,15 @@
   };
 
   const STEP_INPUT_KEY_MAP = {
-    "社会信用代码": "socialCreditCode",
-    "职工数": "medicalCount",
-    "接害人数": "medicalCount",
-    "单位类型": "unitType",
-    "企业规模": "companyScale",
-    "报告同步扁鹊": "syncBianQue",
-    "地区": "area",
-    "行业类别": "industry",
-    "经济类型": "economy"
+    "社会信用代码": ["socialCreditCode"],
+    "职工数": ["employeeCount", "medicalCount"],
+    "接害人数": ["exposedCount", "medicalCount"],
+    "单位类型": ["unitType"],
+    "企业规模": ["companyScale"],
+    "报告同步扁鹊": ["syncBianQue"],
+    "地区": ["area"],
+    "行业类别": ["industry"],
+    "经济类型": ["economy"]
   };
 
   const POSITIONAL_INPUT_KEYS = [
@@ -2718,15 +4011,30 @@
       block: "center"
     });
 
-    const inputKey =
+    const inputKeys =
       STEP_INPUT_KEY_MAP[stepName];
 
-    if (!inputKey) return false;
+    if (
+      !Array.isArray(
+        inputKeys
+      ) ||
+      !inputKeys.length
+    ) {
+      return false;
+    }
+
+    const ranges =
+      getInputLineRanges();
 
     const range =
-      getInputLineRanges().get(
-        inputKey
-      );
+      inputKeys
+        .map(
+          key =>
+            ranges.get(
+              key
+            )
+        )
+        .find(Boolean);
 
     if (!range) return false;
 
@@ -2860,6 +4168,255 @@
         : "点击异常项定位字段和原文。";
 
     statusBox.appendChild(note);
+  }
+
+
+  function renderAdaptiveRunSummary(
+    summary
+  ) {
+    clearFormTitleMarks();
+
+    for (
+      const item
+      of summary.failed ||
+      []
+    ) {
+      markFieldTitle(
+        item.name,
+        "error"
+      );
+    }
+
+    for (
+      const item
+      of summary.omitted ||
+      []
+    ) {
+      markFieldTitle(
+        item.name,
+        "pending"
+      );
+    }
+
+    const filledCount =
+      summary.filled?.length ||
+      0;
+
+    const existingCount =
+      summary.existing?.length ||
+      0;
+
+    const omittedCount =
+      summary.omitted?.length ||
+      0;
+
+    const missingCount =
+      summary.missing?.length ||
+      0;
+
+    const failedCount =
+      summary.failed?.length ||
+      0;
+
+    statusBox.replaceChildren();
+
+    const hasIssues =
+      omittedCount >
+        0 ||
+      missingCount >
+        0 ||
+      failedCount >
+        0;
+
+    statusBox.style.background =
+      hasIssues
+        ? "#fff7f7"
+        : "#f0f9eb";
+
+    statusBox.style.color =
+      hasIssues
+        ? "#e45656"
+        : "#67c23a";
+
+    const head =
+      document.createElement(
+        "div"
+      );
+
+    head.className =
+      "tool-log-head";
+
+    head.textContent =
+      `处理完成｜填写 ${filledCount}` +
+      `｜已存在 ${existingCount}` +
+      (
+        omittedCount
+          ? `｜未提供 ${omittedCount}`
+          : ""
+      ) +
+      (
+        missingCount
+          ? `｜页面缺失 ${missingCount}`
+          : ""
+      ) +
+      (
+        failedCount
+          ? `｜异常跳过 ${failedCount}`
+          : ""
+      );
+
+    statusBox.appendChild(
+      head
+    );
+
+    if (existingCount) {
+      const existing =
+        document.createElement(
+          "div"
+        );
+
+      existing.className =
+        "tool-log-existing";
+
+      existing.textContent =
+        "已存在：" +
+        summary.existing
+          .map(
+            item =>
+              item.name
+          )
+          .join("、");
+
+      statusBox.appendChild(
+        existing
+      );
+    }
+
+    for (
+      const item
+      of summary.omitted ||
+      []
+    ) {
+      const row =
+        document.createElement(
+          "div"
+        );
+
+      row.className =
+        "tool-log-missing";
+
+      row.textContent =
+        `⚠ 未提供：${item.name}`;
+
+      row.title =
+        `${item.name}：${item.reason}`;
+
+      statusBox.appendChild(
+        row
+      );
+    }
+
+    for (
+      const item
+      of summary.missing ||
+      []
+    ) {
+      const row =
+        document.createElement(
+          "button"
+        );
+
+      row.type =
+        "button";
+
+      row.className =
+        "tool-log-missing";
+
+      row.textContent =
+        `⚠ 页面缺少：${item.name}`;
+
+      row.title =
+        `${item.name}：${item.reason}` +
+        "\n点击选中粘贴框中的对应输入内容";
+
+      row.addEventListener(
+        "click",
+        event => {
+          event.stopPropagation();
+
+          locateFailure(
+            item.name
+          );
+        }
+      );
+
+      statusBox.appendChild(
+        row
+      );
+    }
+
+    for (
+      const item
+      of summary.failed ||
+      []
+    ) {
+      const row =
+        document.createElement(
+          "button"
+        );
+
+      row.type =
+        "button";
+
+      row.className =
+        "tool-log-error";
+
+      row.textContent =
+        "✗ " +
+        compactLogText(
+          `${item.name}：${item.reason}`
+        );
+
+      row.title =
+        `${item.name}：${item.reason}` +
+        "\n点击跳转到字段并选中对应输入内容";
+
+      row.addEventListener(
+        "click",
+        event => {
+          event.stopPropagation();
+
+          locateFailure(
+            item.name
+          );
+        }
+      );
+
+      statusBox.appendChild(
+        row
+      );
+    }
+
+    if (
+      omittedCount ||
+      missingCount ||
+      failedCount
+    ) {
+      const note =
+        document.createElement(
+          "div"
+        );
+
+      note.className =
+        "tool-log-note";
+
+      note.textContent =
+        "未提供字段已标红；页面缺失或异常字段已跳过，其余字段已继续处理。";
+
+      statusBox.appendChild(
+        note
+      );
+    }
   }
 
 
@@ -3306,9 +4863,13 @@
       !data.area &&
       !data.industry &&
       !data.economy &&
+      !data.unitType &&
       !data.socialCreditCode &&
       !data.companyScale &&
-      !data.medicalCount
+      !data.employeeCount &&
+      !data.exposedCount &&
+      !data.medicalCount &&
+      !data.syncBianQue
     ) {
       setStatus("没有识别到可处理的数据，请检查格式", "error");
       return;
@@ -3331,11 +4892,8 @@
           )
       );
 
-      clearFormTitleMarks();
-
-      setStatus(
-        `填写完成｜成功 ${summary.completed.length}｜失败 0`,
-        "success"
+      renderAdaptiveRunSummary(
+        summary
       );
     } catch (error) {
       console.error(
@@ -3364,5 +4922,5 @@
   });
 
   textBox.focus();
-  console.log("单位信息自动填写工具 v7.7.22 可编辑完整路径确认版 已加载。");
+  console.log("单位信息自动填写工具 v7.8.3 最后一项弹层收起版 已加载。");
 })();
