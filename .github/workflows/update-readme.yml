@@ -4,6 +4,7 @@ env:
   GITHUB_BRANCH: main
   README_FILE: README.md
   PUBLISH_DIR: publish
+  SITE_ASSETS_DIR: site-assets
   DISTRIBUTION_BASE_URL: https://scripts.wanxinxin.dpdns.org
 
 on:
@@ -47,6 +48,7 @@ jobs:
           from datetime import datetime
           from zoneinfo import ZoneInfo
           from html import escape
+          import json
           import os
           import re
           import subprocess
@@ -57,6 +59,13 @@ jobs:
           PUBLISH_DIR = os.environ.get("PUBLISH_DIR", "publish")
           PUBLISH_ROOT = ROOT / PUBLISH_DIR
           INDEX_PATH = PUBLISH_ROOT / "index.html"
+
+          SITE_ASSETS_DIR = os.environ.get(
+              "SITE_ASSETS_DIR",
+              "site-assets"
+          )
+          SITE_ASSETS_ROOT = ROOT / SITE_ASSETS_DIR
+          SCRIPT_IMAGE_ROOT = SITE_ASSETS_ROOT / "scripts"
 
           BASE_URL = os.environ.get(
               "DISTRIBUTION_BASE_URL",
@@ -569,6 +578,57 @@ jobs:
               return name or folder
 
 
+          SUPPORTED_SCRIPT_IMAGE_SUFFIXES = {
+              ".webp",
+              ".png",
+              ".jpg",
+              ".jpeg",
+              ".gif",
+              ".avif",
+          }
+
+
+          def natural_sort_key(value):
+              return [
+                  int(part) if part.isdigit() else part.lower()
+                  for part in re.split(r"(\d+)", str(value))
+              ]
+
+
+          def script_images(publish_id):
+              # 约定目录：
+              # site-assets/scripts/<publishID>/
+              # 文件名决定展示顺序，例如 01-main.webp、02-setting.webp。
+              folder = SCRIPT_IMAGE_ROOT / publish_id
+
+              if not folder.is_dir():
+                  return []
+
+              files = sorted(
+                  (
+                      path
+                      for path in folder.iterdir()
+                      if path.is_file()
+                      and path.suffix.lower() in SUPPORTED_SCRIPT_IMAGE_SUFFIXES
+                  ),
+                  key=lambda path: natural_sort_key(path.name),
+              )
+
+              result = []
+
+              for path in files:
+                  result.append({
+                      "name": path.name,
+                      "url": (
+                          "/assets/scripts/"
+                          f"{quote(publish_id, safe='._-')}/"
+                          f"{quote(path.name, safe='._-')}"
+                      ),
+                  })
+
+              return result
+
+
           # Cloudflare 页面只按业务分类展示。
           # 1.x / 2.x / 其他等编号仅用于排序，不额外显示分组标题。
           page_groups = {}
@@ -624,6 +684,22 @@ jobs:
                       item["folder_label"],
                   ]).lower()
 
+                  images = script_images(item["publish_id"])
+                  image_urls = [image["url"] for image in images]
+                  image_button = ""
+
+                  if image_urls:
+                      image_button = (
+                          '<button class="button button-secondary '
+                          'script-images-button" '
+                          'type="button" '
+                          f'data-title="{h(item["name"])}" '
+                          f'data-images="{h(json.dumps(image_urls, ensure_ascii=False))}">'
+                          '查看图片 '
+                          f'<span class="image-count">{len(image_urls)}</span>'
+                          '</button>'
+                      )
+
                   modified_date = (
                       item["modified_at"].split(" ", 1)[0]
                       if item["modified_at"] and item["modified_at"] != "-"
@@ -644,6 +720,11 @@ jobs:
                         <p class="script-description">
                           {h(item["description"]) or "暂无功能说明"}
                         </p>
+                        <button class="description-toggle"
+                                type="button"
+                                hidden>
+                          展开说明
+                        </button>
 
                         <div class="script-card-foot">
                           <div class="script-meta">
@@ -659,6 +740,7 @@ jobs:
                                data-script-id="{h(item["publish_id"])}">
                               立即安装
                             </a>
+                            {image_button}
                             <a class="button button-secondary"
                                href="{h(item["github_source"])}"
                                target="_blank"
@@ -1674,6 +1756,28 @@ jobs:
                 -webkit-line-clamp: 2;
               }}
 
+              .script-description.expanded {{
+                display: block;
+                overflow: visible;
+                -webkit-line-clamp: unset;
+              }}
+
+              .description-toggle {{
+                align-self: flex-start;
+                margin: 7px 0 0;
+                padding: 0;
+                border: 0;
+                color: var(--accent);
+                background: transparent;
+                cursor: pointer;
+                font-size: 12px;
+                font-weight: 750;
+              }}
+
+              .description-toggle:hover {{
+                text-decoration: underline;
+              }}
+
               .script-card-foot {{
                 margin-top: auto;
                 padding-top: 14px;
@@ -1694,8 +1798,187 @@ jobs:
 
               .script-actions {{
                 display: flex;
+                flex-wrap: wrap;
                 gap: 8px;
                 margin-top: 12px;
+              }}
+
+              .image-count {{
+                display: inline-flex;
+                min-width: 18px;
+                height: 18px;
+                align-items: center;
+                justify-content: center;
+                margin-left: 5px;
+                padding: 0 5px;
+                border-radius: 999px;
+                color: var(--muted);
+                background: #f1f2f5;
+                font-size: 10px;
+                font-weight: 850;
+              }}
+
+              .image-modal {{
+                position: fixed;
+                z-index: 1000;
+                inset: 0;
+                display: none;
+                align-items: center;
+                justify-content: center;
+                padding: 24px;
+                background: rgba(20, 22, 28, .76);
+                backdrop-filter: blur(8px);
+              }}
+
+              .image-modal.open {{
+                display: flex;
+              }}
+
+              .image-modal-panel {{
+                display: flex;
+                width: min(1080px, 100%);
+                max-height: min(88vh, 900px);
+                flex-direction: column;
+                overflow: hidden;
+                border: 1px solid rgba(255, 255, 255, .18);
+                border-radius: 20px;
+                background: #fff;
+                box-shadow: 0 26px 80px rgba(0, 0, 0, .30);
+              }}
+
+              .image-modal-head {{
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                justify-content: space-between;
+                padding: 14px 16px;
+                border-bottom: 1px solid var(--line);
+              }}
+
+              .image-modal-title {{
+                overflow: hidden;
+                margin: 0;
+                font-size: 15px;
+                font-weight: 850;
+                line-height: 1.4;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+              }}
+
+              .image-modal-close {{
+                display: grid;
+                width: 34px;
+                height: 34px;
+                flex: 0 0 auto;
+                place-items: center;
+                border: 1px solid var(--line);
+                border-radius: 10px;
+                color: var(--muted);
+                background: #fff;
+                cursor: pointer;
+                font-size: 20px;
+                line-height: 1;
+              }}
+
+              .image-stage {{
+                position: relative;
+                display: grid;
+                min-height: 320px;
+                flex: 1;
+                place-items: center;
+                overflow: hidden;
+                background: #f2f3f5;
+              }}
+
+              .image-stage img {{
+                display: block;
+                max-width: 100%;
+                max-height: calc(88vh - 180px);
+                object-fit: contain;
+              }}
+
+              .image-nav {{
+                position: absolute;
+                top: 50%;
+                display: grid;
+                width: 42px;
+                height: 42px;
+                place-items: center;
+                transform: translateY(-50%);
+                border: 0;
+                border-radius: 50%;
+                color: #fff;
+                background: rgba(20, 22, 28, .56);
+                cursor: pointer;
+                font-size: 24px;
+                font-weight: 700;
+              }}
+
+              .image-nav:hover {{
+                background: rgba(20, 22, 28, .72);
+              }}
+
+              .image-nav.prev {{
+                left: 14px;
+              }}
+
+              .image-nav.next {{
+                right: 14px;
+              }}
+
+              .image-nav[hidden] {{
+                display: none;
+              }}
+
+              .image-modal-foot {{
+                display: flex;
+                gap: 14px;
+                align-items: center;
+                padding: 12px 16px;
+                border-top: 1px solid var(--line);
+                background: #fff;
+              }}
+
+              .image-counter {{
+                flex: 0 0 auto;
+                color: var(--muted);
+                font-size: 12px;
+                font-weight: 750;
+              }}
+
+              .image-thumbs {{
+                display: flex;
+                min-width: 0;
+                gap: 7px;
+                overflow-x: auto;
+                scrollbar-width: thin;
+              }}
+
+              .image-thumb {{
+                width: 58px;
+                height: 42px;
+                flex: 0 0 auto;
+                overflow: hidden;
+                padding: 0;
+                border: 2px solid transparent;
+                border-radius: 8px;
+                background: #f2f3f5;
+                cursor: pointer;
+              }}
+
+              .image-thumb.active {{
+                border-color: var(--accent);
+              }}
+
+              .image-thumb img {{
+                display: block;
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+              }}
+
+              body.image-modal-open {{
+                overflow: hidden;
               }}
 
               .guide {{
@@ -1860,6 +2143,28 @@ jobs:
 
                 .script-actions .button {{
                   width: 100%;
+                }}
+
+                .image-modal {{
+                  padding: 10px;
+                }}
+
+                .image-modal-panel {{
+                  max-height: 92vh;
+                  border-radius: 15px;
+                }}
+
+                .image-stage {{
+                  min-height: 220px;
+                }}
+
+                .image-stage img {{
+                  max-height: calc(92vh - 170px);
+                }}
+
+                .image-nav {{
+                  width: 38px;
+                  height: 38px;
                 }}
               }}
             </style>
@@ -2234,6 +2539,49 @@ jobs:
               </div>
             </main>
 
+            <div class="image-modal"
+                 id="image-modal"
+                 aria-hidden="true"
+                 role="dialog"
+                 aria-modal="true"
+                 aria-labelledby="image-modal-title">
+              <div class="image-modal-panel">
+                <div class="image-modal-head">
+                  <h3 class="image-modal-title" id="image-modal-title">脚本图片</h3>
+                  <button class="image-modal-close"
+                          id="image-modal-close"
+                          type="button"
+                          aria-label="关闭图片">
+                    ×
+                  </button>
+                </div>
+
+                <div class="image-stage">
+                  <button class="image-nav prev"
+                          id="image-prev"
+                          type="button"
+                          aria-label="上一张">
+                    ‹
+                  </button>
+                  <img id="image-current"
+                       src=""
+                       alt=""
+                       loading="eager">
+                  <button class="image-nav next"
+                          id="image-next"
+                          type="button"
+                          aria-label="下一张">
+                    ›
+                  </button>
+                </div>
+
+                <div class="image-modal-foot">
+                  <span class="image-counter" id="image-counter"></span>
+                  <div class="image-thumbs" id="image-thumbs"></div>
+                </div>
+              </div>
+            </div>
+
             <footer class="footer">
               <div class="wrap">
                 WanXin Userscripts · 页面与脚本清单由 GitHub Actions 自动维护
@@ -2259,6 +2607,16 @@ jobs:
                 const topScriptsList = document.getElementById("top-scripts");
                 const topCitiesList = document.getElementById("top-cities");
                 const installLinks = [...document.querySelectorAll(".script-install-link")];
+                const imageButtons = [...document.querySelectorAll(".script-images-button")];
+                const descriptionToggles = [...document.querySelectorAll(".description-toggle")];
+                const imageModal = document.getElementById("image-modal");
+                const imageModalTitle = document.getElementById("image-modal-title");
+                const imageModalClose = document.getElementById("image-modal-close");
+                const imageCurrent = document.getElementById("image-current");
+                const imagePrev = document.getElementById("image-prev");
+                const imageNext = document.getElementById("image-next");
+                const imageCounter = document.getElementById("image-counter");
+                const imageThumbs = document.getElementById("image-thumbs");
                 const scriptNameMap = new Map(
                   cards.map(card => [
                     card.dataset.scriptId,
@@ -2287,6 +2645,168 @@ jobs:
                     recommended.classList.add("recommended");
                   }}
                 }}
+
+                let galleryImages = [];
+                let galleryIndex = 0;
+
+                function refreshDescriptionToggles() {{
+                  descriptionToggles.forEach(button => {{
+                    const card = button.closest(".script-card");
+                    const description = card?.querySelector(".script-description");
+
+                    if (!description) return;
+
+                    if (description.classList.contains("expanded")) {{
+                      button.hidden = false;
+                      return;
+                    }}
+
+                    // 只有真正发生两行截断时才显示“展开说明”。
+                    const overflowed =
+                      description.scrollHeight > description.clientHeight + 2;
+
+                    button.hidden = !overflowed;
+                  }});
+                }}
+
+                descriptionToggles.forEach(button => {{
+                  button.addEventListener("click", () => {{
+                    const card = button.closest(".script-card");
+                    const description = card?.querySelector(".script-description");
+
+                    if (!description) return;
+
+                    const expanded = description.classList.toggle("expanded");
+                    button.textContent = expanded ? "收起说明" : "展开说明";
+                    button.hidden = false;
+                  }});
+                }});
+
+                function renderGallery() {{
+                  if (!galleryImages.length) return;
+
+                  galleryIndex = Math.max(
+                    0,
+                    Math.min(galleryIndex, galleryImages.length - 1)
+                  );
+
+                  imageCurrent.src = galleryImages[galleryIndex];
+                  imageCurrent.alt =
+                    (imageModalTitle.textContent || "脚本图片") +
+                    " " +
+                    (galleryIndex + 1);
+
+                  imageCounter.textContent =
+                    (galleryIndex + 1) + " / " + galleryImages.length;
+
+                  const multiple = galleryImages.length > 1;
+                  imagePrev.hidden = !multiple;
+                  imageNext.hidden = !multiple;
+                  imageThumbs.hidden = !multiple;
+
+                  imageThumbs.innerHTML = "";
+
+                  if (multiple) {{
+                    galleryImages.forEach((src, index) => {{
+                      const button = document.createElement("button");
+                      button.type = "button";
+                      button.className =
+                        "image-thumb" + (index === galleryIndex ? " active" : "");
+                      button.setAttribute(
+                        "aria-label",
+                        "查看第 " + (index + 1) + " 张图片"
+                      );
+
+                      const img = document.createElement("img");
+                      img.src = src;
+                      img.alt = "";
+                      img.loading = "lazy";
+
+                      button.appendChild(img);
+                      button.addEventListener("click", () => {{
+                        galleryIndex = index;
+                        renderGallery();
+                      }});
+
+                      imageThumbs.appendChild(button);
+                    }});
+                  }}
+                }}
+
+                function openGallery(title, images) {{
+                  galleryImages = Array.isArray(images)
+                    ? images.filter(Boolean)
+                    : [];
+
+                  if (!galleryImages.length) return;
+
+                  galleryIndex = 0;
+                  imageModalTitle.textContent = title || "脚本图片";
+                  renderGallery();
+
+                  imageModal.classList.add("open");
+                  imageModal.setAttribute("aria-hidden", "false");
+                  document.body.classList.add("image-modal-open");
+                }}
+
+                function closeGallery() {{
+                  imageModal.classList.remove("open");
+                  imageModal.setAttribute("aria-hidden", "true");
+                  document.body.classList.remove("image-modal-open");
+
+                  imageCurrent.removeAttribute("src");
+                  imageThumbs.innerHTML = "";
+                  galleryImages = [];
+                  galleryIndex = 0;
+                }}
+
+                function moveGallery(step) {{
+                  if (galleryImages.length <= 1) return;
+
+                  galleryIndex =
+                    (galleryIndex + step + galleryImages.length) %
+                    galleryImages.length;
+
+                  renderGallery();
+                }}
+
+                imageButtons.forEach(button => {{
+                  button.addEventListener("click", () => {{
+                    let images = [];
+
+                    try {{
+                      images = JSON.parse(button.dataset.images || "[]");
+                    }} catch (_) {{
+                    }}
+
+                    openGallery(
+                      button.dataset.title || "脚本图片",
+                      images
+                    );
+                  }});
+                }});
+
+                imageModalClose.addEventListener("click", closeGallery);
+                imagePrev.addEventListener("click", () => moveGallery(-1));
+                imageNext.addEventListener("click", () => moveGallery(1));
+
+                imageModal.addEventListener("click", event => {{
+                  if (event.target === imageModal) {{
+                    closeGallery();
+                  }}
+                }});
+
+                document.addEventListener("keydown", event => {{
+                  if (!imageModal.classList.contains("open")) return;
+
+                  if (event.key === "Escape") {{
+                    closeGallery();
+                  }} else if (event.key === "ArrowLeft") {{
+                    moveGallery(-1);
+                  }} else if (event.key === "ArrowRight") {{
+                    moveGallery(1);
+                  }}
+                }});
 
                 function formatNumber(value) {{
                   const number = Number(value);
@@ -2735,9 +3255,13 @@ jobs:
 
                 window.addEventListener("resize", () => {{
                   clearTimeout(chartResizeTimer);
-                  chartResizeTimer = setTimeout(drawTrendChart, 120);
+                  chartResizeTimer = setTimeout(() => {{
+                    drawTrendChart();
+                    refreshDescriptionToggles();
+                  }}, 120);
                 }});
 
+                requestAnimationFrame(refreshDescriptionToggles);
                 trackEvent("page_view");
                 loadStats();
               }})();

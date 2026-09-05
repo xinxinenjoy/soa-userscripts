@@ -29,6 +29,10 @@ env:
   # Workflow 自动生成目录，请勿手工维护
   PUBLISH_DIR: publish
 
+  # 网站静态资源源码目录。
+  # 图片等资源放这里，由 Flow 自动复制到 publish/assets/。
+  SITE_ASSETS_DIR: site-assets
+
 on:
   push:
     branches:
@@ -115,6 +119,14 @@ jobs:
           )
 
           PUBLISH_ROOT = ROOT / PUBLISH_DIR
+
+          SITE_ASSETS_DIR = os.environ.get(
+              "SITE_ASSETS_DIR",
+              "site-assets"
+          )
+
+          SITE_ASSETS_ROOT = ROOT / SITE_ASSETS_DIR
+          PUBLISH_ASSETS_ROOT = PUBLISH_ROOT / "assets"
 
           DISTRIBUTION_BASE_URL = os.environ.get(
               "DISTRIBUTION_BASE_URL",
@@ -767,6 +779,24 @@ jobs:
                   info["text"],
                   encoding="utf-8",
                   newline="\n"
+              )
+
+          # 网站静态资源统一从 site-assets/ 发布到 publish/assets/。
+          # 当前目录不存在时直接跳过，因此尚未准备图片也不会影响构建。
+          if SITE_ASSETS_ROOT.exists():
+              shutil.copytree(
+                  SITE_ASSETS_ROOT,
+                  PUBLISH_ASSETS_ROOT,
+                  dirs_exist_ok=True
+              )
+              print(
+                  f"网站静态资源已复制："
+                  f"{SITE_ASSETS_ROOT} -> {PUBLISH_ASSETS_ROOT}"
+              )
+          else:
+              print(
+                  f"网站静态资源目录不存在，已跳过："
+                  f"{SITE_ASSETS_ROOT}"
               )
 
 
