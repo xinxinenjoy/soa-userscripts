@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         扁鹊-1.3体检数据查询
 // @namespace    https://tampermonkey.net/
-// @version      1.3
+// @version      1.4.2
 // @description  SOA体检数据：打开模块后自动读取落单数据、体检汇总及套餐卡/储值卡数量，并支持卡池新标签页自动查询。注意：卡类查询需要账号用友对应的权限
 
 // @match        https://checkup-soa3.health-100.cn/*
@@ -25,6 +25,21 @@
  * - 与SOA.3.1智能审批完全解耦，不修改订单业务数据。
  *
  * 更新记录
+ *
+ * v1.4.2  -  2026-9-5
+ * - 优化体检数据窗体文字可读性：提高关键标签字号、字重和对比度，数值显示更清晰。
+ * - 将落单记录、体检汇总、卡类数量拆分为独立视觉区块，增加间距、浅色背景和区块标题，避免数据区域挤在一起。
+ * - 仅调整UI展示，不修改落单、体检、卡池查询、权限校验及刷新逻辑。
+ *
+ * v1.4.1  -  2026-9-5
+ * - 修复“刷新”按钮与关闭按钮缺少独立ID导致事件绑定到同一按钮的问题；刷新数据时不再关闭工具窗体。
+ * - 刷新按钮更名为“刷新数据”，调整为青绿色轻量按钮样式，并增加刷新中禁用状态。
+ * - 刷新仅清理当前数据缓存并在原窗口内重新查询，不调用关闭窗体逻辑；其余v1.4逻辑保持不变。
+ *
+ * v1.4  -  2026-9-5
+ * - 增加手动刷新按钮。
+ * - 打开模块仍自动读取数据，但后续不再自动重复刷新。
+ * - 刷新时重新请求当前订单数据，避免页面切换造成旧缓存影响。
  *
  * v1.3  -  2026-9-5
  * - 商机编号读取增加老订单兼容：优先读取“商机编号”，缺失或无有效数字时改用“单位代码”。
@@ -107,6 +122,10 @@
       "__soa_data_panel_v10",
     DRAG_HANDLE_ID:
       "__soa_data_drag_handle_v10",
+    REFRESH_ID:
+      "__soa_data_refresh_v141",
+    CLOSE_ID:
+      "__soa_data_close_v141",
     STATUS_ID:
       "__soa_data_status_v10",
     LANDING_DATA_BUTTON_ID:
@@ -1708,10 +1727,55 @@
         : "1fr";
 
     container.style.gap =
-      "8px";
+      "7px";
 
     container.style.marginTop =
       "0";
+
+    container.style.marginBottom =
+      "9px";
+
+    container.style.padding =
+      "8px";
+
+    container.style.border =
+      "1px solid #d9e9ff";
+
+    container.style.borderRadius =
+      "7px";
+
+    container.style.background =
+      "#f8fbff";
+
+    const sectionTitle =
+      document.createElement(
+        "div"
+      );
+
+    sectionTitle.style.cssText = [
+      "grid-column:1 / -1",
+      "display:flex",
+      "align-items:center",
+      "justify-content:space-between",
+      "margin-bottom:1px",
+      "color:#44546a",
+      "font-size:11px",
+      "font-weight:700",
+      "line-height:1.35"
+    ].join(";");
+
+    sectionTitle.innerHTML = `
+      <span>落单记录</span>
+      <span style="
+        color:#8a94a3;
+        font-size:10px;
+        font-weight:500;
+      ">点击记录可复制</span>
+    `;
+
+    container.appendChild(
+      sectionTitle
+    );
 
     options.forEach(option => {
       const button =
@@ -1726,15 +1790,17 @@
         `${option.label}｜${option.time}`;
 
       button.style.cssText = [
-        "min-height:34px",
-        "padding:5px 7px",
-        "border:1px solid #1677ff",
+        "min-height:36px",
+        "padding:6px 8px",
+        "border:1px solid #4096ff",
         "border-radius:6px",
         "background:#fff",
         "color:#1677ff",
+        "box-shadow:0 1px 3px rgba(22,119,255,.08)",
         "cursor:pointer",
         "font-size:12px",
-        "line-height:1.35"
+        "font-weight:600",
+        "line-height:1.4"
       ].join(";");
 
       button.addEventListener(
@@ -2137,41 +2203,68 @@
       ["自费金额", data.selfPayAmount]
     ];
 
-    grid.innerHTML =
-      items
+    grid.innerHTML = `
+      <div style="
+        grid-column:1 / -1;
+        margin-bottom:1px;
+        color:#44546a;
+        font-size:11px;
+        font-weight:700;
+        line-height:1.35;
+      ">
+        体检汇总
+      </div>
+      ${items
         .map(
           ([label, value]) => `
             <div style="
               min-width:0;
-              padding:6px 4px;
-              border:1px solid #f0f0f0;
-              border-radius:5px;
-              background:#fafafa;
+              padding:7px 4px;
+              border:1px solid #edf0f3;
+              border-radius:6px;
+              background:#fff;
               text-align:center;
               user-select:text;
             ">
               <div style="
-                margin-bottom:2px;
-                color:#999;
-                font-size:10px;
-                line-height:1.2;
+                margin-bottom:3px;
+                color:#667085;
+                font-size:11px;
+                font-weight:600;
+                line-height:1.25;
               ">${label}</div>
               <div style="
                 overflow:hidden;
                 text-overflow:ellipsis;
                 white-space:nowrap;
-                color:#262626;
-                font-size:13px;
-                font-weight:700;
-                line-height:1.3;
+                color:#1f2937;
+                font-size:14px;
+                font-weight:800;
+                line-height:1.35;
               " title="${value}">${value}</div>
             </div>
           `
         )
-        .join("");
+        .join("")}
+    `;
 
     grid.style.display =
       "grid";
+
+    grid.style.marginTop =
+      "0";
+
+    grid.style.padding =
+      "8px";
+
+    grid.style.border =
+      "1px solid #eceff3";
+
+    grid.style.borderRadius =
+      "7px";
+
+    grid.style.background =
+      "#fcfcfd";
   }
 
   function getCurrentCardCorpCode() {
@@ -3041,8 +3134,18 @@
       ]
     ];
 
-    grid.innerHTML =
-      items
+    grid.innerHTML = `
+      <div style="
+        grid-column:1 / -1;
+        margin-bottom:1px;
+        color:#44546a;
+        font-size:11px;
+        font-weight:700;
+        line-height:1.35;
+      ">
+        卡类数量
+      </div>
+      ${items
         .map(
           ([label, result]) => {
             const success =
@@ -3113,7 +3216,7 @@
                     ? "#d9f7be"
                     : "#ffccc7"
                 };
-                border-radius:5px;
+                border-radius:6px;
                 background:${
                   success
                     ? "#f6ffed"
@@ -3123,9 +3226,10 @@
               ">
                 <div style="
                   margin-bottom:3px;
-                  color:#999;
-                  font-size:10px;
-                  line-height:1.2;
+                  color:#667085;
+                  font-size:11px;
+                  font-weight:600;
+                  line-height:1.25;
                 ">${label}</div>
 
                 <div
@@ -3139,14 +3243,14 @@
                         ? "#cf1322"
                         : clickable
                           ? "#389e0d"
-                          : "#222"
+                          : "#1f2937"
                     };
                     font-size:${
                       success
                         ? "16px"
-                        : "10px"
+                        : "11px"
                     };
-                    font-weight:700;
+                    font-weight:800;
                     line-height:1.35;
                     cursor:${
                       clickable
@@ -3170,10 +3274,26 @@
             `;
           }
         )
-        .join("");
+        .join("")}
+    `;
 
     grid.style.display =
       "grid";
+
+    grid.style.marginTop =
+      "9px";
+
+    grid.style.padding =
+      "8px";
+
+    grid.style.border =
+      "1px solid #e3f1d5";
+
+    grid.style.borderRadius =
+      "7px";
+
+    grid.style.background =
+      "#fbfff8";
 
     grid.title =
       `cardCorpCode：${cardCorpCode}`;
@@ -3570,12 +3690,23 @@
             grid.innerHTML = `
               <div style="
                 grid-column:1 / -1;
+                color:#44546a;
+                font-size:11px;
+                font-weight:700;
+                line-height:1.35;
+              ">
+                卡类数量
+              </div>
+
+              <div style="
+                grid-column:1 / -1;
                 padding:8px;
                 border:1px solid #e5e7eb;
-                border-radius:5px;
-                background:#fafafa;
-                color:#999;
+                border-radius:6px;
+                background:#fff;
+                color:#7b8494;
                 font-size:11px;
+                font-weight:500;
                 text-align:center;
               ">
                 正在查询套餐卡、储值卡...
@@ -3584,6 +3715,16 @@
 
             grid.style.display =
               "grid";
+            grid.style.marginTop =
+              "9px";
+            grid.style.padding =
+              "8px";
+            grid.style.border =
+              "1px solid #e3f1d5";
+            grid.style.borderRadius =
+              "7px";
+            grid.style.background =
+              "#fbfff8";
           }
 
           cardPool =
@@ -3808,12 +3949,23 @@
             grid.innerHTML = `
               <div style="
                 grid-column:1 / -1;
+                color:#44546a;
+                font-size:11px;
+                font-weight:700;
+                line-height:1.35;
+              ">
+                卡类数量
+              </div>
+
+              <div style="
+                grid-column:1 / -1;
                 padding:8px;
                 border:1px solid #e5e7eb;
-                border-radius:5px;
-                background:#fafafa;
-                color:#999;
+                border-radius:6px;
+                background:#fff;
+                color:#7b8494;
                 font-size:11px;
+                font-weight:500;
                 text-align:center;
               ">
                 正在查询套餐卡、储值卡...
@@ -3822,6 +3974,16 @@
 
             grid.style.display =
               "grid";
+            grid.style.marginTop =
+              "9px";
+            grid.style.padding =
+              "8px";
+            grid.style.border =
+              "1px solid #e3f1d5";
+            grid.style.borderRadius =
+              "7px";
+            grid.style.background =
+              "#fbfff8";
           }
 
           cardPool =
@@ -3955,13 +4117,24 @@
     grid.innerHTML = `
       <div style="
         grid-column:1 / -1;
+        color:#44546a;
+        font-size:11px;
+        font-weight:700;
+        line-height:1.35;
+      ">
+        卡类数量
+      </div>
+
+      <div style="
+        grid-column:1 / -1;
         padding:8px;
         border:1px solid #ffccc7;
-        border-radius:5px;
+        border-radius:6px;
         background:#fff2f0;
         color:#cf1322;
         font-size:11px;
-        line-height:1.45;
+        font-weight:600;
+        line-height:1.5;
         text-align:center;
       ">
         当前页面未读取到商机编号或单位代码，暂无法查询套餐卡、储值卡。
@@ -3970,6 +4143,16 @@
 
     grid.style.display =
       "grid";
+    grid.style.marginTop =
+      "9px";
+    grid.style.padding =
+      "8px";
+    grid.style.border =
+      "1px solid #f7d4d1";
+    grid.style.borderRadius =
+      "7px";
+    grid.style.background =
+      "#fffafa";
   }
 
   function updateDataActionButtons(
@@ -4214,7 +4397,8 @@
       "box-shadow:0 8px 28px rgba(0,0,0,.18)",
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif",
       "font-size:13px",
-      "color:#333"
+      "line-height:1.45",
+      "color:#344054"
     ].join(";");
 
     panel.innerHTML = `
@@ -4230,23 +4414,57 @@
           cursor:move;
         "
       >
-        <strong style="font-size:15px;">
-          体检数据 v1.3
+        <strong style="
+          color:#303846;
+          font-size:15px;
+          font-weight:700;
+        ">
+          体检数据 v1.4.2
         </strong>
 
-        <button
-          id="__soa_data_close_v10"
-          type="button"
-          style="
-            width:26px;
-            height:26px;
-            border:0;
-            border-radius:5px;
-            background:#f5f5f5;
-            color:#666;
-            cursor:pointer;
-          "
-        >×</button>
+        <div style="
+          display:flex;
+          align-items:center;
+          gap:7px;
+          margin-left:auto;
+        ">
+          <button
+            id="${UI.REFRESH_ID}"
+            type="button"
+            title="重新查询当前订单的落单、体检及卡类数据"
+            style="
+              height:28px;
+              padding:0 12px;
+              border:1px solid #87e8de;
+              border-radius:7px;
+              background:linear-gradient(135deg,#e6fffb 0%,#f0fdfa 100%);
+              color:#08979c;
+              box-shadow:0 2px 7px rgba(19,168,168,.12);
+              font-size:12px;
+              font-weight:600;
+              line-height:26px;
+              cursor:pointer;
+              white-space:nowrap;
+              transition:all .18s ease;
+            "
+          >刷新数据</button>
+
+          <button
+            id="${UI.CLOSE_ID}"
+            type="button"
+            title="关闭"
+            style="
+              width:28px;
+              height:28px;
+              border:0;
+              border-radius:7px;
+              background:#f5f5f5;
+              color:#666;
+              font-size:15px;
+              cursor:pointer;
+            "
+          >×</button>
+        </div>
       </div>
 
       <div
@@ -4263,10 +4481,11 @@
         <div
           id="${UI.DATA_PANEL_TITLE_ID}"
           style="
-            margin-bottom:6px;
-            color:#555;
-            font-size:11px;
-            font-weight:600;
+            margin-bottom:8px;
+            color:#3f4a5a;
+            font-size:12px;
+            font-weight:700;
+            line-height:1.4;
             text-align:center;
           "
         ></div>
@@ -4291,9 +4510,7 @@
             display:none;
             grid-template-columns:1fr 1fr;
             gap:6px;
-            margin-top:6px;
-            padding-top:6px;
-            border-top:1px dashed #eee;
+            margin-top:9px;
           "
         ></div>
 
@@ -4306,9 +4523,10 @@
             border:1px solid #d9f7be;
             border-radius:5px;
             background:#fcfff8;
-            color:#555;
-            font-size:10px;
-            line-height:1.4;
+            color:#4b5563;
+            font-size:11px;
+            font-weight:500;
+            line-height:1.5;
             white-space:pre-wrap;
             word-break:break-all;
             user-select:text;
@@ -4323,19 +4541,21 @@
           margin-top:8px;
           padding:7px 8px;
           border-radius:6px;
-          font-size:11px;
-          line-height:1.45;
+          font-size:12px;
+          font-weight:500;
+          line-height:1.5;
           word-break:break-all;
         "
       ></div>
 
       <div style="
         margin-top:7px;
-        color:#999;
-        font-size:10px;
-        line-height:1.4;
+        color:#7b8494;
+        font-size:11px;
+        font-weight:500;
+        line-height:1.55;
       ">
-        打开模块即自动读取当前订单的落单、体检及卡类数据；15秒内重复打开优先复用已加载结果。
+        首次打开自动读取当前订单数据；需要更新时点击“刷新数据”，不进行非必要的后台自动刷新。
       </div>
     `;
 
@@ -4353,7 +4573,7 @@
 
     panel
       .querySelector(
-        "#__soa_data_close_v10"
+        `#${UI.CLOSE_ID}`
       )
       ?.addEventListener(
         "click",
@@ -4361,6 +4581,20 @@
           setPanelVisible(
             false
           )
+      );
+
+    panel
+      .querySelector(
+        `#${UI.REFRESH_ID}`
+      )
+      ?.addEventListener(
+        "click",
+        event => {
+          event.preventDefault();
+          event.stopPropagation();
+
+          refreshPhysicalDataPanel();
+        }
       );
 
 
@@ -4394,6 +4628,82 @@
       panelVisible
         ? "关闭体检数据面板"
         : "查询当前订单体检数据";
+  }
+
+
+  async function refreshPhysicalDataPanel() {
+    if (combinedDataQueryRunning || physicalDataQueryRunning) {
+      updatePanelStatus(
+        "数据正在查询中，请稍候..."
+      );
+      return;
+    }
+
+    syncDataOrderContext();
+
+    const button =
+      document.getElementById(
+        UI.REFRESH_ID
+      );
+
+    if (button) {
+      button.disabled = true;
+      button.textContent = "刷新中...";
+      button.style.opacity = "0.62";
+      button.style.cursor = "wait";
+      button.style.boxShadow = "none";
+    }
+
+    try {
+      /*
+       * 手动刷新只刷新数据，不改变窗体开关状态。
+       * 保持panelVisible=true，并确保当前窗体继续显示。
+       */
+      panelVisible = true;
+
+      const panel =
+        document.getElementById(
+          UI.PANEL_ID
+        );
+
+      if (panel) {
+        panel.style.display =
+          "block";
+      }
+
+      combinedDataCache = {
+        orderCode: "",
+        timestamp: 0
+      };
+
+      cardPoolQueryCache = {
+        orderCode: "",
+        cardCorpCode: "",
+        timestamp: 0,
+        data: null
+      };
+
+      await loadCombinedDataOnOpen(true);
+
+      updatePanelStatus(
+        "✓ 数据已重新查询。",
+        "success"
+      );
+    } catch (error) {
+      warn(
+        error?.message ||
+        String(error)
+      );
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "刷新数据";
+        button.style.opacity = "1";
+        button.style.cursor = "pointer";
+        button.style.boxShadow =
+          "0 2px 7px rgba(19,168,168,.12)";
+      }
+    }
   }
 
   function setPanelVisible(visible) {
