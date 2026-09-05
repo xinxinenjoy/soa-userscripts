@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         扁鹊-1.4对账报表导出
 // @namespace    https://tampermonkey.net/
-// @version      1.7
+// @version      1.9
 // @description  SOA对账报表：支持自定义日期区间，突破3年的时间段限制，自动分段查询、导出。并自动对比报表与订单内的数据差异。
 
 // @match        https://checkup-soa3.health-100.cn/*
@@ -28,8 +28,8 @@
  * SOA.3.3对账报表
  *
  * 当前功能：
- * - SOA订单页自动识别单位代码和订单编号。
- * - 开始、结束日期均可填写；默认结束日期为今天，开始日期取当前订单流程中的“报价确认”日期。
+ * - SOA订单页优先读取商机编号，老订单缺失时自动使用单位代码，并识别订单编号。
+ * - 开始、结束日期均可填写；默认结束日期为今天，开始日期取“报价确认”日期；若已超过单段1080天，则自动向前扩展到完整查询区间。
  * - 超过1080天的日期范围自动拆分为多个连续区间查询并汇总金额。
  * - 支持多种日期格式输入并自动标准化。
  * - 优先复用Fly有效Token；缺失/失效时才打开一次Fly页面刷新授权。
@@ -39,6 +39,15 @@
  * - 面板支持拖动并保存位置；后续其他Fly同类型报表导出统一在本脚本扩展。
  *
  * 更新记录
+ *
+ * v1.9  -  2026-9-5
+ * - 优化默认开始日期：报价确认距结束日期超过1080天时，自动向前扩展到完整查询区间。
+ * - 例如原范围已经需要2次查询，则默认开始日期向前扩展，使2个查询区间都尽量用满；若需要更多区间，同样按完整区间扩展。
+ * - 手工修改开始日期、分段规则、查询、金额核对及导出逻辑均不变。
+ *
+ * v1.8  -  2026-9-5
+ * - 单位查询代码兼容老订单：优先读取“商机编号”，缺失或无有效数字时改用“单位代码”。
+ * - 仅从“商机编号 / 单位代码”两个明确字段提取数字，不扫描页面其他数字；其余报表查询逻辑不变。
  *
  * v1.7  -  2026-9-3
  * - 默认开始日期改为当前订单流程进度中的“报价确认”日期。
@@ -1210,6 +1219,87 @@
     );
   }
 
+
+  function getRegisterFieldTextByLabel(labelText) {
+    const target = compactText(labelText);
+
+    const labels = Array.from(
+      document.querySelectorAll(
+        "#register label, #register .ant-form-item-label, #register [class*='label']"
+      )
+    );
+
+    for (const label of labels) {
+      const text = compactText(
+        label.getAttribute?.("title") ||
+        label.textContent
+      );
+
+      if (text !== target) continue;
+
+      const item =
+        label.closest(".ant-form-item") ||
+        label.parentElement;
+
+      const control = item?.querySelector(
+        ".ant-form-item-control-input-content, .ant-form-item-control"
+      );
+
+      const value = cleanText(
+        control?.innerText ||
+        control?.textContent ||
+        ""
+      );
+
+      if (value) return value;
+    }
+
+    const candidates = Array.from(
+      document.querySelectorAll(
+        "#register div, #register span, #register p"
+      )
+    ).filter(
+      element =>
+        compactText(element.textContent) === target
+    );
+
+    for (const label of candidates) {
+      const row = label.parentElement;
+      if (!row) continue;
+
+      const siblings = Array.from(row.children);
+      const index = siblings.indexOf(label);
+      const nearby = [
+        siblings[index + 1],
+        label.nextElementSibling
+      ].filter(Boolean);
+
+      for (const node of nearby) {
+        const value = cleanText(
+          node.innerText ||
+          node.textContent
+        );
+
+        if (
+          value &&
+          compactText(value) !== target
+        ) {
+          return value;
+        }
+      }
+    }
+
+    return "";
+  }
+
+  function extractBusinessCodeDigits(value) {
+    const raw = cleanText(value)
+      .replace(/^'+/, "")
+      .trim();
+
+    return raw.match(/\d+/)?.[0] || "";
+  }
+
   function extractDateFromText(
     value
   ) {
@@ -1301,41 +1391,103 @@
   function getDefaultReportStartDate(
     endDate
   ) {
-    return (
-      detectQuoteConfirmDate() ||
-      addDays(
+    const quoteDate =
+      detectQuoteConfirmDate();
+
+    if (!quoteDate) {
+      return addDays(
         endDate,
         -FIXED_LOOKBACK_DAYS
-      )
+      );
+    }
+
+    const distanceDays =
+      diffDays(
+        quoteDate,
+        endDate
+      );
+
+    if (
+      !Number.isFinite(
+        distanceDays
+      ) ||
+      distanceDays <=
+        FIXED_LOOKBACK_DAYS
+    ) {
+      return quoteDate;
+    }
+
+    /*
+     * 单次查询允许的最大日期差为1080天，
+     * 实际包含首尾两天，因此一个完整区间覆盖1081个自然日。
+     *
+     * 当“报价确认 → 结束日期”已经超过一个完整区间时，
+     * 不再只从报价确认日开始，而是把总查询范围向前补齐到
+     * 整数个完整区间。
+     *
+     * 例如原本已经需要2次查询：
+     *   第1段：1080天日期差
+     *   第2段：1080天日期差
+     *
+     * 两段连续且不重叠时，总日期差为2161天。
+     * 这样既然已经要请求2次，就把2次区间尽量用满，
+     * 同时保留更早数据，减少遗漏风险。
+     */
+    const fullPeriodDays =
+      FIXED_LOOKBACK_DAYS +
+      1;
+
+    const requiredSegments =
+      Math.ceil(
+        (
+          distanceDays +
+          1
+        ) /
+        fullPeriodDays
+      );
+
+    const fullLookbackDays =
+      requiredSegments *
+        fullPeriodDays -
+      1;
+
+    return addDays(
+      endDate,
+      -fullLookbackDays
     );
   }
 
   function detectCorpCode() {
-    const direct =
+    const opportunityRaw =
       cleanText(
         document.querySelector(
           CORP_SELECTOR
         )?.textContent
-      );
-
-    const fallback =
+      ) ||
       cleanText(
         getFormItemTextByFor(
           "register_opportunity_id"
         )
+      ) ||
+      getRegisterFieldTextByLabel(
+        "商机编号"
       );
 
-    const raw =
-      direct ||
-      fallback;
-
-    const match =
-      raw.match(
-        /\d{8,}/
+    const opportunityCode =
+      extractBusinessCodeDigits(
+        opportunityRaw
       );
+
+    if (opportunityCode) {
+      return opportunityCode;
+    }
 
     return (
-      match?.[0] ||
+      extractBusinessCodeDigits(
+        getRegisterFieldTextByLabel(
+          "单位代码"
+        )
+      ) ||
       ""
     );
   }
@@ -3485,7 +3637,7 @@
         <strong style="
           font-size:15px;
           line-height:1.2;
-        ">对账报表 v1.7</strong>
+        ">对账报表 v1.9</strong>
 
         <button
           id="__soa_report_close_v13"
