@@ -33,6 +33,12 @@ env:
   # 图片等资源放这里，由 Flow 自动复制到 publish/assets/。
   SITE_ASSETS_DIR: site-assets
 
+  # 网站脚本截图自动优化参数
+  IMAGE_MAX_EDGE: 1920
+  IMAGE_WEBP_QUALITY: 88
+  IMAGE_THUMB_EDGE: 360
+  IMAGE_THUMB_QUALITY: 76
+
 on:
   push:
     branches:
@@ -84,10 +90,14 @@ jobs:
       # ========================================================
       # 1. 准备中文目录转拼音简称所需依赖
       # ========================================================
-      - name: Install Pinyin Dependency
+      - name: Install Build Dependencies
         shell: bash
         run: |
-          python3 -m pip install --disable-pip-version-check --quiet pypinyin
+          python3 -m pip install \
+            --disable-pip-version-check \
+            --quiet \
+            pypinyin \
+            pillow
 
       # ========================================================
       # 2. 维护源脚本 + 生成固定 publish 目录
@@ -781,25 +791,6 @@ jobs:
                   newline="\n"
               )
 
-          # 网站静态资源统一从 site-assets/ 发布到 publish/assets/。
-          # 当前目录不存在时直接跳过，因此尚未准备图片也不会影响构建。
-          if SITE_ASSETS_ROOT.exists():
-              shutil.copytree(
-                  SITE_ASSETS_ROOT,
-                  PUBLISH_ASSETS_ROOT,
-                  dirs_exist_ok=True
-              )
-              print(
-                  f"网站静态资源已复制："
-                  f"{SITE_ASSETS_ROOT} -> {PUBLISH_ASSETS_ROOT}"
-              )
-          else:
-              print(
-                  f"网站静态资源目录不存在，已跳过："
-                  f"{SITE_ASSETS_ROOT}"
-              )
-
-
           print("")
           print(
               f"源脚本数量：{len(prepared)}"
@@ -814,6 +805,342 @@ jobs:
           print(
               f"Cloudflare 分发根地址：{DISTRIBUTION_BASE_URL}"
           )
+          PY
+
+      # ========================================================
+      # 3. 自动优化网站图片
+      #
+      # site-assets/scripts/<publishID>/ 中保存原图。
+      # 构建时统一输出：
+      #   publish/assets/scripts/<publishID>/<name>.webp
+      #   publish/assets/scripts/<publishID>/thumbs/<name>.webp
+      #
+      # 其它 site-assets/ 内容保持原样复制到 publish/assets/。
+      # ========================================================
+      - name: Optimize Website Images
+        shell: bash
+        run: |
+          cd source
+
+          python3 <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageOps, UnidentifiedImageError
+          import os
+          import re
+          import shutil
+
+          ROOT = Path(".")
+
+          PUBLISH_DIR = os.environ.get(
+              "PUBLISH_DIR",
+              "publish"
+          )
+
+          SITE_ASSETS_DIR = os.environ.get(
+              "SITE_ASSETS_DIR",
+              "site-assets"
+          )
+
+          MAX_EDGE = max(
+              320,
+              int(os.environ.get("IMAGE_MAX_EDGE", "1920"))
+          )
+
+          WEBP_QUALITY = min(
+              100,
+              max(
+                  50,
+                  int(os.environ.get("IMAGE_WEBP_QUALITY", "88"))
+              )
+          )
+
+          THUMB_EDGE = max(
+              120,
+              int(os.environ.get("IMAGE_THUMB_EDGE", "360"))
+          )
+
+          THUMB_QUALITY = min(
+              95,
+              max(
+                  40,
+                  int(os.environ.get("IMAGE_THUMB_QUALITY", "76"))
+              )
+          )
+
+          SOURCE_ROOT = ROOT / SITE_ASSETS_DIR
+          SOURCE_SCRIPT_ROOT = SOURCE_ROOT / "scripts"
+
+          PUBLISH_ROOT = ROOT / PUBLISH_DIR
+          OUTPUT_ROOT = PUBLISH_ROOT / "assets"
+          OUTPUT_SCRIPT_ROOT = OUTPUT_ROOT / "scripts"
+
+          SOURCE_SUFFIXES = {
+              ".png",
+              ".jpg",
+              ".jpeg",
+              ".webp",
+              ".gif",
+              ".bmp",
+              ".tif",
+              ".tiff",
+          }
+
+
+          def natural_sort_key(value):
+              return [
+                  int(part) if part.isdigit() else part.lower()
+                  for part in re.split(r"(\d+)", str(value))
+              ]
+
+
+          def readable_size(value):
+              size = float(value)
+
+              for unit in ("B", "KB", "MB", "GB"):
+                  if size < 1024 or unit == "GB":
+                      if unit == "B":
+                          return f"{int(size)} {unit}"
+                      return f"{size:.1f} {unit}"
+
+                  size /= 1024
+
+              return f"{size:.1f} GB"
+
+
+          def unique_output_name(stem, used_names):
+              clean_stem = str(stem or "image").strip() or "image"
+              candidate = f"{clean_stem}.webp"
+              number = 2
+
+              while candidate.lower() in used_names:
+                  candidate = f"{clean_stem}-{number}.webp"
+                  number += 1
+
+              used_names.add(candidate.lower())
+              return candidate
+
+
+          def prepare_image(image):
+              # 修复手机照片 / 截图的 EXIF 旋转方向。
+              image = ImageOps.exif_transpose(image)
+
+              # 动图用于脚本功能展示时只取第一帧。
+              if getattr(image, "is_animated", False):
+                  image.seek(0)
+
+              bands = image.getbands()
+
+              if "A" in bands:
+                  return image.convert("RGBA")
+
+              return image.convert("RGB")
+
+
+          def resize_for_web(image, max_edge):
+              result = image.copy()
+
+              if max(result.size) > max_edge:
+                  result.thumbnail(
+                      (max_edge, max_edge),
+                      Image.Resampling.LANCZOS
+                  )
+
+              return result
+
+
+          # publish/ 每次已经由上一步整体重建。
+          # 这里仍单独清理 assets/，保证删除原图后旧发布图不会残留。
+          if OUTPUT_ROOT.exists():
+              shutil.rmtree(OUTPUT_ROOT)
+
+          OUTPUT_ROOT.mkdir(
+              parents=True,
+              exist_ok=True
+          )
+
+          if not SOURCE_ROOT.exists():
+              print(
+                  f"未发现 {SITE_ASSETS_DIR}/，"
+                  "跳过网站图片处理。"
+              )
+              raise SystemExit(0)
+
+
+          # --------------------------------------------
+          # 非 scripts/ 目录中的普通网站资源保持原样复制
+          # --------------------------------------------
+          for item in sorted(
+              SOURCE_ROOT.iterdir(),
+              key=lambda path: natural_sort_key(path.name),
+          ):
+              if item.name == "scripts":
+                  continue
+
+              target = OUTPUT_ROOT / item.name
+
+              if item.is_dir():
+                  shutil.copytree(
+                      item,
+                      target,
+                      dirs_exist_ok=True
+                  )
+              elif item.is_file():
+                  target.parent.mkdir(
+                      parents=True,
+                      exist_ok=True
+                  )
+                  shutil.copy2(
+                      item,
+                      target
+                  )
+
+
+          if not SOURCE_SCRIPT_ROOT.exists():
+              print(
+                  "未发现 site-assets/scripts/，"
+                  "当前没有脚本图片需要处理。"
+              )
+              raise SystemExit(0)
+
+
+          processed_count = 0
+          skipped_count = 0
+          source_bytes = 0
+          output_bytes = 0
+
+          for script_dir in sorted(
+              (
+                  path
+                  for path in SOURCE_SCRIPT_ROOT.iterdir()
+                  if path.is_dir()
+              ),
+              key=lambda path: natural_sort_key(path.name),
+          ):
+              source_files = sorted(
+                  (
+                      path
+                      for path in script_dir.iterdir()
+                      if path.is_file()
+                      and not path.name.startswith(".")
+                      and path.suffix.lower() in SOURCE_SUFFIXES
+                  ),
+                  key=lambda path: natural_sort_key(path.name),
+              )
+
+              if not source_files:
+                  continue
+
+              output_dir = OUTPUT_SCRIPT_ROOT / script_dir.name
+              thumb_dir = output_dir / "thumbs"
+
+              output_dir.mkdir(
+                  parents=True,
+                  exist_ok=True
+              )
+
+              thumb_dir.mkdir(
+                  parents=True,
+                  exist_ok=True
+              )
+
+              used_names = set()
+
+              print("")
+              print(f"处理脚本图片：{script_dir.name}")
+
+              for source in source_files:
+                  original_size = source.stat().st_size
+
+                  try:
+                      with Image.open(source) as opened:
+                          if getattr(opened, "is_animated", False):
+                              print(
+                                  f"  提示：{source.name} 为动图，"
+                                  "网页发布版仅使用第一帧。"
+                              )
+
+                          image = prepare_image(opened)
+
+                  except (
+                      UnidentifiedImageError,
+                      OSError,
+                      ValueError
+                  ) as exc:
+                      skipped_count += 1
+                      print(
+                          "::warning::"
+                          f"无法处理图片 {source.as_posix()}：{exc}"
+                      )
+                      continue
+
+                  output_name = unique_output_name(
+                      source.stem,
+                      used_names
+                  )
+
+                  output_path = output_dir / output_name
+                  thumb_path = thumb_dir / output_name
+
+                  web_image = resize_for_web(
+                      image,
+                      MAX_EDGE
+                  )
+
+                  web_image.save(
+                      output_path,
+                      "WEBP",
+                      quality=WEBP_QUALITY,
+                      method=6
+                  )
+
+                  thumb_image = resize_for_web(
+                      image,
+                      THUMB_EDGE
+                  )
+
+                  thumb_image.save(
+                      thumb_path,
+                      "WEBP",
+                      quality=THUMB_QUALITY,
+                      method=6
+                  )
+
+                  published_size = output_path.stat().st_size
+                  thumb_size = thumb_path.stat().st_size
+
+                  source_bytes += original_size
+                  output_bytes += published_size + thumb_size
+                  processed_count += 1
+
+                  print(
+                      f"  {source.name}"
+                      f" -> {output_name}"
+                      f" | {readable_size(original_size)}"
+                      f" -> {readable_size(published_size)}"
+                      f" + 缩略图 {readable_size(thumb_size)}"
+                      f" | {web_image.width}x{web_image.height}"
+                  )
+
+
+          print("")
+          print(f"图片处理完成：{processed_count} 张")
+          print(f"跳过：{skipped_count} 张")
+
+          if processed_count:
+              print(
+                  f"原图总大小：{readable_size(source_bytes)}"
+              )
+              print(
+                  f"网页图 + 缩略图：{readable_size(output_bytes)}"
+              )
+              print(
+                  f"网页大图最长边：{MAX_EDGE}px"
+                  f" / WebP质量：{WEBP_QUALITY}"
+              )
+              print(
+                  f"缩略图最长边：{THUMB_EDGE}px"
+                  f" / WebP质量：{THUMB_QUALITY}"
+              )
           PY
 
       # ========================================================
