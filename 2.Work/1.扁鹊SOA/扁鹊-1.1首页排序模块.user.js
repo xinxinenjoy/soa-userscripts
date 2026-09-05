@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         扁鹊-1.1首页模块排序
 // @namespace    https://tampermonkey.net/
-// @version      4.6
-// @description  SOA首页模块排序：可自由排序首页图标，支持拖拽、保存、恢复默认、设置每行显示列数、设置模块宽度、设置列间距。
+// @version      4.7
+// @description  SOA首页模块排序：支持网页原始顺序/脚本排序两种图标方案，并支持拖拽保存、列数、模块宽度及列间距设置。
 
 // @match        *://*home.health-100.cn/*
 // @grant        none
@@ -16,6 +16,12 @@
 
 /*
  * 更新记录
+ *
+ * v4.7  -  2026-9-5
+ * - “布局”面板增加两种图标顺序方案：网页原始顺序 / 脚本排序。
+ * - 网页原始顺序按当前网页首次渲染顺序显示，不写入、不覆盖脚本已保存的自定义排序。
+ * - 脚本排序继续沿用原有预设顺序及拖拽后本地保存的顺序；切换方案会自动保存。
+ * - 网页原始顺序下关闭拖拽排序，避免无意改变脚本排序记录；其他布局参数保持原逻辑。
  *
  * v4.5  -  2026-8-29
  * - 更新：测试版本
@@ -80,6 +86,11 @@
 
   const DEFAULT_ROW_GAP = 14;
 
+  const ORDER_MODE = {
+    ORIGINAL: "original",
+    SCRIPT: "script"
+  };
+
   // 继续沿用 v4.0 的 key。
   // 因此如果你已经用上一版排过顺序，新版会直接继承。
   const STORAGE = {
@@ -87,7 +98,8 @@
     columns: "__soa_app_columns_v4",
     buttonPos: "__soa_control_button_pos_v4",
     cardWidth: "__soa_app_card_width_v45",
-    columnGap: "__soa_app_column_gap_v45"
+    columnGap: "__soa_app_column_gap_v45",
+    orderMode: "__soa_app_order_mode_v47"
   };
 
   const IDS = {
@@ -98,6 +110,8 @@
     cardWidth: "__soa_card_width_input",
     columnGap: "__soa_column_gap_input",
     sortSwitch: "__soa_sort_switch",
+    orderModeOriginal: "__soa_order_mode_original",
+    orderModeScript: "__soa_order_mode_script",
     status: "__soa_layout_status"
   };
 
@@ -132,6 +146,9 @@
   let latestMoveEvent = null;
 
   let suppressNextClick = false;
+
+  // 仅记录当前页面生命周期中的网站原始顺序，不写入本地存储。
+  const originalOrderSnapshots = new Map();
 
   const DRAG_ACTIVATION_DISTANCE = 8;
 
@@ -198,6 +215,17 @@
     return DEFAULT_COLUMNS;
   }
 
+
+  function getSavedOrderMode() {
+    const value = storageGet(
+      STORAGE.orderMode,
+      ORDER_MODE.SCRIPT
+    );
+
+    return value === ORDER_MODE.ORIGINAL
+      ? ORDER_MODE.ORIGINAL
+      : ORDER_MODE.SCRIPT;
+  }
 
   function getSavedCardWidth() {
     const n = Number(
@@ -432,6 +460,112 @@
     return result;
   }
 
+  function getVisibleOrderKey(names) {
+    return [...names]
+      .sort((a, b) => a.localeCompare(b, "zh-CN"))
+      .join("\u001f");
+  }
+
+  function captureOriginalOrder(row = getRow()) {
+    const names = getCols(row)
+      .map(getName)
+      .filter(Boolean);
+
+    if (!names.length) return [];
+
+    const key = getVisibleOrderKey(names);
+
+    if (!originalOrderSnapshots.has(key)) {
+      originalOrderSnapshots.set(
+        key,
+        [...names]
+      );
+
+      console.log(
+        "[SOA布局] 已记录网页原始顺序：",
+        names
+      );
+    }
+
+    return (
+      originalOrderSnapshots.get(key) ||
+      [...names]
+    );
+  }
+
+  function getOriginalOrder(row = getRow()) {
+    const names = getCols(row)
+      .map(getName)
+      .filter(Boolean);
+
+    if (!names.length) return [];
+
+    const key = getVisibleOrderKey(names);
+
+    return (
+      originalOrderSnapshots.get(key) ||
+      captureOriginalOrder(row)
+    );
+  }
+
+  function restoreOriginalOrder() {
+    const row = getRow();
+    const cols = getCols(row);
+
+    if (!row || !cols.length) return;
+
+    const originalOrder =
+      getOriginalOrder(row);
+
+    const rank = new Map(
+      originalOrder.map(
+        (name, index) => [name, index]
+      )
+    );
+
+    cols
+      .map((col, index) => ({
+        col,
+        index,
+        name: getName(col)
+      }))
+      .sort((a, b) => {
+        const aKnown = rank.has(a.name);
+        const bKnown = rank.has(b.name);
+
+        if (aKnown && bKnown) {
+          return rank.get(a.name) - rank.get(b.name);
+        }
+
+        if (aKnown) return -1;
+        if (bKnown) return 1;
+        return a.index - b.index;
+      })
+      .forEach(item =>
+        row.appendChild(item.col)
+      );
+  }
+
+  function isOriginalOrderApplied() {
+    const row = getRow();
+    const names = getCols(row)
+      .map(getName)
+      .filter(Boolean);
+
+    if (!names.length) return true;
+
+    const originalOrder =
+      getOriginalOrder(row);
+
+    return (
+      names.length === originalOrder.length &&
+      names.every(
+        (name, index) =>
+          name === originalOrder[index]
+      )
+    );
+  }
+
   function saveCurrentOrder() {
     const names = getCols().map(getName).filter(Boolean);
     if (!names.length) return;
@@ -503,9 +637,21 @@
   }
 
   function resetToDefaultOrder() {
-    storageSet(STORAGE.order, JSON.stringify(DEFAULT_ORDER));
+    storageSet(
+      STORAGE.order,
+      JSON.stringify(DEFAULT_ORDER)
+    );
+
+    storageSet(
+      STORAGE.orderMode,
+      ORDER_MODE.SCRIPT
+    );
+
+    sortEnabled = false;
     restoreOrder();
     applyGridLayout();
+    updateSortableState();
+    updateOrderModeUi();
     showStatus("已恢复脚本预设顺序");
   }
 
@@ -513,9 +659,121 @@
    * 7. 排序状态
    * ========================================================= */
 
+  function updateOrderModeUi() {
+    const mode = getSavedOrderMode();
+
+    const originalButton =
+      document.getElementById(
+        IDS.orderModeOriginal
+      );
+
+    const scriptButton =
+      document.getElementById(
+        IDS.orderModeScript
+      );
+
+    originalButton?.classList.toggle(
+      "__soa_mode_active",
+      mode === ORDER_MODE.ORIGINAL
+    );
+
+    scriptButton?.classList.toggle(
+      "__soa_mode_active",
+      mode === ORDER_MODE.SCRIPT
+    );
+
+    const checkbox =
+      document.getElementById(
+        IDS.sortSwitch
+      );
+
+    const switchWrap =
+      checkbox?.closest(
+        ".__soa_switch"
+      );
+
+    if (checkbox) {
+      const disabled =
+        mode === ORDER_MODE.ORIGINAL;
+
+      checkbox.disabled = disabled;
+
+      if (disabled) {
+        checkbox.checked = false;
+      }
+    }
+
+    if (switchWrap) {
+      switchWrap.style.opacity =
+        mode === ORDER_MODE.ORIGINAL
+          ? "0.45"
+          : "1";
+
+      switchWrap.title =
+        mode === ORDER_MODE.ORIGINAL
+          ? "网页原始顺序下不启用拖拽排序"
+          : "";
+    }
+  }
+
+  function setOrderMode(mode) {
+    const nextMode =
+      mode === ORDER_MODE.ORIGINAL
+        ? ORDER_MODE.ORIGINAL
+        : ORDER_MODE.SCRIPT;
+
+    if (dragState) {
+      finishDrag(
+        nextMode === ORDER_MODE.SCRIPT
+      );
+    } else if (pendingDrag) {
+      cancelPendingDrag(
+        pendingDrag.pointerId
+      );
+    }
+
+    if (
+      nextMode ===
+      ORDER_MODE.ORIGINAL
+    ) {
+      sortEnabled = false;
+    }
+
+    storageSet(
+      STORAGE.orderMode,
+      nextMode
+    );
+
+    if (
+      nextMode ===
+      ORDER_MODE.ORIGINAL
+    ) {
+      restoreOriginalOrder();
+    } else {
+      restoreOrder();
+    }
+
+    applyGridLayout();
+    updateSortableState();
+    updateOrderModeUi();
+
+    showStatus(
+      nextMode === ORDER_MODE.ORIGINAL
+        ? "已切换：网页原始顺序"
+        : "已切换：脚本排序"
+    );
+  }
+
   function updateSortableState() {
+    const scriptMode =
+      getSavedOrderMode() ===
+      ORDER_MODE.SCRIPT;
+
     getCols().forEach(col => {
-      if (sortEnabled) {
+      if (
+        sortEnabled &&
+        scriptMode
+      ) {
         col.classList.add(CLS.sortable);
         col.style.cursor = "grab";
       } else {
@@ -528,6 +786,20 @@
   }
 
   function setSortEnabled(enabled) {
+    if (
+      enabled &&
+      getSavedOrderMode() !==
+        ORDER_MODE.SCRIPT
+    ) {
+      sortEnabled = false;
+      updateSortableState();
+      updateOrderModeUi();
+      showStatus(
+        "请先切换到“脚本排序”再拖拽"
+      );
+      return;
+    }
+
     sortEnabled = Boolean(enabled);
 
     if (!sortEnabled && pendingDrag) {
@@ -547,13 +819,30 @@
 
     updateSortableState();
 
-    const checkbox = document.getElementById(IDS.sortSwitch);
-    if (checkbox) checkbox.checked = sortEnabled;
+    const checkbox =
+      document.getElementById(
+        IDS.sortSwitch
+      );
+
+    if (checkbox) {
+      checkbox.checked =
+        sortEnabled &&
+        getSavedOrderMode() ===
+          ORDER_MODE.SCRIPT;
+    }
+
+    updateOrderModeUi();
 
     if (sortEnabled) {
       showStatus("排序已开启，拖动卡片后自动保存");
     } else {
-      saveCurrentOrder();
+      if (
+        getSavedOrderMode() ===
+        ORDER_MODE.SCRIPT
+      ) {
+        saveCurrentOrder();
+      }
+
       showStatus("排序已关闭");
       scheduleApply();
     }
@@ -1437,6 +1726,63 @@
       }
 
 
+      #${IDS.panel} .__soa_mode_label {
+        margin: 2px 0 7px;
+        color: #515a6e;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      #${IDS.panel} .__soa_mode_grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 7px;
+      }
+
+      #${IDS.panel} .__soa_mode_btn {
+        min-width: 0;
+        height: 56px;
+        padding: 6px 7px;
+        border: 1px solid #dcdee2;
+        border-radius: 8px;
+        background: #fff;
+        color: #515a6e;
+        cursor: pointer;
+        box-sizing: border-box;
+        transition:
+          border-color .15s ease,
+          background .15s ease,
+          color .15s ease;
+      }
+
+      #${IDS.panel} .__soa_mode_btn:hover {
+        border-color: #2d8cf0;
+        color: #2d8cf0;
+      }
+
+      #${IDS.panel} .__soa_mode_btn.__soa_mode_active {
+        border-color: #2d8cf0;
+        background: #eef7ff;
+        color: #2d8cf0;
+      }
+
+      #${IDS.panel} .__soa_mode_icon {
+        display: block;
+        margin-bottom: 3px;
+        font-size: 18px;
+        line-height: 1;
+      }
+
+      #${IDS.panel} .__soa_mode_text {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
       #${IDS.panel} .__soa_num_wrap {
         display: flex;
         align-items: center;
@@ -1617,11 +1963,24 @@
     const columns = getSavedColumns();
     const cardWidth = getSavedCardWidth();
 
-    if (sortEnabled) {
-      button.textContent = `↕ 排序中 · ${columns}列`;
+    const orderMode =
+      getSavedOrderMode();
+
+    if (
+      sortEnabled &&
+      orderMode === ORDER_MODE.SCRIPT
+    ) {
+      button.textContent =
+        `↕ 排序中 · ${columns}列`;
       button.classList.add("__soa_sort_active");
     } else {
-      button.textContent = `🧩 布局 · ${columns}列 · ${cardWidth}px`;
+      const modeText =
+        orderMode === ORDER_MODE.ORIGINAL
+          ? "原始"
+          : "脚本";
+
+      button.textContent =
+        `🧩 布局 · ${modeText} · ${columns}列`;
       button.classList.remove("__soa_sort_active");
     }
   }
@@ -1659,6 +2018,32 @@
 
     panel.innerHTML = `
       <div class="__soa_title">应用中心布局</div>
+
+      <div class="__soa_mode_label">
+        图标顺序
+      </div>
+
+      <div class="__soa_mode_grid">
+        <button
+          id="${IDS.orderModeOriginal}"
+          class="__soa_mode_btn"
+          type="button"
+          data-order-mode="${ORDER_MODE.ORIGINAL}"
+        >
+          <span class="__soa_mode_icon">↩</span>
+          <span class="__soa_mode_text">网页原始顺序</span>
+        </button>
+
+        <button
+          id="${IDS.orderModeScript}"
+          class="__soa_mode_btn"
+          type="button"
+          data-order-mode="${ORDER_MODE.SCRIPT}"
+        >
+          <span class="__soa_mode_icon">↕</span>
+          <span class="__soa_mode_text">脚本排序</span>
+        </button>
+      </div>
 
       <div class="__soa_row">
         <span>每行最多列数</span>
@@ -1706,8 +2091,8 @@
       </div>
 
       <div class="__soa_hint">
-        模块采用固定宽度并从左排列，不再强行拉满整行。<br>
-        开启排序后仍按网格槽位锁定方式拖动，松手自动保存。
+        “网页原始顺序”完全按网站当前原始顺序显示；“脚本排序”使用预设/拖拽保存顺序。<br>
+        模块仍采用固定宽度左对齐；脚本排序下可开启拖拽，松手自动保存。
       </div>
 
       <div id="${IDS.status}">
@@ -1743,6 +2128,7 @@
     cardWidthInput.value = String(getSavedCardWidth());
     columnGapInput.value = String(getSavedColumnGap());
     sortSwitch.checked = sortEnabled;
+    updateOrderModeUi();
 
     select.addEventListener("change", () => {
       setColumns(select.value);
@@ -1773,6 +2159,18 @@
     });
 
     panel.addEventListener("click", e => {
+      const modeButton =
+        e.target?.closest?.(
+          "[data-order-mode]"
+        );
+
+      if (modeButton) {
+        setOrderMode(
+          modeButton.dataset.orderMode
+        );
+        return;
+      }
+
       const action = e.target?.dataset?.action;
       if (!action) return;
 
@@ -1823,9 +2221,13 @@
       }
 
       if (checkbox) {
-        checkbox.checked = sortEnabled;
+        checkbox.checked =
+          sortEnabled &&
+          getSavedOrderMode() ===
+            ORDER_MODE.SCRIPT;
       }
 
+      updateOrderModeUi();
       positionPanel();
     }
   }
@@ -2049,14 +2451,31 @@
     try {
       bindRowEvents();
 
-      // 排序编辑状态下不主动恢复顺序。
-      // 避免 Vue observer 在用户拖动过程中抢回 DOM。
-      if (!sortEnabled && !isOrderApplied()) {
-        restoreOrder();
+      // 先记录网站刚渲染出来的真实顺序，再做任何脚本重排。
+      captureOriginalOrder(row);
+
+      const orderMode =
+        getSavedOrderMode();
+
+      if (
+        orderMode === ORDER_MODE.ORIGINAL
+      ) {
+        sortEnabled = false;
+
+        if (!isOriginalOrderApplied()) {
+          restoreOriginalOrder();
+        }
+      } else {
+        // 排序编辑状态下不主动恢复顺序。
+        // 避免 Vue observer 在用户拖动过程中抢回 DOM。
+        if (!sortEnabled && !isOrderApplied()) {
+          restoreOrder();
+        }
       }
 
       applyGridLayout();
       updateSortableState();
+      updateOrderModeUi();
     } finally {
       setTimeout(() => {
         applying = false;
@@ -2100,7 +2519,7 @@
         applyCurrentLayout();
 
         console.log(
-          `[SOA布局] v4.5 初始化完成。` +
+          `[SOA布局] v4.7 初始化完成。` +
           `列数：${getSavedColumns()}，` +
           `模块宽度：${getSavedCardWidth()}px，` +
           `列间距：${getSavedColumnGap()}px。`
